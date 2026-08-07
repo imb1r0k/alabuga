@@ -1,10 +1,20 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Skeleton } from './Skeleton';
+import { 
+  Home, 
+  Users, 
+  BookmarkCheck, 
+  Building2, 
+  ChevronLeft, 
+  ChevronRight,
+  ShieldCheck
+} from 'lucide-react';
 
 export const AdminLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, loading: authLoading } = useAuth();
+  const [collapsed, setCollapsed] = useState(true);
 
   if (!isAuthenticated && !authLoading) {
     return (
@@ -19,48 +29,117 @@ export const AdminLayout: React.FC<{ children?: React.ReactNode }> = ({ children
 
   if (authLoading) {
     return (
-      <div className="container" style={{ paddingTop: '40px' }}>
-        <div className="card" style={{ minHeight: '400px' }}>
-          <Skeleton width="100%" height={40} className="mb-4" />
-          <Skeleton width="100%" height={250} />
-        </div>
+      <div style={{ padding: '20px' }}>
+        <Skeleton width="100%" height={40} className="mb-4" />
+        <Skeleton width="100%" height={400} />
       </div>
     );
   }
 
-  const getLinkStyle = ({ isActive }: { isActive: boolean }) => ({
-    padding: '10px 20px',
-    borderBottom: isActive ? '3px solid #007bff' : '3px solid transparent',
-    fontWeight: isActive ? ('bold' as const) : ('normal' as const),
-    color: isActive ? '#007bff' : '#555',
-    textDecoration: 'none',
-    display: 'inline-block',
-  });
+  const navItems = [
+    { to: '/admin-panel', label: 'Главная', icon: Home, end: true },
+    { to: '/admin-panel/users', label: 'Пользователи', icon: Users, end: false },
+    { to: '/admin-panel/bookings', label: 'Бронирования', icon: BookmarkCheck, end: false },
+    { to: '/admin-panel/buildings', label: 'Корпуса и Этажи', icon: Building2, end: false },
+  ];
 
   return (
-    <div className="container" style={{ paddingTop: '30px', paddingBottom: '50px' }}>
-      <div className="card">
-        <h1 style={{ fontSize: '26px', marginBottom: '20px', color: '#333' }}>Панель администратора</h1>
+    <div style={{ display: 'flex', minHeight: 'calc(100vh - 64px)', backgroundColor: '#f4f6f9' }}>
+      {/* Боковая навигация слева */}
+      <aside
+        style={{
+          width: collapsed ? '68px' : '230px',
+          backgroundColor: '#1e293b',
+          color: '#fff',
+          transition: 'width 0.2s ease-in-out',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          zIndex: 100,
+          borderRight: '1px solid #0f172a',
+          flexShrink: 0
+        }}
+      >
+        <div>
+          {/* Шапка бокового меню */}
+          <div style={{
+            height: '60px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: collapsed ? 'center' : 'space-between',
+            padding: collapsed ? '0' : '0 16px',
+            borderBottom: '1px solid #334155'
+          }}>
+            {!collapsed && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold', fontSize: '15px' }}>
+                <ShieldCheck size={20} color="#38bdf8" />
+                <span>Админка</span>
+              </div>
+            )}
+            <button
+              onClick={() => setCollapsed(!collapsed)}
+              title={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#94a3b8',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '6px',
+                borderRadius: '6px'
+              }}
+            >
+              {collapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
+            </button>
+          </div>
 
-        {/* Навигационное меню по отдельным страницам */}
-        <div style={{ display: 'flex', gap: '8px', borderBottom: '2px solid #eee', marginBottom: '24px', flexWrap: 'wrap' }}>
-          <NavLink to="/admin-panel" end style={getLinkStyle}>
-            Главная
-          </NavLink>
-          <NavLink to="/admin-panel/users" style={getLinkStyle}>
-            Пользователи
-          </NavLink>
-          <NavLink to="/admin-panel/bookings" style={getLinkStyle}>
-            Бронирования
-          </NavLink>
-          <NavLink to="/admin-panel/buildings" style={getLinkStyle}>
-            Корпуса
-          </NavLink>
+          {/* Список разделов */}
+          <nav style={{ padding: '12px 8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {navItems.map((item) => {
+              const IconComponent = item.icon;
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  style={({ isActive }) => ({
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    padding: collapsed ? '12px 0' : '10px 14px',
+                    justifyContent: collapsed ? 'center' : 'flex-start',
+                    borderRadius: '8px',
+                    color: isActive ? '#ffffff' : '#94a3b8',
+                    backgroundColor: isActive ? '#0284c7' : 'transparent',
+                    textDecoration: 'none',
+                    fontSize: '14px',
+                    fontWeight: isActive ? 600 : 400,
+                    transition: 'all 0.15s ease'
+                  })}
+                  title={collapsed ? item.label : undefined}
+                >
+                  <IconComponent size={20} style={{ flexShrink: 0 }} />
+                  {!collapsed && <span>{item.label}</span>}
+                </NavLink>
+              );
+            })}
+          </nav>
         </div>
 
-        {/* Содержимое текущей страницы */}
-        <div>{children || <Outlet />}</div>
-      </div>
+        {/* Подвал меню */}
+        <div style={{ padding: '12px', borderTop: '1px solid #334155', textAlign: 'center', fontSize: '11px', color: '#64748b' }}>
+          {!collapsed && <span>Алабуга Admin 2025</span>}
+        </div>
+      </aside>
+
+      {/* Основное содержимое без внутренних внешних рамок и лишних отступов */}
+      <main style={{ flex: 1, overflowX: 'auto', padding: '0', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, padding: '20px' }}>
+          {children || <Outlet />}
+        </div>
+      </main>
     </div>
   );
 };

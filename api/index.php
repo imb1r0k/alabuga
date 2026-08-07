@@ -22,9 +22,16 @@ try {
     $pdo = new PDO("mysql:host=$host;port=$port;dbname=$dbname;charset=utf8mb4", $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+
+    // Миграции для старых таблиц
+    try { $pdo->exec("ALTER TABLE `rooms` ADD COLUMN `room_type` VARCHAR(50) NOT NULL DEFAULT 'room' AFTER `is_technical`"); } catch (Exception $e) {}
+    try { $pdo->exec("ALTER TABLE `buildings` MODIFY COLUMN `gender` ENUM('M', 'F', 'MIXED') NOT NULL DEFAULT 'MIXED'"); } catch (Exception $e) {}
+    try { $pdo->exec("ALTER TABLE `floors` MODIFY COLUMN `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT'"); } catch (Exception $e) {}
+    try { $pdo->exec("ALTER TABLE `rooms` MODIFY COLUMN `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT'"); } catch (Exception $e) {}
+
 } catch (PDOException $e) {
     http_response_code(500);
-    echo json_encode(['error' => 'Ошибка подключения к базе данных: ' . $e->getMessage()]);
+    echo json_encode(['error' => 'Ошибка подключения к БД: ' . $e->getMessage()]);
     exit();
 }
 
@@ -44,7 +51,7 @@ function initFreshDatabase($pdo) {
           `key` VARCHAR(50) NOT NULL PRIMARY KEY,
           `value` TEXT NULL,
           `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
         INSERT INTO `settings` (`key`, `value`) VALUES ('site_title', 'Алабуга - форум 2025');
 
@@ -59,7 +66,7 @@ function initFreshDatabase($pdo) {
           `role` VARCHAR(50) NOT NULL DEFAULT 'user',
           `team_name` VARCHAR(100) NULL,
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
         CREATE TABLE `tokens` (
           `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -68,25 +75,25 @@ function initFreshDatabase($pdo) {
           `expires_at` DATETIME NOT NULL,
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
         CREATE TABLE `buildings` (
           `id` INT AUTO_INCREMENT PRIMARY KEY,
           `name` VARCHAR(255) NOT NULL,
-          `gender` ENUM('M', 'F') NOT NULL DEFAULT 'M',
+          `gender` ENUM('M', 'F', 'MIXED') NOT NULL DEFAULT 'MIXED',
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
         CREATE TABLE `floors` (
           `id` INT AUTO_INCREMENT PRIMARY KEY,
           `building_id` INT NOT NULL,
           `floor_number` INT NOT NULL,
           `width` INT NOT NULL DEFAULT 8,
-          `gender` ENUM('M', 'F', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
+          `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
           `layout_data` LONGTEXT NULL,
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (`building_id`) REFERENCES `buildings`(`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
         CREATE TABLE `rooms` (
           `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -96,13 +103,14 @@ function initFreshDatabase($pdo) {
           `name` VARCHAR(255) NULL,
           `capacity` INT NOT NULL DEFAULT 2,
           `is_technical` TINYINT(1) NOT NULL DEFAULT 0,
-          `gender` ENUM('M', 'F', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
+          `room_type` VARCHAR(50) NOT NULL DEFAULT 'room',
+          `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
           `x_pos` INT NOT NULL DEFAULT 0,
           `y_pos` INT NOT NULL DEFAULT 0,
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (`floor_id`) REFERENCES `floors`(`id`) ON DELETE CASCADE,
           FOREIGN KEY (`building_id`) REFERENCES `buildings`(`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
         CREATE TABLE `bookings` (
           `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -113,18 +121,17 @@ function initFreshDatabase($pdo) {
           `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
           FOREIGN KEY (`room_id`) REFERENCES `rooms`(`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     ";
 
     $pdo->exec($sql);
 
-    // Добавляем аккаунт администратора по умолчанию
     $adminPassword = password_hash('admin123', PASSWORD_DEFAULT);
     $stmt = $pdo->prepare("INSERT INTO `users` (`first_name`, `last_name`, `name`, `email`, `phone`, `password`, `role`, `team_name`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
     $stmt->execute(['Админ', 'Главный', 'Администратор', 'admin@alabuga.ru', '+79990000000', $adminPassword, 'admin', 'Оргкомитет']);
 }
 
-// Автоматически создаем таблицы, если их нет
+// Автопроверка наличия таблиц
 try {
     $pdo->query("SELECT 1 FROM `users` LIMIT 1");
 } catch (Exception $e) {
@@ -192,7 +199,6 @@ function checkAdmin($pdo, $token) {
     return $user;
 }
 
-// Главная логика маршрутизации
 try {
     switch ($uri) {
         case 'init-db':
@@ -317,7 +323,6 @@ try {
             }
             break;
 
-        // ----- УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ (АДМИНКА) -----
         case 'admin/users':
             checkAdmin($pdo, $token);
             if ($method === 'GET') {
@@ -387,7 +392,6 @@ try {
             }
             break;
 
-        // ----- УПРАВЛЕНИЕ БРОНИРОВАНИЯМИ (АДМИНКА) -----
         case 'admin/bookings':
             checkAdmin($pdo, $token);
             if ($method === 'GET') {
@@ -446,7 +450,6 @@ try {
             }
             break;
 
-        // ----- КОРПУСА, ЭТАЖИ И КОМНАТЫ -----
         case 'admin/buildings':
             checkAdmin($pdo, $token);
             if ($method === 'GET') {
@@ -454,7 +457,7 @@ try {
                 echo json_encode($stmt->fetchAll());
             } elseif ($method === 'POST') {
                 $name = $input['name'] ?? 'Новый корпус';
-                $gender = $input['gender'] ?? 'M';
+                $gender = $input['gender'] ?? 'MIXED';
 
                 if (isset($input['id'])) {
                     $stmt = $pdo->prepare('UPDATE buildings SET name = ?, gender = ? WHERE id = ?');
@@ -465,6 +468,7 @@ try {
                     $stmt->execute([$name, $gender]);
                     $bId = $pdo->lastInsertId();
 
+                    // Создаем пустой макет этажа без авто-комнат
                     $fStmt = $pdo->prepare('INSERT INTO floors (building_id, floor_number, width, gender) VALUES (?, 1, 8, "DEFAULT")');
                     $fStmt->execute([$bId]);
 
@@ -520,6 +524,7 @@ try {
                 $name = $input['name'] ?? '';
                 $capacity = $input['capacity'] ?? 2;
                 $isTechnical = isset($input['is_technical']) ? (int)$input['is_technical'] : 0;
+                $roomType = $input['room_type'] ?? 'room';
                 $gender = $input['gender'] ?? 'DEFAULT';
                 $xPos = $input['x_pos'] ?? 0;
                 $yPos = $input['y_pos'] ?? 0;
@@ -527,16 +532,16 @@ try {
                 if ($id) {
                     $stmt = $pdo->prepare('
                         UPDATE rooms 
-                        SET room_number = ?, name = ?, capacity = ?, is_technical = ?, gender = ?, x_pos = ?, y_pos = ?
+                        SET room_number = ?, name = ?, capacity = ?, is_technical = ?, room_type = ?, gender = ?, x_pos = ?, y_pos = ?
                         WHERE id = ?
                     ');
-                    $stmt->execute([$roomNumber, $name, $capacity, $isTechnical, $gender, $xPos, $yPos, $id]);
+                    $stmt->execute([$roomNumber, $name, $capacity, $isTechnical, $roomType, $gender, $xPos, $yPos, $id]);
                 } else {
                     $stmt = $pdo->prepare('
-                        INSERT INTO rooms (floor_id, building_id, room_number, name, capacity, is_technical, gender, x_pos, y_pos)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO rooms (floor_id, building_id, room_number, name, capacity, is_technical, room_type, gender, x_pos, y_pos)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ');
-                    $stmt->execute([$floorId, $buildingId, $roomNumber, $name, $capacity, $isTechnical, $gender, $xPos, $yPos]);
+                    $stmt->execute([$floorId, $buildingId, $roomNumber, $name, $capacity, $isTechnical, $roomType, $gender, $xPos, $yPos]);
                 }
                 echo json_encode(['success' => true]);
             }
@@ -546,7 +551,7 @@ try {
             checkAdmin($pdo, $token);
             if ($method === 'GET') {
                 $stmt = $pdo->query('
-                    SELECT r.id, r.room_number, r.name, fl.floor_number, bu.name as building_name
+                    SELECT r.id, r.room_number, r.name, r.room_type, fl.floor_number, bu.name as building_name
                     FROM rooms r
                     JOIN floors fl ON r.floor_id = fl.id
                     JOIN buildings bu ON r.building_id = bu.id

@@ -33,7 +33,6 @@ CREATE TABLE `users` (
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Создаем дефолтного администратора (пароль: admin123)
 INSERT INTO `users` (`first_name`, `last_name`, `name`, `email`, `phone`, `password`, `role`, `team_name`)
 VALUES ('Админ', 'Главный', 'Администратор', 'admin@alabuga.ru', '+79990000000', '$2y$10$e88yC0w.1/a7GjQW.S3x2uA6x30cO4c6B7H6K2M8P1L1I1N1O1Q1S', 'admin', 'Оргкомитет');
 
@@ -47,11 +46,11 @@ CREATE TABLE `tokens` (
   FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 4. Корпуса
+-- 4. Корпуса (Мужской M, Женский F, Смешанный MIXED)
 CREATE TABLE `buildings` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `name` VARCHAR(255) NOT NULL,
-  `gender` ENUM('M', 'F') NOT NULL DEFAULT 'M',
+  `gender` ENUM('M', 'F', 'MIXED') NOT NULL DEFAULT 'MIXED',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -61,13 +60,13 @@ CREATE TABLE `floors` (
   `building_id` INT NOT NULL,
   `floor_number` INT NOT NULL,
   `width` INT NOT NULL DEFAULT 8,
-  `gender` ENUM('M', 'F', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
+  `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
   `layout_data` LONGTEXT NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (`building_id`) REFERENCES `buildings`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 6. Комнаты
+-- 6. Комнаты и помещения
 CREATE TABLE `rooms` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `floor_id` INT NOT NULL,
@@ -76,7 +75,8 @@ CREATE TABLE `rooms` (
   `name` VARCHAR(255) NULL,
   `capacity` INT NOT NULL DEFAULT 2,
   `is_technical` TINYINT(1) NOT NULL DEFAULT 0,
-  `gender` ENUM('M', 'F', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
+  `room_type` VARCHAR(50) NOT NULL DEFAULT 'room', -- room, elevator, stairs, tech
+  `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
   `x_pos` INT NOT NULL DEFAULT 0,
   `y_pos` INT NOT NULL DEFAULT 0,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
