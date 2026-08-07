@@ -41,7 +41,9 @@ import {
   Save,
   RotateCcw,
   Hash,
-  Pencil
+  Pencil,
+  Smartphone,
+  Monitor
 } from 'lucide-react';
 
 type TileType = 'room' | 'elevator' | 'stairs' | 'tech' | 'gen-start' | 'gen-turn' | 'gen-end';
@@ -88,7 +90,6 @@ export const AdminBuildingsPage: React.FC = () => {
   const [floors, setFloors] = useState<any[]>([]);
   const [selectedFloor, setSelectedFloor] = useState<any>(null);
   
-  // Комнаты
   const [allRooms, setAllRooms] = useState<any[]>([]);
   const [rooms, setRooms] = useState<any[]>([]);
   const [localRooms, setLocalRooms] = useState<any[]>([]);
@@ -98,8 +99,10 @@ export const AdminBuildingsPage: React.FC = () => {
   const [allBookings, setAllBookings] = useState<any[]>([]);
   const [roomBookings, setRoomBookings] = useState<any[]>([]);
 
-  // Режим редактирования макета (по умолчанию FALSE)
+  // Режим редактирования
   const [isEditLayout, setIsEditLayout] = useState(false);
+  // Переключение вида (автоматически включаем вертикальный для маленьких экранов)
+  const [forceVerticalView, setForceVerticalView] = useState(false);
 
   const [buildingsLoading, setBuildingsLoading] = useState(false);
   const [savingBuilding, setSavingBuilding] = useState(false);
@@ -119,13 +122,12 @@ export const AdminBuildingsPage: React.FC = () => {
   // Подтверждение удаления
   const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<{ type: 'building' | 'floor' | 'room'; id: number; name: string } | null>(null);
 
-  // Режим генерации
+  // Генерация
   const [genMode, setGenMode] = useState(false);
   const [selectedTool, setSelectedTool] = useState<TileType>('room');
   const [selectedDir, setSelectedDir] = useState<Direction>('right');
   const [draggedTile, setDraggedTile] = useState<{ type: TileType; dir: Direction } | null>(null);
 
-  // Параметры генератора
   const [genFrom, setGenFrom] = useState(1);
   const [genTo, setGenTo] = useState(20);
   const [genSeats, setGenSeats] = useState(2);
@@ -198,12 +200,10 @@ export const AdminBuildingsPage: React.FC = () => {
     }
   };
 
-  // Вычисление начального номера комнат на этаже
   const calculateFloorStartRoomNumber = (targetFloor: any, floorsList = floors) => {
     if (targetFloor.start_room_number && Number(targetFloor.start_room_number) > 0) {
       return Number(targetFloor.start_room_number);
     }
-
     const lowerFloors = floorsList.filter((f) => Number(f.floor_number) < Number(targetFloor.floor_number));
     let start = 1;
     for (const lf of lowerFloors) {
@@ -213,18 +213,14 @@ export const AdminBuildingsPage: React.FC = () => {
     return start;
   };
 
-  // Вычисление индекса ячейки (по часовой или сверху вниз по столбцам)
   const getCellIndex = (x: number, y: number, width: number, orderType: string = 'clockwise') => {
     if (orderType === 'column_wise') {
-      // Сверху вниз по столбцам (x=0: y=0 -> 1, y=2 -> 2; x=1: y=0 -> 3, y=2 -> 4; и т.д.)
       return y === 0 ? x * 2 + 1 : x * 2 + 2;
     } else {
-      // По часовой стрелке (y=0 -> 1..width; y=2 -> 2*width..width+1)
       return y === 0 ? x + 1 : width * 2 - x;
     }
   };
 
-  // Получить глобальный сквозной номер для конкретной ячейки
   const getCalculatedRoomNumber = (x: number, y: number) => {
     if (!selectedFloor) return 1;
     const width = Number(selectedFloor.width) || 8;
@@ -233,7 +229,6 @@ export const AdminBuildingsPage: React.FC = () => {
     return floorStart + cellIdx - 1;
   };
 
-  // Местность и статистика корпусов
   const getBuildingStats = (buildingId: number) => {
     const bRooms = allRooms.filter((r) => Number(r.building_id) === Number(buildingId) && r.room_type === 'room');
     const totalCapacity = bRooms.reduce((sum, r) => sum + (Number(r.capacity) || 0), 0);
@@ -268,7 +263,6 @@ export const AdminBuildingsPage: React.FC = () => {
     }
   };
 
-  // Открытие диалога добавления этажа
   const openAddFloorModal = () => {
     const maxFloorNum = floors.reduce((max, f) => Math.max(max, Number(f.floor_number)), 0);
     const nextNum = maxFloorNum + 1;
@@ -279,7 +273,6 @@ export const AdminBuildingsPage: React.FC = () => {
     setShowAddFloorModal(true);
   };
 
-  // Автоматический расчет старта для нового этажа ("номер последней комнаты прошлого этажа + 1")
   const getDefaultNextStartRoomNum = () => {
     if (floors.length === 0) return 1;
     const maxPrevFloor = floors.reduce((prev, current) => (Number(current.floor_number) > Number(prev.floor_number) ? current : prev), floors[0]);
@@ -339,7 +332,6 @@ export const AdminBuildingsPage: React.FC = () => {
     setHasUnsavedChanges(true);
   };
 
-  // Удаление с подтверждением
   const confirmDelete = async () => {
     if (!deleteConfirmTarget) return;
     const { type, id } = deleteConfirmTarget;
@@ -370,7 +362,6 @@ export const AdminBuildingsPage: React.FC = () => {
     return selectedBuilding?.gender || 'MIXED';
   };
 
-  // ЛОКАЛЬНОЕ размещение ячейки в памяти
   const placeTileLocally = (x: number, y: number, type: TileType, dir: Direction = 'right') => {
     if (!isEditLayout || y === 1 || !selectedFloor || !selectedBuilding) return;
 
@@ -468,7 +459,6 @@ export const AdminBuildingsPage: React.FC = () => {
     setDraggedTile(null);
   };
 
-  // Поворот локально
   const handleSetDirectionForCell = (e: React.MouseEvent, room: any, newDir: Direction) => {
     e.stopPropagation();
     e.preventDefault();
@@ -483,7 +473,6 @@ export const AdminBuildingsPage: React.FC = () => {
     setHasUnsavedChanges(true);
   };
 
-  // ЛОКАЛЬНЫЙ АЛГОРИТМ ГЕНЕРАЦИИ В ПАМЯТИ
   const handleRunGeneration = () => {
     if (!selectedFloor || !selectedBuilding) return;
     setGenStatusMsg('Генерация макета...');
@@ -583,7 +572,6 @@ export const AdminBuildingsPage: React.FC = () => {
     setGenStatusMsg(`✅ Сгенерировано ${placedCount} комнат (${genFrom}–${genFrom + placedCount - 1}). Нажмите «Сохранить макет»`);
   };
 
-  // СОХРАНЕНИЕ ВСЕГО МАКЕТА ЭТАЖА НА СЕРВЕР
   const handleSaveFullLayout = async () => {
     if (!selectedFloor) return;
     setSavingLayout(true);
@@ -615,7 +603,6 @@ export const AdminBuildingsPage: React.FC = () => {
     }
   };
 
-  // Сброс несохраненных изменений
   const handleResetLayout = () => {
     setLocalRooms([...rooms]);
     setHasUnsavedChanges(false);
@@ -646,16 +633,122 @@ export const AdminBuildingsPage: React.FC = () => {
     setSelectedRoom(null);
   };
 
+  // Компонент отрисовки отдельной ячейки
+  const renderCellTile = (x: number, y: number) => {
+    const room = localRooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === y);
+    const calcRoomNum = getCalculatedRoomNumber(x, y);
+    const tmpl = [...STANDARD_TEMPLATES, ...GEN_TEMPLATES].find((t) => t.type === room?.room_type);
+    const IconComp = tmpl?.icon || Bed;
+    const effectiveRoomGender = getEffectiveGender(room?.gender, selectedFloor?.gender);
+    const bookedCount = room && room.room_type === 'room' && room.id ? getRoomOccupancy(room.id) : 0;
+
+    return (
+      <div
+        key={`cell-${x}-${y}`}
+        onClick={() => handleCellClick(x, y)}
+        onDragOver={(e) => isEditLayout && e.preventDefault()}
+        onDrop={(e) => isEditLayout && handleDrop(e, x, y)}
+        style={{
+          height: '90px',
+          width: '100%',
+          border: room ? `2px solid ${tmpl?.borderColor || '#0284c7'}` : '2px dashed #cbd5e1',
+          borderRadius: '8px',
+          backgroundColor: room ? (tmpl?.bg || '#e0f2fe') : '#ffffff',
+          color: tmpl?.textColor || '#0369a1',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          fontSize: '11px',
+          padding: '4px',
+          textAlign: 'center',
+          position: 'relative',
+          transition: 'all 0.15s ease',
+        }}
+      >
+        {room && (
+          <div style={{ position: 'absolute', top: '3px', right: '4px', display: 'flex', alignItems: 'center', gap: '3px' }}>
+            <GenderBadge gender={effectiveRoomGender} size={15} />
+            {isEditLayout && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLocalRooms((prev) => prev.filter((r) => !(Number(r.x_pos) === x && Number(r.y_pos) === y)));
+                  setHasUnsavedChanges(true);
+                }}
+                title="Удалить"
+                style={{ border: 'none', background: 'rgba(239, 68, 68, 0.85)', color: '#fff', borderRadius: '50%', width: '15px', height: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+              >
+                <X size={9} />
+              </button>
+            )}
+          </div>
+        )}
+
+        {room ? (
+          <>
+            <IconComp size={18} style={{ marginBottom: '2px', marginTop: '4px' }} />
+            <strong>{room.room_number || room.name}</strong>
+
+            {room.room_type === 'room' && (
+              <span style={{ fontSize: '10px', marginTop: '2px', fontWeight: 600, color: bookedCount >= room.capacity ? '#dc2626' : '#16a34a' }}>
+                {bookedCount} / {room.capacity}
+              </span>
+            )}
+
+            {isEditLayout && (room.room_type === 'gen-start' || room.room_type === 'gen-turn') && (
+              <div style={{ display: 'flex', gap: '3px', marginTop: '4px', backgroundColor: 'rgba(255,255,255,0.85)', padding: '2px 4px', borderRadius: '4px', zIndex: 10 }}>
+                {([
+                  { dir: 'right', icon: ArrowRight },
+                  { dir: 'down', icon: ArrowDown },
+                  { dir: 'left', icon: ArrowLeft },
+                  { dir: 'up', icon: ArrowUp },
+                ] as const).map(({ dir: dVal, icon: IconD }) => (
+                  <button
+                    key={dVal}
+                    type="button"
+                    onClick={(e) => handleSetDirectionForCell(e, room, dVal)}
+                    style={{
+                      padding: '1px',
+                      border: 'none',
+                      borderRadius: '3px',
+                      background: room.name.includes(dVal) ? '#0284c7' : 'transparent',
+                      color: room.name.includes(dVal) ? '#fff' : '#334155',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center'
+                    }}
+                    title={`Повернуть: ${dVal}`}
+                  >
+                    <IconD size={11} />
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{ color: '#94a3b8', fontSize: '11px', textAlign: 'center' }}>
+            <span style={{ fontSize: '10px', display: 'block', fontWeight: 'bold', color: '#cbd5e1' }}>№ {calcRoomNum}</span>
+            {isEditLayout ? '+ Пусто' : 'Свободно'}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const floorWidth = Number(selectedFloor?.width) || 8;
+
   return (
     <AdminLayout>
       <div style={{ padding: '0 10px' }}>
         {buildingsLoading ? (
           <Skeleton width="100%" height={250} />
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: '290px 1fr', gap: '20px', gridTemplateAreas: '"sidebar main"' }} className="admin-buildings-grid">
+          <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '20px', gridTemplateAreas: '"sidebar main"' }} className="admin-buildings-grid">
             
             {/* Сайдбар выбора и создания корпуса */}
-            <div style={{ backgroundColor: '#fff', padding: '16px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', gridArea: 'sidebar' }} className="admin-buildings-sidebar">
+            <div style={{ backgroundColor: '#fff', padding: '16px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', gridArea: 'sidebar' }}>
               <h4 style={{ fontSize: '16px', marginBottom: '14px', color: '#1e293b' }}>Список корпусов</h4>
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
@@ -750,7 +843,7 @@ export const AdminBuildingsPage: React.FC = () => {
             </div>
 
             {/* Основной редактор этажей */}
-            <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', gridArea: 'main' }} className="admin-buildings-main">
+            <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', gridArea: 'main' }}>
               {selectedBuilding ? (
                 <div>
                   {/* Шапка корпуса */}
@@ -785,7 +878,7 @@ export const AdminBuildingsPage: React.FC = () => {
                               boxShadow: '0 0 0 3px rgba(22, 163, 74, 0.3)'
                             }}
                           >
-                            <Save size={16} /> {savingLayout ? 'Сохранение...' : '💾 Сохранить макет'}
+                            <Save size={16} /> {savingLayout ? 'Сохранение...' : '💾 Сохранить'}
                           </button>
 
                           <button
@@ -818,6 +911,17 @@ export const AdminBuildingsPage: React.FC = () => {
                       >
                         {isEditLayout ? <Eye size={16} /> : <Edit3 size={16} />}
                         {isEditLayout ? 'Просмотр' : '✏️ Редактировать'}
+                      </button>
+
+                      {/* Кнопка ручного переключения Вертикального/Горизонтального макета */}
+                      <button
+                        onClick={() => setForceVerticalView(!forceVerticalView)}
+                        className="btn btn-secondary"
+                        style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                        title="Переключить вид карточек этажа"
+                      >
+                        {forceVerticalView ? <Monitor size={16} /> : <Smartphone size={16} />}
+                        <span className="hidden md:inline">{forceVerticalView ? 'Горизонтально' : 'Вертикально (Смартфон)'}</span>
                       </button>
 
                       {isEditLayout && (
@@ -1004,34 +1108,6 @@ export const AdminBuildingsPage: React.FC = () => {
                                 </div>
                               );
                             })}
-
-                            {genMode && (selectedTool === 'gen-start' || selectedTool === 'gen-turn') && (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '12px', padding: '4px 10px', backgroundColor: '#f3e8ff', borderRadius: '6px', border: '1px solid #c084fc' }}>
-                                <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b21a8' }}>Направление:</span>
-                                {([
-                                  { dir: 'right', icon: ArrowRight },
-                                  { dir: 'down', icon: ArrowDown },
-                                  { dir: 'left', icon: ArrowLeft },
-                                  { dir: 'up', icon: ArrowUp },
-                                ] as const).map(({ dir, icon: IconD }) => (
-                                  <button
-                                    key={dir}
-                                    type="button"
-                                    onClick={() => setSelectedDir(dir)}
-                                    style={{
-                                      border: 'none',
-                                      borderRadius: '4px',
-                                      padding: '4px',
-                                      cursor: 'pointer',
-                                      backgroundColor: selectedDir === dir ? '#7c3aed' : '#e9d5ff',
-                                      color: selectedDir === dir ? '#fff' : '#6b21a8'
-                                    }}
-                                  >
-                                    <IconD size={14} />
-                                  </button>
-                                ))}
-                              </div>
-                            )}
                           </div>
                         </div>
                       )}
@@ -1063,239 +1139,75 @@ export const AdminBuildingsPage: React.FC = () => {
                         </div>
                       )}
 
-                      {/* СЕТКА ЭТАЖА */}
-                      <div style={{ overflowX: 'auto', padding: '10px 0' }} className="floor-layout-container">
-                        <div className="floor-layout"
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: `repeat(${Number(selectedFloor.width) || 8}, 95px)`,
-                            gap: '8px',
-                            justifyContent: 'start',
-                          }}>
-                          {/* ВЕРХНИЙ РЯД (y = 0) */}
-                          {Array.from({ length: Number(selectedFloor.width) || 8 }).map((_, x) => {
-                            const room = localRooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === 0);
-                            const calcRoomNum = getCalculatedRoomNumber(x, 0);
-                            const tmpl = [...STANDARD_TEMPLATES, ...GEN_TEMPLATES].find((t) => t.type === room?.room_type);
-                            const IconComp = tmpl?.icon || Bed;
-                            const effectiveRoomGender = getEffectiveGender(room?.gender, selectedFloor.gender);
-                            const bookedCount = room && room.room_type === 'room' && room.id ? getRoomOccupancy(room.id) : 0;
+                      {/* СЕТКА ЭТАЖА (АДАПТИВНАЯ: НА ПК ГОРИЗОНТАЛЬНАЯ, НА МОБИЛЬНЫХ ВЕРТИКАЛЬНАЯ) */}
+                      <div className="w-full overflow-x-auto py-2">
+                        
+                        {/* 1. Горизонтальный макет (для широких экранов ПК) */}
+                        <div className={`${forceVerticalView ? 'hidden' : 'hidden md:block'}`}>
+                          <div
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: `repeat(${floorWidth}, 95px)`,
+                              gap: '8px',
+                              justifyContent: 'start',
+                            }}
+                          >
+                            {/* Верхний ряд (y=0) */}
+                            {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 0))}
 
-                            return (
-                              <div
-                                key={`top-${x}`}
-                                onClick={() => handleCellClick(x, 0)}
-                                onDragOver={(e) => isEditLayout && e.preventDefault()}
-                                onDrop={(e) => isEditLayout && handleDrop(e, x, 0)}
-                                style={{
-                                  height: '95px',
-                                  border: room ? `2px solid ${tmpl?.borderColor || '#0284c7'}` : '2px dashed #cbd5e1',
-                                  borderRadius: '8px',
-                                  backgroundColor: room ? (tmpl?.bg || '#e0f2fe') : '#ffffff',
-                                  color: tmpl?.textColor || '#0369a1',
-                                  display: 'flex',
-                                  flexDirection: 'column',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  cursor: 'pointer',
-                                  fontSize: '11px',
-                                  padding: '4px',
-                                  textAlign: 'center',
-                                  position: 'relative',
-                                  transition: 'all 0.15s ease',
-                                }}
-                              >
-                                {room && (
-                                  <div style={{ position: 'absolute', top: '3px', right: '4px', display: 'flex', alignItems: 'center', gap: '3px' }}>
-                                    <GenderBadge gender={effectiveRoomGender} size={15} />
-                                    {isEditLayout && (
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setLocalRooms((prev) => prev.filter((r) => !(Number(r.x_pos) === x && Number(r.y_pos) === 0)));
-                                          setHasUnsavedChanges(true);
-                                        }}
-                                        title="Удалить"
-                                        style={{ border: 'none', background: 'rgba(239, 68, 68, 0.85)', color: '#fff', borderRadius: '50%', width: '15px', height: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
-                                      >
-                                        <X size={9} />
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
+                            {/* Коридор (y=1) */}
+                            <div style={{
+                              gridColumn: `1 / span ${floorWidth}`,
+                              height: '32px',
+                              backgroundColor: '#e2e8f0',
+                              border: '1px solid #cbd5e1',
+                              borderRadius: '6px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: '#475569',
+                              fontWeight: 'bold',
+                              fontSize: '11px',
+                              letterSpacing: '2px',
+                            }}>
+                              ═══ КОРИДОР ═══
+                            </div>
 
-                                {room ? (
-                                  <>
-                                    <IconComp size={18} style={{ marginBottom: '2px', marginTop: '4px' }} />
-                                    <strong>{room.room_number || room.name}</strong>
+                            {/* Нижний ряд (y=2) */}
+                            {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 2))}
+                          </div>
+                        </div>
 
-                                    {room.room_type === 'room' && (
-                                      <span style={{ fontSize: '10px', marginTop: '2px', fontWeight: 600, color: bookedCount >= room.capacity ? '#dc2626' : '#16a34a' }}>
-                                        {bookedCount} / {room.capacity}
-                                      </span>
-                                    )}
-
-                                    {isEditLayout && (room.room_type === 'gen-start' || room.room_type === 'gen-turn') && (
-                                      <div style={{ display: 'flex', gap: '3px', marginTop: '4px', backgroundColor: 'rgba(255,255,255,0.85)', padding: '2px 4px', borderRadius: '4px', zIndex: 10 }}>
-                                        {([
-                                          { dir: 'right', icon: ArrowRight },
-                                          { dir: 'down', icon: ArrowDown },
-                                          { dir: 'left', icon: ArrowLeft },
-                                          { dir: 'up', icon: ArrowUp },
-                                        ] as const).map(({ dir: dVal, icon: IconD }) => (
-                                          <button
-                                            key={dVal}
-                                            type="button"
-                                            onClick={(e) => handleSetDirectionForCell(e, room, dVal)}
-                                            style={{
-                                              padding: '1px',
-                                              border: 'none',
-                                              borderRadius: '3px',
-                                              background: room.name.includes(dVal) ? '#0284c7' : 'transparent',
-                                              color: room.name.includes(dVal) ? '#fff' : '#334155',
-                                              cursor: 'pointer',
-                                              display: 'flex',
-                                              alignItems: 'center'
-                                            }}
-                                            title={`Повернуть: ${dVal}`}
-                                          >
-                                            <IconD size={11} />
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </>
-                                ) : (
-                                  <div style={{ color: '#94a3b8', fontSize: '11px', textAlign: 'center' }}>
-                                    <span style={{ fontSize: '10px', display: 'block', fontWeight: 'bold', color: '#cbd5e1' }}>№ {calcRoomNum}</span>
-                                    {isEditLayout ? '+ Пусто' : 'Свободно'}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-
-                          {/* КОРИДОР (y = 1) */}
-                          <div style={{
-                            gridColumn: `1 / span ${Number(selectedFloor.width) || 8}`,
-                            height: '32px',
-                            backgroundColor: '#e2e8f0',
-                            border: '1px solid #cbd5e1',
-                            borderRadius: '6px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: '#475569',
-                            fontWeight: 'bold',
-                            fontSize: '11px',
-                            letterSpacing: '2px',
-                          }}>
-                            ═══ КОРИДОР ═══
+                        {/* 2. Вертикальный макет (для Смартфонов и маленьких экранов):
+                            Слева комнаты y=0, посередине вертикальный коридор, справа комнаты y=2 */}
+                        <div className={`${forceVerticalView ? 'block' : 'block md:hidden'}`}>
+                          <div className="text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1.5">
+                            <Smartphone size={14} /> Вертикальный вид корпуса для смартфона:
                           </div>
 
-                          {/* НИЖНИЙ РЯД (y = 2) */}
-                          {Array.from({ length: Number(selectedFloor.width) || 8 }).map((_, x) => {
-                            const room = localRooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === 2);
-                            const calcRoomNum = getCalculatedRoomNumber(x, 2);
-                            const tmpl = [...STANDARD_TEMPLATES, ...GEN_TEMPLATES].find((t) => t.type === room?.room_type);
-                            const IconComp = tmpl?.icon || Bed;
-                            const effectiveRoomGender = getEffectiveGender(room?.gender, selectedFloor.gender);
-                            const bookedCount = room && room.room_type === 'room' && room.id ? getRoomOccupancy(room.id) : 0;
+                          <div className="grid grid-cols-[1fr_28px_1fr] gap-2 max-w-sm mx-auto">
+                            {/* По заголовку для колонок */}
+                            <div className="text-center text-xs font-bold text-slate-600 bg-slate-100 p-1 rounded">Левое крыло</div>
+                            <div className="text-center text-xs font-bold text-slate-400 p-1">║</div>
+                            <div className="text-center text-xs font-bold text-slate-600 bg-slate-100 p-1 rounded">Правое крыло</div>
 
-                            return (
-                              <div
-                                key={`bot-${x}`}
-                                onClick={() => handleCellClick(x, 2)}
-                                onDragOver={(e) => isEditLayout && e.preventDefault()}
-                                onDrop={(e) => isEditLayout && handleDrop(e, x, 2)}
-                                style={{
-                                  height: '95px',
-                                  border: room ? `2px solid ${tmpl?.borderColor || '#0284c7'}` : '2px dashed #cbd5e1',
-                                  borderRadius: '8px',
-                                  backgroundColor: room ? (tmpl?.bg || '#e0f2fe') : '#ffffff',
-                                  color: tmpl?.textColor || '#0369a1',
-                                  display: 'flex',
-                                  flexDirection: 'column',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  cursor: 'pointer',
-                                  fontSize: '11px',
-                                  padding: '4px',
-                                  textAlign: 'center',
-                                  position: 'relative',
-                                  transition: 'all 0.15s ease',
-                                }}
-                              >
-                                {room && (
-                                  <div style={{ position: 'absolute', top: '3px', right: '4px', display: 'flex', alignItems: 'center', gap: '3px' }}>
-                                    <GenderBadge gender={effectiveRoomGender} size={15} />
-                                    {isEditLayout && (
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setLocalRooms((prev) => prev.filter((r) => !(Number(r.x_pos) === x && Number(r.y_pos) === 2)));
-                                          setHasUnsavedChanges(true);
-                                        }}
-                                        title="Удалить"
-                                        style={{ border: 'none', background: 'rgba(239, 68, 68, 0.85)', color: '#fff', borderRadius: '50%', width: '15px', height: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
-                                      >
-                                        <X size={9} />
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
+                            {Array.from({ length: floorWidth }).map((_, x) => (
+                              <React.Fragment key={`vert-row-${x}`}>
+                                {/* Левая комната (y=0) */}
+                                <div>{renderCellTile(x, 0)}</div>
 
-                                {room ? (
-                                  <>
-                                    <IconComp size={18} style={{ marginBottom: '2px', marginTop: '4px' }} />
-                                    <strong>{room.room_number || room.name}</strong>
+                                {/* Вертикальный сегмент коридора */}
+                                <div className="bg-slate-200 border border-slate-300 rounded flex items-center justify-center text-[10px] font-bold text-slate-500 writing-mode-vertical">
+                                  ║
+                                </div>
 
-                                    {room.room_type === 'room' && (
-                                      <span style={{ fontSize: '10px', marginTop: '2px', fontWeight: 600, color: bookedCount >= room.capacity ? '#dc2626' : '#16a34a' }}>
-                                        {bookedCount} / {room.capacity}
-                                      </span>
-                                    )}
-
-                                    {isEditLayout && (room.room_type === 'gen-start' || room.room_type === 'gen-turn') && (
-                                      <div style={{ display: 'flex', gap: '3px', marginTop: '4px', backgroundColor: 'rgba(255,255,255,0.85)', padding: '2px 4px', borderRadius: '4px', zIndex: 10 }}>
-                                        {([
-                                          { dir: 'right', icon: ArrowRight },
-                                          { dir: 'down', icon: ArrowDown },
-                                          { dir: 'left', icon: ArrowLeft },
-                                          { dir: 'up', icon: ArrowUp },
-                                        ] as const).map(({ dir: dVal, icon: IconD }) => (
-                                          <button
-                                            key={dVal}
-                                            type="button"
-                                            onClick={(e) => handleSetDirectionForCell(e, room, dVal)}
-                                            style={{
-                                              padding: '1px',
-                                              border: 'none',
-                                              borderRadius: '3px',
-                                              background: room.name.includes(dVal) ? '#0284c7' : 'transparent',
-                                              color: room.name.includes(dVal) ? '#fff' : '#334155',
-                                              cursor: 'pointer',
-                                              display: 'flex',
-                                              alignItems: 'center'
-                                            }}
-                                            title={`Повернуть: ${dVal}`}
-                                          >
-                                            <IconD size={11} />
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </>
-                                ) : (
-                                  <div style={{ color: '#94a3b8', fontSize: '11px', textAlign: 'center' }}>
-                                    <span style={{ fontSize: '10px', display: 'block', fontWeight: 'bold', color: '#cbd5e1' }}>№ {calcRoomNum}</span>
-                                    {isEditLayout ? '+ Пусто' : 'Свободно'}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
+                                {/* Правая комната (y=2) */}
+                                <div>{renderCellTile(x, 2)}</div>
+                              </React.Fragment>
+                            ))}
+                          </div>
                         </div>
+
                       </div>
 
                       {/* МОДАЛЬНОЕ ОКНО ДЕТАЛЕЙ КОМНАТЫ И БРОНИРОВАНИЙ */}
@@ -1324,54 +1236,56 @@ export const AdminBuildingsPage: React.FC = () => {
                             </h4>
 
                             {roomBookings.length > 0 ? (
-                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                                <thead>
-                                  <tr style={{ backgroundColor: '#f1f5f9', textTransform: 'uppercase', fontSize: '11px', color: '#64748b' }}>
-                                    <th style={{ padding: '6px', textAlign: 'left' }}>#</th>
-                                    <th style={{ padding: '6px', textAlign: 'left' }}>ФИО</th>
-                                    <th style={{ padding: '6px', textAlign: 'left' }}>Тел.</th>
-                                    <th style={{ padding: '6px', textAlign: 'left' }}>Статус</th>
-                                    <th style={{ padding: '6px', textAlign: 'left' }}>Действие</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {roomBookings.map((b) => (
-                                    <tr key={b.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                      <td style={{ padding: '6px' }}>#{b.id}</td>
-                                      <td style={{ padding: '6px', fontWeight: 600 }}>{b.last_name} {b.first_name || b.user_name}</td>
-                                      <td style={{ padding: '6px' }}>{b.user_phone || '-'}</td>
-                                      <td style={{ padding: '6px' }}>
-                                        <span style={{
-                                          padding: '2px 6px',
-                                          borderRadius: '4px',
-                                          fontSize: '11px',
-                                          color: '#fff',
-                                          backgroundColor: b.status === 'approved' ? '#16a34a' : b.status === 'approved_bot' ? '#0891b2' : '#eab308'
-                                        }}>
-                                          {b.status === 'approved' ? 'Одобрено' : b.status === 'approved_bot' ? 'Одобрено ботом' : 'Ожидает'}
-                                        </span>
-                                      </td>
-                                      <td style={{ padding: '6px' }}>
-                                        <select
-                                          value={b.status}
-                                          onChange={(e) => handleUpdateBookingStatus(b, e.target.value)}
-                                          style={{ fontSize: '11px', padding: '2px 4px', borderRadius: '4px' }}
-                                        >
-                                          <option value="pending">Ожидает</option>
-                                          <option value="approved">Одобрить</option>
-                                          <option value="rejected">Отклонить</option>
-                                        </select>
-                                      </td>
+                              <div className="overflow-x-auto">
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                                  <thead>
+                                    <tr style={{ backgroundColor: '#f1f5f9', textTransform: 'uppercase', fontSize: '11px', color: '#64748b' }}>
+                                      <th style={{ padding: '6px', textAlign: 'left' }}>#</th>
+                                      <th style={{ padding: '6px', textAlign: 'left' }}>ФИО</th>
+                                      <th style={{ padding: '6px', textAlign: 'left' }}>Тел.</th>
+                                      <th style={{ padding: '6px', textAlign: 'left' }}>Статус</th>
+                                      <th style={{ padding: '6px', textAlign: 'left' }}>Действие</th>
                                     </tr>
-                                  ))}
-                                </tbody>
-                              </table>
+                                  </thead>
+                                  <tbody>
+                                    {roomBookings.map((b) => (
+                                      <tr key={b.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                        <td style={{ padding: '6px' }}>#{b.id}</td>
+                                        <td style={{ padding: '6px', fontWeight: 600 }}>{b.last_name} {b.first_name || b.user_name}</td>
+                                        <td style={{ padding: '6px' }}>{b.user_phone || '-'}</td>
+                                        <td style={{ padding: '6px' }}>
+                                          <span style={{
+                                            padding: '2px 6px',
+                                            borderRadius: '4px',
+                                            fontSize: '11px',
+                                            color: '#fff',
+                                            backgroundColor: b.status === 'approved' ? '#16a34a' : b.status === 'approved_bot' ? '#0891b2' : '#eab308'
+                                          }}>
+                                            {b.status === 'approved' ? 'Одобрено' : b.status === 'approved_bot' ? 'Одобрено ботом' : 'Ожидает'}
+                                          </span>
+                                        </td>
+                                        <td style={{ padding: '6px' }}>
+                                          <select
+                                            value={b.status}
+                                            onChange={(e) => handleUpdateBookingStatus(b, e.target.value)}
+                                            style={{ fontSize: '11px', padding: '2px 4px', borderRadius: '4px' }}
+                                          >
+                                            <option value="pending">Ожидает</option>
+                                            <option value="approved">Одобрить</option>
+                                            <option value="rejected">Отклонить</option>
+                                          </select>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
                             ) : (
                               <p style={{ margin: 0, fontSize: '13px', color: '#94a3b8' }}>Нет бронирований.</p>
                             )}
                           </div>
 
-                          <form onSubmit={handleSaveRoomDetailsLocally} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                          <form onSubmit={handleSaveRoomDetailsLocally} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div className="input-group" style={{ marginBottom: 0 }}>
                               <label style={{ fontSize: '12px', fontWeight: 600 }}>Номер</label>
                               <input
@@ -1415,8 +1329,8 @@ export const AdminBuildingsPage: React.FC = () => {
                               </select>
                             </div>
 
-                            <div style={{ gridColumn: '1 / -1', marginTop: '10px', display: 'flex', gap: '10px' }}>
-                              <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div className="sm:col-span-2 mt-2 flex gap-2">
+                              <button type="submit" className="btn btn-primary flex-1" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 <SquareCheck size={16} /> Применить
                               </button>
 
@@ -1477,11 +1391,9 @@ export const AdminBuildingsPage: React.FC = () => {
                   />
                 </div>
 
-                {/* Красивый переключатель нумерации */}
                 <div className="input-group">
                   <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '8px' }}>Нумерация комнат</label>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                    {/* Автоматическая нумерация */}
                     <div
                       onClick={() => setStartNumMode('default')}
                       style={{
@@ -1503,7 +1415,6 @@ export const AdminBuildingsPage: React.FC = () => {
                       <span style={{ fontSize: '11px', color: '#64748b' }}>Начнёт с №{getDefaultNextStartRoomNum()}</span>
                     </div>
 
-                    {/* Ручная нумерация */}
                     <div
                       onClick={() => setStartNumMode('custom')}
                       style={{
