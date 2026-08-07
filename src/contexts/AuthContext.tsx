@@ -3,16 +3,19 @@ import { api } from '../services/api';
 
 interface User {
   id: number;
-  email: string;
-  name: string;
+  login: string;
+  phone?: string;
+  name?: string;
+  first_name?: string;
+  last_name?: string;
   role: string;
 }
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string) => Promise<void>;
+  login: (identifier: string, password: string) => Promise<void>;
+  register: (firstName: string, lastName: string, phone: string, password: string) => Promise<any>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   isAuthenticated: boolean;
@@ -20,13 +23,9 @@ interface AuthContextType {
   isModerator: boolean;
 }
 
-interface AuthProviderProps {
-  children: React.ReactNode;
-}
-
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -51,20 +50,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const response = await api.post('/login', { email, password });
+  const login = async (identifier: string, password: string) => {
+    const response = await api.post('/login', { identifier, password });
     const { token, user } = response.data;
     localStorage.setItem('token', token);
     setUser(user);
-    await fetchUser(); // Обновляем профиль с бэкенда для получения актуальной роли
+    await fetchUser(); // обновляем из бэкенда
   };
 
-  const register = async (name: string, email: string, password: string) => {
-    const response = await api.post('/register', { name, email, password });
+  const register = async (firstName: string, lastName: string, phone: string, password: string) => {
+    const response = await api.post('/register', {
+      first_name: firstName,
+      last_name: lastName,
+      phone,
+      password
+    });
     const { token, user } = response.data;
     localStorage.setItem('token', token);
     setUser(user);
-    await fetchUser();
+    // Не вызываем fetchUser сразу, т.к. нужно вернуть данные для модалки
+    return user;
   };
 
   const logout = async () => {
