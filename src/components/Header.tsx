@@ -30,7 +30,6 @@ export const Header = () => {
         alignItems: 'center',
         width: '100%'
       }}>
-        {/* Site title with skeleton loader */}
         <div style={{ minWidth: '150px' }}>
           {settingsLoading ? (
             <Skeleton width={180} height={24} rounded={true} className="inline-block" />
@@ -50,7 +49,7 @@ export const Header = () => {
           {isAuthenticated ? (
             <>
               <span style={{ fontSize: '14px', color: '#666', marginRight: '8px' }}>
-                {user?.name || user?.email} ({user?.role})
+                {user?.last_name} {user?.first_name || user?.name} ({user?.role})
               </span>
 
               {(isAdmin || isModerator) && (

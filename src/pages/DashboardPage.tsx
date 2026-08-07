@@ -25,7 +25,6 @@ export const DashboardPage = () => {
     );
   }
 
-  // Show skeleton while loading user data
   if (loading) {
     return (
       <div className="container" style={{ paddingTop: '40px' }}>
@@ -34,24 +33,20 @@ export const DashboardPage = () => {
             <h1 style={{ fontSize: '28px', marginBottom: '24px', color: '#333', visibility: 'hidden' }}>
               Личный кабинет
             </h1>
-            
             <div style={{ borderTop: '1px solid #eee', paddingTop: '24px', visibility: 'hidden' }}>
               <div style={{ marginBottom: '16px', visibility: 'hidden' }}>
                 <Skeleton width={80} height={16} className="mb-2" />
                 <Skeleton width={200} height={16} />
               </div>
-              
               <div style={{ marginBottom: '16px', visibility: 'hidden' }}>
                 <Skeleton width={80} height={16} className="mb-2" />
                 <Skeleton width={250} height={16} />
               </div>
-              
               <div style={{ visibility: 'hidden' }}>
                 <Skeleton width={120} height={16} className="mb-2" />
                 <Skeleton width={100} height={16} />
               </div>
             </div>
-
             <div style={{ borderTop: '1px solid #eee', marginTop: '24px', paddingTop: '24px', visibility: 'hidden' }}>
               <h3 style={{ marginBottom: '12px', color: '#333', visibility: 'hidden' }}>
                 Ваша информация
@@ -75,13 +70,18 @@ export const DashboardPage = () => {
         
         <div style={{ borderTop: '1px solid #eee', paddingTop: '24px' }}>
           <div style={{ marginBottom: '16px' }}>
-            <label style={{ fontSize: '14px', color: '#666', display: 'block' }}>Имя</label>
-            <p style={{ fontSize: '18px', color: '#333' }}>{user?.name || 'Не указано'}</p>
+            <label style={{ fontSize: '14px', color: '#666', display: 'block' }}>ФИО</label>
+            <p style={{ fontSize: '18px', color: '#333' }}>{user?.last_name} {user?.first_name || user?.name || 'Не указано'}</p>
           </div>
           
           <div style={{ marginBottom: '16px' }}>
-            <label style={{ fontSize: '14px', color: '#666', display: 'block' }}>Email</label>
-            <p style={{ fontSize: '18px', color: '#333' }}>{user?.email}</p>
+            <label style={{ fontSize: '14px', color: '#666', display: 'block' }}>Логин</label>
+            <p style={{ fontSize: '18px', color: '#333' }}>{user?.login}</p>
+          </div>
+
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ fontSize: '14px', color: '#666', display: 'block' }}>Телефон</label>
+            <p style={{ fontSize: '18px', color: '#333' }}>{user?.phone || 'Не указан'}</p>
           </div>
           
           <div>

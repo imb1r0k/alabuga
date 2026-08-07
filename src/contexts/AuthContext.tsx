@@ -3,16 +3,19 @@ import { api } from '../services/api';
 
 interface User {
   id: number;
-  email: string;
+  login: string;
   name: string;
   role: string;
+  first_name?: string;
+  last_name?: string;
+  phone?: string;
 }
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string) => Promise<void>;
+  login: (loginOrPhone: string, password: string) => Promise<void>;
+  register: (lastName: string, firstName: string, phone: string, password: string) => Promise<any>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   isAuthenticated: boolean;
@@ -51,20 +54,33 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const response = await api.post('/login', { email, password });
-    const { token, user } = response.data;
-    localStorage.setItem('token', token);
-    setUser(user);
-    await fetchUser(); // Обновляем профиль с бэкенда для получения актуальной роли
-  };
-
-  const register = async (name: string, email: string, password: string) => {
-    const response = await api.post('/register', { name, email, password });
+  const login = async (loginOrPhone: string, password: string) => {
+    const isPhone = /^[0-9+\-() ]+$/.test(loginOrPhone);
+    const payload: any = { password };
+    if (isPhone) {
+      payload.phone = loginOrPhone;
+    } else {
+      payload.login = loginOrPhone;
+    }
+    const response = await api.post('/login', payload);
     const { token, user } = response.data;
     localStorage.setItem('token', token);
     setUser(user);
     await fetchUser();
+  };
+
+  const register = async (lastName: string, firstName: string, phone: string, password: string) => {
+    const response = await api.post('/register', {
+      last_name: lastName,
+      first_name: firstName,
+      phone,
+      password
+    });
+    const { token, user } = response.data;
+    localStorage.setItem('token', token);
+    setUser(user);
+    await fetchUser();
+    return user; // содержит login и password для окна
   };
 
   const logout = async () => {

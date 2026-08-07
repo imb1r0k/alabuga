@@ -28,7 +28,6 @@ try {
     exit();
 }
 
-// Функция инициализации базы данных "с нуля"
 function initFreshDatabase($pdo) {
     $sql = "
         SET FOREIGN_KEY_CHECKS = 0;
@@ -54,7 +53,7 @@ function initFreshDatabase($pdo) {
           `first_name` VARCHAR(100) NULL,
           `last_name` VARCHAR(100) NULL,
           `name` VARCHAR(255) NOT NULL,
-          `email` VARCHAR(255) NOT NULL UNIQUE,
+          `login` VARCHAR(100) NOT NULL UNIQUE,
           `phone` VARCHAR(50) NULL,
           `password` VARCHAR(255) NOT NULL,
           `role` VARCHAR(50) NOT NULL DEFAULT 'user',
@@ -68,7 +67,7 @@ function initFreshDatabase($pdo) {
           `token` VARCHAR(255) NOT NULL UNIQUE,
           `expires_at` DATETIME NOT NULL,
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+          FOREIGN KEY (` REFERENCES `users`(`id`) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
         CREATE TABLE `buildings` (
@@ -110,7 +109,7 @@ function initFreshDatabase($pdo) {
 
         CREATE TABLE `bookings` (
           `id` INT AUTO_INCREMENT PRIMARY KEY,
-          `user_id` INT NOT NULL,
+          ` INT NOT NULL,
           `room_id` INT NOT NULL,
           `status` ENUM('pending', 'rejected', 'approved', 'approved_bot') NOT NULL DEFAULT 'pending',
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -123,8 +122,8 @@ function initFreshDatabase($pdo) {
     $pdo->exec($sql);
 
     $adminPassword = password_hash('admin123', PASSWORD_DEFAULT);
-    $stmt = $pdo->prepare("INSERT INTO `users` (`first_name`, `last_name`, `name`, `email`, `phone`, `password`, `role`, `team_name`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->execute(['Админ', 'Главный', 'Администратор', 'admin@alabuga.ru', '+79990000000', $adminPassword, 'admin', 'Оргкомитет']);
+    $stmt = $pdo->prepare("INSERT INTO `users` (`first_name`, `last_name`, `name`, `login`, `phone`, `password`, `role`, `team_name`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->execute(['Админ', 'Главный', 'Администратор', 'admin', '+79990000000', $adminPassword, 'admin', 'Оргкомитет']);
 }
 
 function ensureTablesExist($pdo) {
@@ -134,37 +133,33 @@ function ensureTablesExist($pdo) {
           `value` TEXT NULL,
           `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-
         "INSERT IGNORE INTO `settings` (`key`, `value`) VALUES ('site_title', 'Алабуга - форум 2025');",
-
         "CREATE TABLE IF NOT EXISTS `users` (
           `id` INT AUTO_INCREMENT PRIMARY KEY,
           `first_name` VARCHAR(100) NULL,
           `last_name` VARCHAR(100) NULL,
           `name` VARCHAR(255) NOT NULL,
-          `email` VARCHAR(255) NOT NULL UNIQUE,
+          `login` VARCHAR(100) NOT NULL UNIQUE,
           `phone` VARCHAR(50) NULL,
           `password` VARCHAR(255) NOT NULL,
           `role` VARCHAR(50) NOT NULL DEFAULT 'user',
           `team_name` VARCHAR(100) NULL,
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-
         "CREATE TABLE IF NOT EXISTS `tokens` (
           `id` INT AUTO_INCREMENT PRIMARY KEY,
           `user_id` INT NOT NULL,
           `token` VARCHAR(255) NOT NULL UNIQUE,
           `expires_at` DATETIME NOT NULL,
-          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-
         "CREATE TABLE IF NOT EXISTS `buildings` (
           `id` INT AUTO_INCREMENT PRIMARY KEY,
           `name` VARCHAR(255) NOT NULL,
           `gender` ENUM('M', 'F', 'MIXED') NOT NULL DEFAULT 'MIXED',
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-
         "CREATE TABLE IF NOT EXISTS `floors` (
           `id` INT AUTO_INCREMENT PRIMARY KEY,
           `building_id` INT NOT NULL,
@@ -174,9 +169,9 @@ function ensureTablesExist($pdo) {
           `room_order_type` VARCHAR(20) NOT NULL DEFAULT 'clockwise',
           `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
           `layout_data` LONGTEXT NULL,
-          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (`building_id`) REFERENCES `buildings`(`id`) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-
         "CREATE TABLE IF NOT EXISTS `rooms` (
           `id` INT AUTO_INCREMENT PRIMARY KEY,
           `floor_id` INT NOT NULL,
@@ -189,34 +184,30 @@ function ensureTablesExist($pdo) {
           `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
           `x_pos` INT NOT NULL DEFAULT 0,
           `y_pos` INT NOT NULL DEFAULT 0,
-          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (`floor_id`) REFERENCES `floors`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`building_id`) REFERENCES `buildings`(`id`) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-
         "CREATE TABLE IF NOT EXISTS `bookings` (
           `id` INT AUTO_INCREMENT PRIMARY KEY,
-          `user_id` INT NOT NULL,
+          ` INT NOT NULL,
           `room_id` INT NOT NULL,
           `status` ENUM('pending', 'rejected', 'approved', 'approved_bot') NOT NULL DEFAULT 'pending',
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+          `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`room_id`) REFERENCES `rooms`(`id`) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
     ];
 
     foreach ($queries as $q) {
-        try {
-            $pdo->exec($q);
-        } catch (Exception $e) {
-            // Игнорируем
-        }
+        try { $pdo->exec($q); } catch (Exception $e) {}
     }
 
-    try {
-        $pdo->exec("ALTER TABLE `floors` ADD COLUMN `start_room_number` INT NULL DEFAULT NULL;");
-    } catch (Exception $e) {}
-
-    try {
-        $pdo->exec("ALTER TABLE `floors` ADD COLUMN `room_order_type` VARCHAR(20) NOT NULL DEFAULT 'clockwise';");
-    } catch (Exception $e) {}
+    try { $pdo->exec("ALTER TABLE `users` ADD COLUMN `login` VARCHAR(100) NOT NULL UNIQUE"); } catch (Exception $e) {}
+    try { $pdo->exec("ALTER TABLE `users` ADD COLUMN `phone` VARCHAR(50) NULL"); } catch (Exception $e) {}
+    try { $pdo->exec("ALTER TABLE `floors` ADD COLUMN `start_room_number` INT NULL DEFAULT NULL;"); } catch (Exception $e) {}
+    try { $pdo->exec("ALTER TABLE `floors` ADD COLUMN `room_order_type` VARCHAR(20) NOT NULL DEFAULT 'clockwise';"); } catch (Exception $e) {}
 }
 
 ensureTablesExist($pdo);
@@ -268,7 +259,7 @@ function getUserByToken($pdo, $token) {
     if (empty($token)) return null;
     try {
         $stmt = $pdo->prepare(
-            'SELECT u.id, u.first_name, u.last_name, u.name, u.email, u.phone, u.role, u.team_name FROM users u 
+            'SELECT u.id, u.first_name, u.last_name, u.name, u.login, u.phone, u.role, u.team_name FROM users u 
              INNER JOIN tokens t ON u.id = t.user_id 
              WHERE t.token = ? AND t.expires_at > NOW()'
         );
@@ -298,7 +289,7 @@ try {
                 'success' => true,
                 'message' => 'База данных успешно пересоздана с нуля!',
                 'default_admin' => [
-                    'email' => 'admin@alabuga.ru',
+                    'login' => 'admin',
                     'password' => 'admin123'
                 ]
             ]);
@@ -328,32 +319,40 @@ try {
 
         case 'register':
             if ($method === 'POST') {
-                $name = $input['name'] ?? '';
-                $email = $input['email'] ?? '';
+                $lastName = $input['last_name'] ?? '';
+                $firstName = $input['first_name'] ?? '';
+                $phone = $input['phone'] ?? '';
                 $password = $input['password'] ?? '';
+                $name = trim($lastName . ' ' . $firstName);
                 
-                if (empty($email) || empty($password)) {
+                $phoneClean = preg_replace('/[^0-9]/', '', $phone);
+                
+                if (empty($lastName) || empty($firstName) || empty($phone) || empty($password)) {
                     http_response_code(400);
-                    echo json_encode(['error' => 'Email и пароль обязательны']);
+                    echo json_encode(['error' => 'Все поля обязательны']);
                     break;
                 }
                 
-                $stmt = $pdo->prepare('SELECT id FROM users WHERE email = ?');
-                $stmt->execute([$email]);
+                // Проверка, что телефон не занят
+                $stmt = $pdo->prepare('SELECT id FROM users WHERE phone = ?');
+                $stmt->execute([$phoneClean]);
                 if ($stmt->fetch()) {
                     http_response_code(400);
-                    echo json_encode(['error' => 'Пользователь с таким email уже существует']);
+                    echo json_encode(['error' => 'Пользователь с таким номером телефона уже существует']);
                     break;
                 }
                 
-                $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)');
+                // Генерация логина: ALABUGA_XXXX (4 случайные цифры)
+                $login = 'ALABUGA_' . str_pad(random_int(0, 9999), 4, '0', STR_PAD_LEFT);
                 
-                if ($stmt->execute([$name, $email, $hashedPassword, 'user'])) {
+                $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
+                $stmt = $pdo->prepare('INSERT INTO users (first_name, last_name, name, login, phone, password, role) VALUES (?, ?, ?, ?, ?, ?, ?)');
+                
+                if ($stmt->execute([$firstName, $lastName, $name, $login, $phoneClean, $hashedPassword, 'user'])) {
                     $userId = $pdo->lastInsertId();
                     $newToken = generateToken($userId);
                     
-                    $stmt = $pdo->prepare('INSERT INTO tokens (user_id, token, expires_at) VALUES (?, ?, ?)');
+                    $stmt = $pdo->prepare('INSERT INTO tokens (, token, expires_at) VALUES (?, ?, ?)');
                     $expiresAt = date('Y-m-d H:i:s', strtotime('+7 days'));
                     $stmt->execute([$userId, $newToken, $expiresAt]);
                     
@@ -362,8 +361,12 @@ try {
                         'token' => $newToken,
                         'user' => [
                             'id' => $userId,
+                            'first_name' => $firstName,
+                            'last_name' => $lastName,
                             'name' => $name,
-                            'email' => $email,
+                            'login' => $login,
+                            'phone' => $phoneClean,
+                            'password' => $password,
                             'role' => 'user'
                         ]
                     ]);
@@ -373,16 +376,30 @@ try {
             
         case 'login':
             if ($method === 'POST') {
-                $email = $input['email'] ?? '';
+                $login = $input['login'] ?? '';
+                $phone = $input['phone'] ?? '';
                 $password = $input['password'] ?? '';
                 
-                $stmt = $pdo->prepare('SELECT * FROM users WHERE email = ?');
-                $stmt->execute([$email]);
-                $user = $stmt->fetch();
+                $user = null;
+                
+                // Поиск по логину
+                if (!empty($login)) {
+                    $stmt = $pdo->prepare('SELECT * FROM users WHERE login = ?');
+                    $stmt->execute([$login]);
+                    $user = $stmt->fetch();
+                }
+                
+                // Поиск по телефону, если по логину не нашли
+                if (!$user && !empty($phone)) {
+                    $phoneClean = preg_replace('/[^0-9]/', '', $phone);
+                    $stmt = $pdo->prepare('SELECT * FROM users WHERE phone = ?');
+                    $stmt->execute([$phoneClean]);
+                    $user = $stmt->fetch();
+                }
                 
                 if (!$user || !password_verify($password, $user['password'])) {
                     http_response_code(401);
-                    echo json_encode(['error' => 'Неверный email или пароль']);
+                    echo json_encode(['error' => 'Неверный логин/телефон или пароль']);
                     break;
                 }
                 
@@ -417,7 +434,7 @@ try {
         case 'admin/users':
             checkAdmin($pdo, $token);
             if ($method === 'GET') {
-                $stmt = $pdo->query('SELECT id, first_name, last_name, name, email, phone, role, team_name, created_at FROM users ORDER BY id DESC');
+                $stmt = $pdo->query('SELECT id, first_name, last_name, name, login, phone, role, team_name, created_at FROM users ORDER BY id DESC');
                 $users = $stmt->fetchAll();
                 echo json_encode($users);
             } elseif ($method === 'POST') {
@@ -430,12 +447,12 @@ try {
                 $firstName = $input['first_name'] ?? '';
                 $lastName = $input['last_name'] ?? '';
                 $phone = $input['phone'] ?? '';
-                $email = $input['email'] ?? '';
+                $login = $input['login'] ?? '';
                 $role = $input['role'] ?? 'user';
                 $teamName = $input['team_name'] ?? '';
 
-                $sql = 'UPDATE users SET first_name = ?, last_name = ?, phone = ?, email = ?, role = ?, team_name = ?';
-                $params = [$firstName, $lastName, $phone, $email, $role, $teamName];
+                $sql = 'UPDATE users SET first_name = ?, last_name = ?, phone = ?, login = ?, role = ?, team_name = ?';
+                $params = [$firstName, $lastName, $phone, $login, $role, $teamName];
 
                 if (!empty($input['password'])) {
                     $sql .= ', password = ?';
@@ -488,7 +505,7 @@ try {
             if ($method === 'GET') {
                 $stmt = $pdo->query('
                     SELECT b.id, b.status, b.created_at, b.user_id, b.room_id,
-                           u.first_name, u.last_name, u.name as user_name, u.email as user_email, u.phone as user_phone,
+                           u.first_name, u.last_name, u.name as user_name, u.login as user_login, u.phone as user_phone,
                            r.room_number, r.name as room_name, r.gender as room_gender,
                            fl.id as floor_id, fl.floor_number, fl.gender as floor_gender,
                            bu.id as building_id, bu.name as building_name, bu.gender as building_gender
@@ -551,7 +568,7 @@ try {
                 }
                 $stmt = $pdo->prepare('
                     SELECT b.id, b.status, b.created_at, b.user_id,
-                           u.first_name, u.last_name, u.name as user_name, u.email as user_email, u.phone as user_phone
+                           u.first_name, u.last_name, u.name as user_name, u.login as user_login, u.phone as user_phone
                     FROM bookings b
                     JOIN users u ON b.user_id = u.id
                     WHERE b.room_id = ? AND b.status != "rejected"
