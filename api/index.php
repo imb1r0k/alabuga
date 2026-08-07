@@ -84,6 +84,7 @@ function initFreshDatabase($pdo) {
           `floor_number` INT NOT NULL,
           `width` INT NOT NULL DEFAULT 8,
           `start_room_number` INT NULL DEFAULT NULL,
+          `room_order_type` VARCHAR(20) NOT NULL DEFAULT 'clockwise',
           `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
           `layout_data` LONGTEXT NULL,
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -170,6 +171,7 @@ function ensureTablesExist($pdo) {
           `floor_number` INT NOT NULL,
           `width` INT NOT NULL DEFAULT 8,
           `start_room_number` INT NULL DEFAULT NULL,
+          `room_order_type` VARCHAR(20) NOT NULL DEFAULT 'clockwise',
           `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
           `layout_data` LONGTEXT NULL,
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -210,9 +212,11 @@ function ensureTablesExist($pdo) {
 
     try {
         $pdo->exec("ALTER TABLE `floors` ADD COLUMN `start_room_number` INT NULL DEFAULT NULL;");
-    } catch (Exception $e) {
-        // Колонка уже создана
-    }
+    } catch (Exception $e) {}
+
+    try {
+        $pdo->exec("ALTER TABLE `floors` ADD COLUMN `room_order_type` VARCHAR(20) NOT NULL DEFAULT 'clockwise';");
+    } catch (Exception $e) {}
 }
 
 ensureTablesExist($pdo);
@@ -587,7 +591,7 @@ try {
                     $stmt->execute([$name, $gender]);
                     $bId = $pdo->lastInsertId();
 
-                    $fStmt = $pdo->prepare('INSERT INTO floors (building_id, floor_number, width, gender) VALUES (?, 1, 8, "DEFAULT")');
+                    $fStmt = $pdo->prepare('INSERT INTO floors (building_id, floor_number, width, gender, room_order_type) VALUES (?, 1, 8, "DEFAULT", "clockwise")');
                     $fStmt->execute([$bId]);
 
                     echo json_encode(['success' => true, 'id' => $bId]);
@@ -623,13 +627,14 @@ try {
                 $width = $input['width'] ?? 8;
                 $gender = $input['gender'] ?? 'DEFAULT';
                 $startRoomNum = isset($input['start_room_number']) ? (int)$input['start_room_number'] : null;
+                $roomOrderType = $input['room_order_type'] ?? 'clockwise';
 
                 if (isset($input['id'])) {
-                    $stmt = $pdo->prepare('UPDATE floors SET width = ?, gender = ?, start_room_number = ? WHERE id = ?');
-                    $stmt->execute([$width, $gender, $startRoomNum, $input['id']]);
+                    $stmt = $pdo->prepare('UPDATE floors SET width = ?, gender = ?, start_room_number = ?, room_order_type = ? WHERE id = ?');
+                    $stmt->execute([$width, $gender, $startRoomNum, $roomOrderType, $input['id']]);
                 } else {
-                    $stmt = $pdo->prepare('INSERT INTO floors (building_id, floor_number, width, gender, start_room_number) VALUES (?, ?, ?, ?, ?)');
-                    $stmt->execute([$buildingId, $floorNumber, $width, $gender, $startRoomNum]);
+                    $stmt = $pdo->prepare('INSERT INTO floors (building_id, floor_number, width, gender, start_room_number, room_order_type) VALUES (?, ?, ?, ?, ?, ?)');
+                    $stmt->execute([$buildingId, $floorNumber, $width, $gender, $startRoomNum, $roomOrderType]);
                 }
                 echo json_encode(['success' => true]);
             }
