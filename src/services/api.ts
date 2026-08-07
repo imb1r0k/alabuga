@@ -1,128 +1,47 @@
-import axios from 'axios';
+// ... (весь существующий код)
 
-const API_URL = '/api';
-
-export const api = axios.create({
-  baseURL: API_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
-
-api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-    }
-    return Promise.reject(error);
-  }
-);
-
-export const getSettings = async () => {
-  try {
-    const response = await api.get('/settings');
-    return response.data;
-  } catch (error) {
-    return { site_title: 'Алабуга - форум 2025' };
-  }
-};
-
-export const updateSettings = async (siteTitle: string) => {
-  const response = await api.post('/settings', { site_title: siteTitle });
+// Команды
+export const getAdminTeams = async () => {
+  const response = await api.get('/admin/teams');
   return response.data;
 };
 
-// Пользователи
-export const getAdminUsers = async () => {
-  const response = await api.get('/admin/users');
+export const saveAdminTeam = async (teamData: any) => {
+  const response = await api.post('/admin/teams', teamData);
   return response.data;
 };
 
-export const updateAdminUser = async (userData: any) => {
-  const response = await api.post('/admin/users', userData);
+export const deleteAdminTeam = async (id: number) => {
+  const response = await api.post('/admin/teams/delete', { id });
   return response.data;
 };
 
-export const getUserDetails = async (id: number) => {
-  const response = await api.get(`/admin/user-details?id=${id}`);
+export const getAdminTeamMembers = async (teamId: number) => {
+  const response = await api.get(`/admin/teams/members?team_id=${teamId}`);
   return response.data;
 };
 
-// Бронирования
-export const getAdminBookings = async () => {
-  const response = await api.get('/admin/bookings');
+export const getAdminTeamChat = async (teamId: number) => {
+  const response = await api.get(`/admin/teams/chat?team_id=${teamId}`);
   return response.data;
 };
 
-export const updateAdminBooking = async (bookingData: any) => {
-  const response = await api.post('/admin/bookings', bookingData);
+export const sendAdminTeamMessage = async (teamId: number, message: string) => {
+  const response = await api.post('/admin/teams/chat', { team_id: teamId, message });
   return response.data;
 };
 
-export const getRoomBookings = async (roomId: number) => {
-  const response = await api.get(`/admin/room-bookings?room_id=${roomId}`);
+export const getAdminTeamCalendar = async (teamId: number) => {
+  const response = await api.get(`/admin/teams/calendar?team_id=${teamId}`);
   return response.data;
 };
 
-// Корпуса и комната
-export const getAdminBuildings = async () => {
-  const response = await api.get('/admin/buildings');
+export const addAdminTeamEvent = async (teamId: number, eventData: any) => {
+  const response = await api.post('/admin/teams/calendar', { ...eventData, team_id: teamId });
   return response.data;
 };
 
-export const saveAdminBuilding = async (building: any) => {
-  const response = await api.post('/admin/buildings', building);
-  return response.data;
-};
-
-export const deleteAdminBuilding = async (id: number) => {
-  const response = await api.post('/admin/buildings', { id, action: 'delete' });
-  return response.data;
-};
-
-export const getAdminFloors = async (buildingId: number) => {
-  const response = await api.get(`/admin/floors?building_id=${buildingId}`);
-  return response.data;
-};
-
-export const saveAdminFloor = async (floor: any) => {
-  const response = await api.post('/admin/floors', floor);
-  return response.data;
-};
-
-export const deleteAdminFloor = async (id: number) => {
-  const response = await api.post('/admin/floors', { id, action: 'delete' });
-  return response.data;
-};
-
-export const getAdminRooms = async (floorId: number) => {
-  const response = await api.get(`/admin/rooms?floor_id=${floorId}`);
-  return response.data;
-};
-
-export const saveAdminRoom = async (room: any) => {
-  const response = await api.post('/admin/rooms', room);
-  return response.data;
-};
-
-export const deleteAdminRoom = async (id: number) => {
-  const response = await api.post('/admin/rooms', { id, action: 'delete' });
-  return response.data;
-};
-
-export const getAllRooms = async () => {
-  const response = await api.get('/admin/all-rooms');
+export const deleteAdminTeamEvent = async (id: number) => {
+  const response = await api.post('/admin/teams/calendar', { action: 'delete', id });
   return response.data;
 };
