@@ -71,6 +71,11 @@ export const updateAdminBooking = async (bookingData: any) => {
   return response.data;
 };
 
+export const getRoomBookings = async (roomId: number) => {
+  const response = await api.get(`/admin/room-bookings?room_id=${roomId}`);
+  return response.data;
+};
+
 // Корпуса и комната
 export const getAdminBuildings = async () => {
   const response = await api.get('/admin/buildings');
@@ -79,6 +84,11 @@ export const getAdminBuildings = async () => {
 
 export const saveAdminBuilding = async (building: any) => {
   const response = await api.post('/admin/buildings', building);
+  return response.data;
+};
+
+export const deleteAdminBuilding = async (id: number) => {
+  const response = await api.post('/admin/buildings', { id, action: 'delete' });
   return response.data;
 };
 
@@ -92,6 +102,11 @@ export const saveAdminFloor = async (floor: any) => {
   return response.data;
 };
 
+export const deleteAdminFloor = async (id: number) => {
+  const response = await api.post('/admin/floors', { id, action: 'delete' });
+  return response.data;
+};
+
 export const getAdminRooms = async (floorId: number) => {
   const response = await api.get(`/admin/rooms?floor_id=${floorId}`);
   return response.data;
@@ -99,6 +114,11 @@ export const getAdminRooms = async (floorId: number) => {
 
 export const saveAdminRoom = async (room: any) => {
   const response = await api.post('/admin/rooms', room);
+  return response.data;
+};
+
+export const deleteAdminRoom = async (id: number) => {
+  const response = await api.post('/admin/rooms', { id, action: 'delete' });
   return response.data;
 };
 

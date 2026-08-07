@@ -529,12 +529,44 @@ try {
             }
             break;
 
+        case 'admin/room-bookings':
+            checkAdmin($pdo, $token);
+            if ($method === 'GET') {
+                $roomId = $_GET['room_id'] ?? null;
+                if (!$roomId) {
+                    echo json_encode([]);
+                    break;
+                }
+                $stmt = $pdo->prepare('
+                    SELECT b.id, b.status, b.created_at, b.user_id,
+                           u.first_name, u.last_name, u.name as user_name, u.email as user_email, u.phone as user_phone
+                    FROM bookings b
+                    JOIN users u ON b.user_id = u.id
+                    WHERE b.room_id = ? AND b.status != "rejected"
+                    ORDER BY b.id DESC
+                ');
+                $stmt->execute([$roomId]);
+                echo json_encode($stmt->fetchAll());
+            }
+            break;
+
         case 'admin/buildings':
             checkAdmin($pdo, $token);
             if ($method === 'GET') {
                 $stmt = $pdo->query('SELECT * FROM buildings ORDER BY id ASC');
                 echo json_encode($stmt->fetchAll());
             } elseif ($method === 'POST') {
+                $action = $input['action'] ?? 'save';
+                if ($action === 'delete') {
+                    $id = $input['id'] ?? null;
+                    if ($id) {
+                        $stmt = $pdo->prepare('DELETE FROM buildings WHERE id = ?');
+                        $stmt->execute([$id]);
+                    }
+                    echo json_encode(['success' => true]);
+                    break;
+                }
+
                 $name = $input['name'] ?? 'Новый корпус';
                 $gender = $input['gender'] ?? 'MIXED';
 
@@ -567,6 +599,17 @@ try {
                 $stmt->execute([$buildingId]);
                 echo json_encode($stmt->fetchAll());
             } elseif ($method === 'POST') {
+                $action = $input['action'] ?? 'save';
+                if ($action === 'delete') {
+                    $id = $input['id'] ?? null;
+                    if ($id) {
+                        $stmt = $pdo->prepare('DELETE FROM floors WHERE id = ?');
+                        $stmt->execute([$id]);
+                    }
+                    echo json_encode(['success' => true]);
+                    break;
+                }
+
                 $buildingId = $input['building_id'] ?? null;
                 $floorNumber = $input['floor_number'] ?? 1;
                 $width = $input['width'] ?? 8;
@@ -596,9 +639,10 @@ try {
                 echo json_encode($stmt->fetchAll());
             } elseif ($method === 'POST') {
                 $id = $input['id'] ?? null;
+                $action = $input['action'] ?? 'save';
                 $roomType = $input['room_type'] ?? 'room';
 
-                if ($roomType === 'empty' && $id) {
+                if (($action === 'delete' || $roomType === 'empty') && $id) {
                     $stmt = $pdo->prepare('DELETE FROM rooms WHERE id = ?');
                     $stmt->execute([$id]);
                     echo json_encode(['success' => true]);
@@ -637,7 +681,9 @@ try {
             checkAdmin($pdo, $token);
             if ($method === 'GET') {
                 $stmt = $pdo->query('
-                    SELECT r.id, r.room_number, r.name, r.room_type, fl.floor_number, bu.name as building_name
+                    SELECT r.id, r.room_number, r.name, r.room_type, r.capacity, r.gender as room_gender,
+                           fl.id as floor_id, fl.floor_number, fl.gender as floor_gender,
+                           bu.id as building_id, bu.name as building_name, bu.gender as building_gender
                     FROM rooms r
                     JOIN floors fl ON r.floor_id = fl.id
                     JOIN buildings bu ON r.building_id = bu.id
