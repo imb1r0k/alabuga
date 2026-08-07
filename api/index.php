@@ -22,19 +22,13 @@ try {
     $pdo = new PDO("mysql:host=$host;port=$port;dbname=$dbname;charset=utf8mb4", $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-
-    // Миграции для старых таблиц
-    try { $pdo->exec("ALTER TABLE `rooms` ADD COLUMN `room_type` VARCHAR(50) NOT NULL DEFAULT 'room' AFTER `is_technical`"); } catch (Exception $e) {}
-    try { $pdo->exec("ALTER TABLE `buildings` MODIFY COLUMN `gender` ENUM('M', 'F', 'MIXED') NOT NULL DEFAULT 'MIXED'"); } catch (Exception $e) {}
-    try { $pdo->exec("ALTER TABLE `floors` MODIFY COLUMN `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT'"); } catch (Exception $e) {}
-    try { $pdo->exec("ALTER TABLE `rooms` MODIFY COLUMN `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT'"); } catch (Exception $e) {}
-
 } catch (PDOException $e) {
     http_response_code(500);
-    echo json_encode(['error' => 'Ошибка подключения к БД: ' . $e->getMessage()]);
+    echo json_encode(['error' => 'Ошибка подключения к базе данных: ' . $e->getMessage()]);
     exit();
 }
 
+// Функция инициализации базы данных "с нуля"
 function initFreshDatabase($pdo) {
     $sql = "
         SET FOREIGN_KEY_CHECKS = 0;
@@ -131,16 +125,103 @@ function initFreshDatabase($pdo) {
     $stmt->execute(['Админ', 'Главный', 'Администратор', 'admin@alabuga.ru', '+79990000000', $adminPassword, 'admin', 'Оргкомитет']);
 }
 
-// Автопроверка наличия таблиц
-try {
-    $pdo->query("SELECT 1 FROM `users` LIMIT 1");
-} catch (Exception $e) {
-    initFreshDatabase($pdo);
+// Безопасное автосоздание всех таблиц при необходимости
+function ensureTablesExist($pdo) {
+    $queries = [
+        "CREATE TABLE IF NOT EXISTS `settings` (
+          `key` VARCHAR(50) NOT NULL PRIMARY KEY,
+          `value` TEXT NULL,
+          `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+
+        "INSERT IGNORE INTO `settings` (`key`, `value`) VALUES ('site_title', 'Алабуга - форум 2025');",
+
+        "CREATE TABLE IF NOT EXISTS `users` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `first_name` VARCHAR(100) NULL,
+          `last_name` VARCHAR(100) NULL,
+          `name` VARCHAR(255) NOT NULL,
+          `email` VARCHAR(255) NOT NULL UNIQUE,
+          `phone` VARCHAR(50) NULL,
+          `password` VARCHAR(255) NOT NULL,
+          `role` VARCHAR(50) NOT NULL DEFAULT 'user',
+          `team_name` VARCHAR(100) NULL,
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+
+        "CREATE TABLE IF NOT EXISTS `tokens` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `user_id` INT NOT NULL,
+          `token` VARCHAR(255) NOT NULL UNIQUE,
+          `expires_at` DATETIME NOT NULL,
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+
+        "CREATE TABLE IF NOT EXISTS `buildings` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `name` VARCHAR(255) NOT NULL,
+          `gender` ENUM('M', 'F', 'MIXED') NOT NULL DEFAULT 'MIXED',
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+
+        "CREATE TABLE IF NOT EXISTS `floors` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `building_id` INT NOT NULL,
+          `floor_number` INT NOT NULL,
+          `width` INT NOT NULL DEFAULT 8,
+          `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
+          `layout_data` LONGTEXT NULL,
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+
+        "CREATE TABLE IF NOT EXISTS `rooms` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `floor_id` INT NOT NULL,
+          `building_id` INT NOT NULL,
+          `room_number` VARCHAR(50) NOT NULL,
+          `name` VARCHAR(255) NULL,
+          `capacity` INT NOT NULL DEFAULT 2,
+          `is_technical` TINYINT(1) NOT NULL DEFAULT 0,
+          `room_type` VARCHAR(50) NOT NULL DEFAULT 'room',
+          `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
+          `x_pos` INT NOT NULL DEFAULT 0,
+          `y_pos` INT NOT NULL DEFAULT 0,
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+
+        "CREATE TABLE IF NOT EXISTS `bookings` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `user_id` INT NOT NULL,
+          `room_id` INT NOT NULL,
+          `status` ENUM('pending', 'rejected', 'approved', 'approved_bot') NOT NULL DEFAULT 'pending',
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+    ];
+
+    foreach ($queries as $q) {
+        try {
+            $pdo->exec($q);
+        } catch (Exception $e) {
+            // Игнорируем дублирующиеся типы
+        }
+    }
 }
 
-$uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$uri = str_replace('/api', '', $uri);
-$uri = str_replace('/index.php', '', $uri);
+ensureTablesExist($pdo);
+
+// Определение запрашиваемого маршрута
+$uri = '';
+if (!empty($_GET['route'])) {
+    $uri = $_GET['route'];
+} elseif (!empty($_SERVER['PATH_INFO'])) {
+    $uri = $_SERVER['PATH_INFO'];
+} else {
+    $requestUri = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
+    $requestUri = preg_replace('/^.*?index\.php/i', '', $requestUri);
+    $requestUri = preg_replace('/^\/api/i', '', $requestUri);
+    $uri = $requestUri;
+}
 $uri = trim($uri, '/');
 $method = $_SERVER['REQUEST_METHOD'];
 
@@ -468,7 +549,6 @@ try {
                     $stmt->execute([$name, $gender]);
                     $bId = $pdo->lastInsertId();
 
-                    // Создаем пустой макет этажа без авто-комнат
                     $fStmt = $pdo->prepare('INSERT INTO floors (building_id, floor_number, width, gender) VALUES (?, 1, 8, "DEFAULT")');
                     $fStmt->execute([$bId]);
 
