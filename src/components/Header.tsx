@@ -69,19 +69,19 @@ export const Header: React.FC = () => {
                   }}>
               
               {/* Логотип: картинка (svg/png) или текст из БД */}
-              <Link to="/" style={{ display: 'flex', alignItems: 'center', color: '#fff', textDecoration: 'none', fontWeight: 'bold', fontSize: '18px', marginRight: 'auto', minWidth: 0 }}>
-                {settingsLoading ? (
-                  <Skeleton width="200px" height="28px" rounded="6px" />
-                ) : isImageUrl(siteTitle) ? (
-                  <img
-                    src={siteTitle}
-                    alt="Логотип сайта"
-                    style={{ height: '36px', width: 'auto', maxWidth: '220px', objectFit: 'contain', display: 'block' }}
-                  />
-                ) : (
-                  <span style={{ letterSpacing: '0.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{siteTitle}</span>
-                )}
-              </Link>
+              <Link to="/" style={{ display: 'flex', alignItems: 'center', color: '#fff', textDecoration: 'none', fontWeight: 'bold', fontSize: '18px', marginRight: 'auto', flexShrink: 0 }}>
+                              {settingsLoading ? (
+                                <Skeleton width="200px" height="28px" rounded="6px" />
+                              ) : isImageUrl(siteTitle) ? (
+                                <img
+                                  src={siteTitle}
+                                  alt="Логотип сайта"
+                                  style={{ height: '36px', width: 'auto', maxWidth: '220px', objectFit: 'contain', display: 'block' }}
+                                />
+                              ) : (
+                                <span style={{ letterSpacing: '0.5px', whiteSpace: 'nowrap' }}>{siteTitle}</span>
+                              )}
+                            </Link>
       
               {/* Навигация ПК */}
               <nav className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', flexShrink: 0 }}>
