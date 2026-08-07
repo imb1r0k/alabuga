@@ -35,7 +35,7 @@ export const AdminUsersPage: React.FC = () => {
       first_name: u.first_name || '',
       last_name: u.last_name || '',
       phone: u.phone || '',
-      email: u.email || '',
+      username: u.username || '', // было email
       role: u.role || 'user',
       team_name: u.team_name || '',
       password: '',
@@ -80,7 +80,7 @@ export const AdminUsersPage: React.FC = () => {
                       <th style={{ padding: '8px' }}>Фамилия</th>
                       <th style={{ padding: '8px' }}>Имя</th>
                       <th style={{ padding: '8px' }}>Телефон</th>
-                      <th style={{ padding: '8px' }}>Логин (Email)</th>
+                      <th style={{ padding: '8px' }}>Логин</th>
                       <th style={{ padding: '8px' }}>Роль</th>
                     </tr>
                   </thead>
@@ -98,15 +98,9 @@ export const AdminUsersPage: React.FC = () => {
                         <td style={{ padding: '8px' }}>{u.last_name || '-'}</td>
                         <td style={{ padding: '8px' }}>{u.first_name || u.name}</td>
                         <td style={{ padding: '8px' }}>{u.phone || '-'}</td>
-                        <td style={{ padding: '8px' }}>{u.email}</td>
+                        <td style={{ padding: '8px' }}>{u.username || u.email || '-'}</td>
                         <td style={{ padding: '8px' }}>
-                          <span style={{
-                            padding: '2px 6px',
-                            borderRadius: '4px',
-                            backgroundColor: u.role === 'admin' ? '#dc3545' : '#6c757d',
-                            color: '#fff',
-                            fontSize: '12px'
-                          }}>
+                          <span style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: u.role === 'admin' ? '#dc3545' : '#6c757d', color: '#fff', fontSize: '12px' }}>
                             {u.role}
                           </span>
                         </td>
@@ -123,87 +117,48 @@ export const AdminUsersPage: React.FC = () => {
                   <h3>Редактирование #{selectedUser.id}</h3>
                   <button onClick={() => setSelectedUser(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '16px' }}>✕</button>
                 </div>
-
                 {userMsg && (
                   <div style={{ padding: '8px', borderRadius: '4px', marginBottom: '12px', backgroundColor: userMsg.includes('Ошибка') ? '#f8d7da' : '#d4edda', fontSize: '14px' }}>
                     {userMsg}
                   </div>
                 )}
-
                 <form onSubmit={handleSaveUser}>
                   <div className="input-group">
                     <label>Фамилия</label>
-                    <input
-                      type="text"
-                      value={userFormData.last_name}
-                      onChange={(e) => setUserFormData({ ...userFormData, last_name: e.target.value })}
-                    />
+                    <input type="text" value={userFormData.last_name} onChange={(e) => setUserFormData({ ...userFormData, last_name: e.target.value })} />
                   </div>
-
                   <div className="input-group">
                     <label>Имя</label>
-                    <input
-                      type="text"
-                      value={userFormData.first_name}
-                      onChange={(e) => setUserFormData({ ...userFormData, first_name: e.target.value })}
-                    />
+                    <input type="text" value={userFormData.first_name} onChange={(e) => setUserFormData({ ...userFormData, first_name: e.target.value })} />
                   </div>
-
                   <div className="input-group">
                     <label>Телефон</label>
-                    <input
-                      type="text"
-                      value={userFormData.phone}
-                      onChange={(e) => setUserFormData({ ...userFormData, phone: e.target.value })}
-                    />
+                    <input type="text" value={userFormData.phone} onChange={(e) => setUserFormData({ ...userFormData, phone: e.target.value })} />
                   </div>
-
                   <div className="input-group">
-                    <label>Email (Логин)</label>
-                    <input
-                      type="email"
-                      value={userFormData.email}
-                      onChange={(e) => setUserFormData({ ...userFormData, email: e.target.value })}
-                      required
-                    />
+                    <label>Логин</label>
+                    <input type="text" value={userFormData.username} onChange={(e) => setUserFormData({ ...userFormData, username: e.target.value })} required />
                   </div>
-
                   <div className="input-group">
                     <label>Новый пароль (оставьте пустым если не хотите менять)</label>
-                    <input
-                      type="password"
-                      value={userFormData.password}
-                      onChange={(e) => setUserFormData({ ...userFormData, password: e.target.value })}
-                    />
+                    <input type="password" value={userFormData.password} onChange={(e) => setUserFormData({ ...userFormData, password: e.target.value })} />
                   </div>
-
                   <div className="input-group">
                     <label>Роль</label>
-                    <select
-                      value={userFormData.role}
-                      onChange={(e) => setUserFormData({ ...userFormData, role: e.target.value })}
-                      style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
-                    >
+                    <select value={userFormData.role} onChange={(e) => setUserFormData({ ...userFormData, role: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}>
                       <option value="user">Пользователь</option>
                       <option value="moderator">Модератор</option>
                       <option value="admin">Администратор</option>
                     </select>
                   </div>
-
                   <div className="input-group">
                     <label>Команда</label>
-                    <input
-                      type="text"
-                      value={userFormData.team_name}
-                      onChange={(e) => setUserFormData({ ...userFormData, team_name: e.target.value })}
-                    />
+                    <input type="text" value={userFormData.team_name} onChange={(e) => setUserFormData({ ...userFormData, team_name: e.target.value })} />
                   </div>
-
                   <button type="submit" className="btn btn-primary" disabled={savingUser} style={{ width: '100%', marginTop: '10px' }}>
                     {savingUser ? 'Сохранение...' : 'Сохранить пользователя'}
                   </button>
                 </form>
-
                 {userDetails && (
                   <div style={{ marginTop: '20px', borderTop: '1px solid #ddd', paddingTop: '15px' }}>
                     <h4>Текущее бронирование</h4>
@@ -214,7 +169,6 @@ export const AdminUsersPage: React.FC = () => {
                     ) : (
                       <p style={{ fontSize: '14px', color: '#888' }}>Нет активных бронирований</p>
                     )}
-
                     <h4 style={{ marginTop: '12px' }}>История бронирований</h4>
                     {userDetails.bookings_history?.length > 0 ? (
                       <ul style={{ paddingLeft: '20px', fontSize: '13px' }}>

@@ -26,24 +26,19 @@ export const Header = () => {
     }
   };
 
-  // Определяем зону навигации
   const isAdminZone = location.pathname.startsWith('/admin-panel');
   const isDashboardZone = location.pathname.startsWith('/dashboard');
 
-  // Кнопки для гостя
   const guestNav = (
     <div className="nav-animate" key="guest">
-      <Link to="/auth" className="btn btn-primary">
-        Войти
-      </Link>
+      <Link to="/auth" className="btn btn-primary">Войти</Link>
     </div>
   );
 
-  // Кнопки для авторизованного на главной
   const userNav = (
     <div className="nav-animate" key="user-home">
       <span className="nav-user-info">
-        {user?.name || user?.email}
+        {user?.name || user?.username || user?.phone}
       </span>
       {(isAdmin || isModerator) && (
         <Link to="/admin-panel" className="btn btn-secondary">
@@ -62,7 +57,6 @@ export const Header = () => {
     </div>
   );
 
-  // Кнопки для админки
   const adminNav = (
     <div className="nav-animate" key="admin-nav">
       <NavLink to="/admin-panel" end className="btn btn-secondary btn-admin-nav">
@@ -92,7 +86,6 @@ export const Header = () => {
     </div>
   );
 
-  // Кнопки для личного кабинета
   const dashboardNav = (
     <div className="nav-animate" key="dashboard-nav">
       <Link to="/" className="btn btn-primary">
@@ -100,10 +93,10 @@ export const Header = () => {
         На домашнюю
       </Link>
       {isAuthenticated && (isAdmin || isModerator) && (
-        <NavLink to="/admin-panel" className="btn btn-secondary">
+        <Link to="/admin-panel" className="btn btn-secondary">
           <ShieldCheck size={16} style={{ marginRight: '4px' }} />
           Админка
-        </NavLink>
+        </Link>
       )}
       <button onClick={handleLogout} className="btn btn-danger">
         <LogOut size={16} style={{ marginRight: '4px' }} />
@@ -112,31 +105,21 @@ export const Header = () => {
     </div>
   );
 
-  // Определяем что отображать
   let currentNav = null;
-  if (isAdminZone) {
-    currentNav = adminNav;
-  } else if (isDashboardZone) {
-    currentNav = dashboardNav;
-  } else {
-    currentNav = isAuthenticated ? userNav : guestNav;
-  }
+  if (isAdminZone) currentNav = adminNav;
+  else if (isDashboardZone) currentNav = dashboardNav;
+  else currentNav = isAuthenticated ? userNav : guestNav;
 
   return (
     <header className="site-header">
       <div className="container header-container">
-        {/* Логотип */}
         <div className="header-logo">
           {settingsLoading ? (
             <Skeleton width={180} height={24} rounded={true} className="inline-block" />
           ) : (
-            <Link to="/" className="site-title">
-              {siteTitle}
-            </Link>
+            <Link to="/" className="site-title">{siteTitle}</Link>
           )}
         </div>
-
-        {/* Навигация */}
         <nav className="header-nav">
           {currentNav}
         </nav>
