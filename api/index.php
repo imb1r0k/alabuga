@@ -2,25 +2,22 @@
 // ============================================
 // 1. CORS ЗАГОЛОВКИ - ДОЛЖНЫ БЫТЬ ПЕРВЫМИ!
 // ============================================
-// Разрешаем все домены
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
 header('Access-Control-Allow-Credentials: true');
-header('Access-Control-Max-Age: 86400'); // Кэширование preflight на 24 часа
+header('Access-Control-Max-Age: 86400');
 
-// Если это OPTIONS запрос (preflight) - завершаем здесь
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit();
 }
 
 // ============================================
-// 2. ОСТАЛЬНОЙ КОД
+// 2. ПОДКЛЮЧЕНИЕ К БД И ОБРАБОТКА
 // ============================================
 header('Content-Type: application/json; charset=utf-8');
 
-// Подключение к базе данных
 $host = 'localhost';
 $dbname = 'imb1r0kya2';
 $username = 'imb1r0kya2';
@@ -44,15 +41,32 @@ $uri = str_replace('/index.php', '', $uri);
 $uri = trim($uri, '/');
 $method = $_SERVER['REQUEST_METHOD'];
 
-// Получение данных запроса
 $input = json_decode(file_get_contents('php://input'), true) ?? [];
 
-// Получение заголовка авторизации
-$headers = getallheaders();
-$authHeader = $headers['Authorization'] ?? '';
-$token = str_replace('Bearer ', '', $authHeader);
+// Надежное извлечение Bearer-токена
+function getBearerToken() {
+    $authHeader = '';
+    if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+        $authHeader = $_SERVER['HTTP_AUTHORIZATION'];
+    } elseif (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+        $authHeader = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+    } else {
+        $headers = function_exists('getallheaders') ? getallheaders() : [];
+        foreach ($headers as $key => $value) {
+            if (strtolower($key) === 'authorization') {
+                $authHeader = $value;
+                break;
+            }
+        }
+    }
+    if (preg_match('/Bearer\s(\S+)/i', $authHeader, $matches)) {
+        return $matches[1];
+    }
+    return '';
+}
 
-// Функции авторизации
+$token = getBearerToken();
+
 function generateToken($userId) {
     return bin2hex(random_bytes(32)) . '_' . $userId . '_' . time();
 }
@@ -71,6 +85,37 @@ function getUserByToken($pdo, $token) {
 
 // Маршруты API
 switch ($uri) {
+    case 'settings':
+        if ($method === 'GET') {
+            try {
+                $stmt = $pdo->query('SELECT `key`, `value` FROM settings');
+                $settings = [];
+                while ($row = $stmt->fetch()) {
+                    $settings[$row['key']] = $row['value'];
+                }
+                if (!isset($settings['site_title'])) {
+                    $settings['site_title'] = 'Алабуга - форум 2025';
+                }
+                echo json_encode($settings);
+            } catch (Exception $e) {
+                echo json_encode(['site_title' => 'Алабуга - форум 2025']);
+            }
+        } elseif ($method === 'POST') {
+            $user = getUserByToken($pdo, $token);
+            if (!$user || strtolower(trim($user['role'] ?? '')) !== 'admin') {
+                http_response_code(403);
+                echo json_encode(['error' => 'Недостаточно прав']);
+                break;
+            }
+            $siteTitle = trim($input['site_title'] ?? '');
+            if (!empty($siteTitle)) {
+                $stmt = $pdo->prepare('INSERT INTO settings (`key`, `value`) VALUES ("site_title", ?) ON DUPLICATE KEY UPDATE `value` = ?');
+                $stmt->execute([$siteTitle, $siteTitle]);
+            }
+            echo json_encode(['success' => true]);
+        }
+        break;
+
     case 'register':
         if ($method === 'POST') {
             $name = $input['name'] ?? '';

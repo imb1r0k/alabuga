@@ -1,8 +1,10 @@
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useSettings } from '../contexts/SettingsContext';
 
 export const Header = () => {
   const { user, logout, isAuthenticated, isAdmin, isModerator } = useAuth();
+  const { siteTitle } = useSettings();
 
   const handleLogout = async () => {
     try {
@@ -33,7 +35,7 @@ export const Header = () => {
           color: '#dc3545',
           textDecoration: 'none'
         }}>
-          Алабуга - форум 2025
+          {siteTitle}
         </Link>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>

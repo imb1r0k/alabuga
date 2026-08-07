@@ -1,6 +1,5 @@
 import axios from 'axios';
 
-// Используем относительный путь /api для проксирования через Vite
 const API_URL = '/api';
 
 export const api = axios.create({
@@ -26,17 +25,21 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('token');
-      window.location.href = '/auth';
     }
     return Promise.reject(error);
   }
 );
 
-export const getForumYear = async () => {
+export const getSettings = async () => {
   try {
-    const response = await api.get('/forum-year');
+    const response = await api.get('/settings');
     return response.data;
   } catch (error) {
-    return null;
+    return { site_title: 'Алабуга - форум 2025' };
   }
+};
+
+export const updateSettings = async (siteTitle: string) => {
+  const response = await api.post('/settings', { site_title: siteTitle });
+  return response.data;
 };

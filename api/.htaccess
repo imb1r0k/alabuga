@@ -1,17 +1,10 @@
-# Включаем движок перезаписи
 RewriteEngine On
 
-# Все запросы к API направляем на index.php
+# Передача заголовка Authorization в PHP
+SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+RewriteCond %{HTTP:Authorization} ^(.*)
+RewriteRule .* - [e=HTTP_AUTHORIZATION:%1]
+
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^(.*)$ index.php [QSA,L]
-
-# Запрет доступа к файлам конфигурации
-<FilesMatch "\.(ini|log|sql)$">
-    Order allow,deny
-    Deny from all
-</FilesMatch>
-
-# Включаем отображение ошибок PHP (для отладки)
-php_flag display_errors on
-php_value error_reporting E_ALL
+RewriteRule ^ index.php [QSA,L]

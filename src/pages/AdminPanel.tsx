@@ -1,7 +1,18 @@
+import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useSettings } from '../contexts/SettingsContext';
 
 export const AdminPanel = () => {
-  const { user, isAuthenticated, isAdmin, isModerator } = useAuth();
+  const { user, isAuthenticated, isAdmin } = useAuth();
+  const { siteTitle, updateSiteTitle } = useSettings();
+
+  const [titleInput, setTitleInput] = useState(siteTitle);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    setTitleInput(siteTitle);
+  }, [siteTitle]);
 
   if (!isAuthenticated) {
     return (
@@ -23,6 +34,20 @@ export const AdminPanel = () => {
       </div>
     );
   }
+
+  const handleSaveTitle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setMessage('');
+    try {
+      await updateSiteTitle(titleInput);
+      setMessage('Название сайта успешно обновлено!');
+    } catch (err: any) {
+      setMessage('Ошибка при сохранении: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="container" style={{ paddingTop: '40px' }}>
@@ -48,12 +73,44 @@ export const AdminPanel = () => {
           </div>
         </div>
 
-        <div style={{ borderTop: '1px solid #eee', marginTop: '24px', paddingTop: '24px' }}>
-          <h3 style={{ marginBottom: '12px', color: '#333' }}>Доступные инструменты</h3>
-          <p style={{ color: '#666' }}>
-            Здесь будут отображаться инструменты администрирования.
-          </p>
-        </div>
+        {isAdmin && (
+          <div style={{ borderTop: '1px solid #eee', marginTop: '24px', paddingTop: '24px' }}>
+            <h3 style={{ marginBottom: '16px', color: '#333' }}>Настройки сайта</h3>
+            
+            {message && (
+              <div style={{
+                padding: '10px 15px',
+                borderRadius: '4px',
+                marginBottom: '16px',
+                backgroundColor: message.includes('Ошибка') ? '#f8d7da' : '#d4edda',
+                color: message.includes('Ошибка') ? '#721c24' : '#155724'
+              }}>
+                {message}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveTitle}>
+              <div className="input-group">
+                <label htmlFor="siteTitle">Название сайта (хранится в БД)</label>
+                <input
+                  id="siteTitle"
+                  type="text"
+                  value={titleInput}
+                  onChange={(e) => setTitleInput(e.target.value)}
+                  required
+                  disabled={saving}
+                />
+              </div>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={saving}
+              >
+                {saving ? 'Сохранение...' : 'Сохранить название'}
+              </button>
+            </form>
+          </div>
+        )}
       </div>
     </div>
   );
