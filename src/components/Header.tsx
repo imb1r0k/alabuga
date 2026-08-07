@@ -52,38 +52,36 @@ export const Header: React.FC = () => {
       boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
     }}>
       <div style={{
-        maxWidth: '1280px',
-        margin: '0 auto',
-        padding: '0 16px',
-        height: '64px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: '16px'
-      }}>
-        
-        {/* Логотип */}
-                <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fff', textDecoration: 'none', fontWeight: 'bold', fontSize: '18px' }}>
-                  <div style={{
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '8px',
-                    backgroundColor: '#0284c7',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#fff',
-                    fontSize: '14px',
-                    fontWeight: 800,
-                    boxShadow: '0 4px 12px rgba(2, 132, 199, 0.3)'
-                  }}>
-                    A
-                  </div>
-                  <span style={{ letterSpacing: '0.5px' }}>{siteTitle}</span>
-                </Link>
-
-        {/* Навигация ПК */}
-        <nav className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: '4px', overflowX: 'auto' }}>
+              maxWidth: '1280px',
+              margin: '0 auto',
+              padding: '0 16px',
+              height: '64px',
+              display: 'flex',
+              alignItems: 'center',
+            }}>
+              
+              {/* Логотип */}
+              <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fff', textDecoration: 'none', fontWeight: 'bold', fontSize: '18px', marginRight: 'auto' }}>
+                <div style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '8px',
+                  backgroundColor: '#0284c7',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#fff',
+                  fontSize: '14px',
+                  fontWeight: 800,
+                  boxShadow: '0 4px 12px rgba(2, 132, 199, 0.3)'
+                }}>
+                  A
+                </div>
+                <span style={{ letterSpacing: '0.5px' }}>{siteTitle}</span>
+              </Link>
+      
+              {/* Навигация ПК */}
+              <nav className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', flexShrink: 0 }}>
           <NavLink to="/" end style={navLinkStyle}>
             <Home size={16} />
             <span>Главная</span>
@@ -97,7 +95,7 @@ export const Header: React.FC = () => {
           )}
 
           {(isAdmin || isModerator) && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', paddingLeft: '8px', marginLeft: '8px', borderLeft: '1px solid #1e293b' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '6px', borderLeft: '1px solid #334155' }}>
               <NavLink to="/admin-panel" end style={navLinkStyle}>
                 <ShieldCheck size={16} />
                 <span>Панель</span>
@@ -127,7 +125,7 @@ export const Header: React.FC = () => {
         </nav>
 
         {/* Блок аккаунта ПК */}
-        <div className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: '12px', marginLeft: '16px' }}>
           {isAuthenticated ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', backgroundColor: '#1e293b', padding: '6px 12px', borderRadius: '20px', border: '1px solid #334155' }}>
               <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#0284c7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold' }}>
