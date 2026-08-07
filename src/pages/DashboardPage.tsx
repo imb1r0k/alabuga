@@ -1,7 +1,7 @@
 import { useAuth } from '../contexts/AuthContext';
 
 export const DashboardPage = () => {
-  const { user, isAuthenticated, isAdmin, isModerator } = useAuth();
+  const { user, isAuthenticated } = useAuth();
 
   if (!isAuthenticated) {
     return (
