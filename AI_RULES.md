@@ -1,19 +1,50 @@
-# Tech Stack
+# AI_RULES.md
 
-- You are building a React application.
-- Use TypeScript.
-- Use React Router. KEEP the routes in src/App.tsx
-- Always put source code in the src folder.
-- Put pages into src/pages/
-- Put components into src/components/
-- The main page (default page) is src/pages/Index.tsx
-- UPDATE the main page to include the new components. OTHERWISE, the user can NOT see any components!
-- ALWAYS try to use the shadcn/ui library.
-- Tailwind CSS: always use Tailwind CSS for styling components. Utilize Tailwind classes extensively for layout, spacing, colors, and other design aspects.
+## Основные правила
 
-Available packages and libraries:
+- **Язык общения:** Отвечай мне строго на русском языке. Все комментарии в коде и пояснения пиши на русском.
+- **Технический стек:** Мы разрабатываем React-приложение на TypeScript. Используем React Router для маршрутизации.
+- **Структура проекта:**
+  - Все исходники в папке `src/`.
+  - Страницы (`pages`) лежат в `src/pages/`. Главная страница (по умолчанию) — `src/pages/Index.tsx`.
+  - Компоненты (`components`) лежат в `src/components/`.
+  - Контексты (`contexts`) лежат в `src/contexts/`.
+  - Сервисы (`services`) лежат в `src/services/`.
 
-- The lucide-react package is installed for icons.
-- You ALREADY have ALL the shadcn/ui components and their dependencies installed. So you don't need to install them again.
-- You have ALL the necessary Radix UI components installed.
-- Use prebuilt components from the shadcn/ui library after importing them. Note that these files shouldn't be edited, so make new components if you need to change them.
+## Стилизация и UI
+
+- **Стилизация:** Мы используем **Tailwind CSS**. Всегда применяй Tailwind-классы для стилизации компонентов, верстки, отступов, цветов и т.д.
+- **Библиотека компонентов:** У нас установлена и настроена библиотека **shadcn/ui**. Все её компоненты уже импортированы и готовы к использованию. Не нужно их переустанавливать.
+- **Иконки:** Для иконок используй библиотеку `lucide-react`.
+- **Единый стиль:** Все компоненты должны быть выполнены в едином стиле, используя цветовую схему и компоненты из shadcn/ui.
+
+## Особенности работы с кодом
+
+- **Маршрутизация:** Все маршруты должны быть определены в `src/App.tsx`.
+- **Обновление главной страницы:** При добавлении новых компонентов или функционала ОБЯЗАТЕЛЬНО обновляй главную страницу (`src/pages/Index.tsx`), иначе пользователь не увидит изменений!
+- **Использование существующих компонентов:** Не редактируй файлы компонентов shadcn/ui напрямую. Если нужно их изменить — создавай новые компоненты-обертки.
+
+## Бэкенд и API
+
+- **Бэкенд:** Мы используем PHP-бэкенд с базой данных MySQL.
+- **API-запросы:** Все запросы к API выполняются через `src/services/api.ts`.
+- **URL API:** Для разработки используется прокси Vite, поэтому в коде используй относительный путь `/api`.
+- **CORS:** Все CORS-заголовки настраиваются на стороне бэкенда (в PHP).
+- **Структура API:** Бэкенд состоит из одного файла `api/index.php`, который обрабатывает все маршруты.
+
+## Команды и процесс
+
+- **Запуск проекта:** `npm run dev`
+- **Сборка проекта:** `npm run build`
+- **Формат кода:** Используй единый стиль форматирования (ESLint + Prettier, если настроены).
+
+## Требования к ответам
+
+- Всегда давай полные и рабочие фрагменты кода.
+- Поясняй изменения, которые ты вносишь, особенно если они касаются архитектуры.
+- Если нужно создать новый файл — указывай его полный путь.
+- Предлагай решения, которые соответствуют нашему текущему стеку (React, TypeScript, Tailwind, shadcn/ui).
+- Никогда не используй Моковые данные и заглушки.
+---
+
+**Теперь ты готов помогать мне с разработкой, соблюдая все эти правила!**
