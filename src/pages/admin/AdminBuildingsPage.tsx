@@ -104,7 +104,6 @@ export const AdminBuildingsPage: React.FC = () => {
   const [buildingsLoading, setBuildingsLoading] = useState(false);
   const [savingBuilding, setSavingBuilding] = useState(false);
   const [savingLayout, setSavingLayout] = useState(false);
-  const [savingRoom, setSavingRoom] = useState(false);
   
   // Добавление корпуса
   const [newBuildingName, setNewBuildingName] = useState('');
@@ -1417,7 +1416,7 @@ export const AdminBuildingsPage: React.FC = () => {
                             </div>
 
                             <div style={{ gridColumn: '1 / -1', marginTop: '10px', display: 'flex', gap: '10px' }}>
-                              <button type="submit" className="btn btn-primary" disabled={savingRoom} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 <SquareCheck size={16} /> Применить
                               </button>
 
