@@ -1,10 +1,11 @@
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
+import { Skeleton } from './Skeleton';
 
 export const Header = () => {
   const { user, logout, isAuthenticated, isAdmin, isModerator } = useAuth();
-  const { siteTitle } = useSettings();
+  const { siteTitle, loading: settingsLoading } = useSettings();
 
   const handleLogout = async () => {
     try {
@@ -29,14 +30,21 @@ export const Header = () => {
         alignItems: 'center',
         width: '100%'
       }}>
-        <Link to="/" style={{
-          fontSize: '24px',
-          fontWeight: 'bold',
-          color: '#dc3545',
-          textDecoration: 'none'
-        }}>
-          {siteTitle}
-        </Link>
+        {/* Site title with skeleton loader */}
+        <div style={{ minWidth: '150px' }}>
+          {settingsLoading ? (
+            <Skeleton width={180} height={24} rounded={true} className="inline-block" />
+          ) : (
+            <Link to="/" style={{
+              fontSize: '24px',
+              fontWeight: 'bold',
+              color: '#dc3545',
+              textDecoration: 'none'
+            }}>
+              {siteTitle}
+            </Link>
+          )}
+        </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {isAuthenticated ? (

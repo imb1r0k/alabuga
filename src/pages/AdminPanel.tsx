@@ -1,18 +1,22 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
+import { Skeleton } from '../components/Skeleton';
 
 export const AdminPanel = () => {
-  const { user, isAuthenticated, isAdmin } = useAuth();
-  const { siteTitle, updateSiteTitle } = useSettings();
+  const { user, isAuthenticated, isAdmin, loading: authLoading } = useAuth();
+  const { siteTitle, loading: settingsLoading, updateSiteTitle } = useSettings();
 
   const [titleInput, setTitleInput] = useState(siteTitle);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
+  // Initialize titleInput when settings load
   useEffect(() => {
-    setTitleInput(siteTitle);
-  }, [siteTitle]);
+    if (!settingsLoading) {
+      setTitleInput(siteTitle);
+    }
+  }, [siteTitle, settingsLoading]);
 
   if (!isAuthenticated) {
     return (
@@ -30,6 +34,60 @@ export const AdminPanel = () => {
           <p style={{ color: '#666', textAlign: 'center' }}>
             Для доступа к админ-панели необходимо войти в систему.
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show skeletons while loading auth or settings data
+  if (authLoading || settingsLoading) {
+    return (
+      <div className="container" style={{ paddingTop: '40px' }}>
+        <div className="card" style={{ minHeight: '400px' }}>
+          <div style={{ padding: '24px' }}>
+            {/* Admin header with skeletons */}
+            <div style={{ marginBottom: '24px' }}>
+              <h1 style={{ fontSize: '28px', marginBottom: '16px', color: '#333', visibility: 'hidden' }}>
+                Админ-панель
+              </h1>
+              
+              <div style={{ borderTop: '1px solid #eee', paddingTop: '24px', visibility: 'hidden' }}>
+                <div style={{ marginBottom: '16px' }}>
+                  <Skeleton width={80} height={16} className="mb-2" />
+                  <Skeleton width={150} height={16} />
+                </div>
+                
+                <div style={{ marginBottom: '16px' }}>
+                  <Skeleton width={80} height={16} className="mb-2" />
+                  <Skeleton width={150} height={16} />
+                </div>
+                
+                <div>
+                  <Skeleton width={80} height={16} className="mb-2" />
+                  <Skeleton width={100} height={16} />
+                </div>
+              </div>
+            </div>
+
+            {/* Settings section skeleton */}
+            <div style={{ borderTop: '1px solid #eee', marginTop: '24px', paddingTop: '24px', visibility: 'hidden' }}>
+              <h3 style={{ marginBottom: '16px', color: '#333', visibility: 'hidden' }}>
+                Настройки сайта
+              </h3>
+              
+              <div style={{ marginBottom: '16px' }}>
+                <Skeleton width={180} height={20} className="mb-2" />
+                <Skeleton width={300} height={20} />
+              </div>
+              
+              <button
+                className="btn btn-primary"
+                style={{ opacity: '0.5' }}
+              >
+                Сохранить название
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );

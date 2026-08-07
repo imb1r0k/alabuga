@@ -1,7 +1,8 @@
 import { useAuth } from '../contexts/AuthContext';
+import { Skeleton } from '../components/Skeleton';
 
 export const DashboardPage = () => {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading } = useAuth();
 
   if (!isAuthenticated) {
     return (
@@ -19,6 +20,47 @@ export const DashboardPage = () => {
           <p style={{ color: '#666', textAlign: 'center' }}>
             Для доступа к личному кабинету необходимо войти в систему.
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show skeleton while loading user data
+  if (loading) {
+    return (
+      <div className="container" style={{ paddingTop: '40px' }}>
+        <div className="card" style={{ minHeight: '300px' }}>
+          <div style={{ padding: '24px' }}>
+            <h1 style={{ fontSize: '28px', marginBottom: '24px', color: '#333', visibility: 'hidden' }}>
+              Личный кабинет
+            </h1>
+            
+            <div style={{ borderTop: '1px solid #eee', paddingTop: '24px', visibility: 'hidden' }}>
+              <div style={{ marginBottom: '16px', visibility: 'hidden' }}>
+                <Skeleton width={80} height={16} className="mb-2" />
+                <Skeleton width={200} height={16} />
+              </div>
+              
+              <div style={{ marginBottom: '16px', visibility: 'hidden' }}>
+                <Skeleton width={80} height={16} className="mb-2" />
+                <Skeleton width={250} height={16} />
+              </div>
+              
+              <div style={{ visibility: 'hidden' }}>
+                <Skeleton width={120} height={16} className="mb-2" />
+                <Skeleton width={100} height={16} />
+              </div>
+            </div>
+
+            <div style={{ borderTop: '1px solid #eee', marginTop: '24px', paddingTop: '24px', visibility: 'hidden' }}>
+              <h3 style={{ marginBottom: '12px', color: '#333', visibility: 'hidden' }}>
+                Ваша информация
+              </h3>
+              <p style={{ color: '#666', visibility: 'hidden' }}>
+                Здесь будет отображаться информация о вашем аккаунте и активности.
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     );
