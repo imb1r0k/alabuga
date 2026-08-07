@@ -13,7 +13,7 @@ export const AuthPage = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [regSuccess, setRegSuccess] = useState<any>(null);
-  const [customLogin, setCustomLogin] = useState(''); // новое поле для логина при регистрации
+  const [customLogin, setCustomLogin] = useState('');
   
   const { login, register } = useAuth();
   const navigate = useNavigate();
@@ -76,7 +76,6 @@ export const AuthPage = () => {
           setLoading(false);
           return;
         }
-        // Передаём пользовательский логин (может быть пустой — тогда сервер сгенерирует сам)
         const userData = await register(lastName, firstName, phone, password, customLogin);
         setRegSuccess(userData);
       }
@@ -133,7 +132,7 @@ export const AuthPage = () => {
             </button>
           </div>
         ) : (
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} autoComplete="off">
             {isLogin ? (
               <>
                 <div className="input-group">
@@ -141,10 +140,12 @@ export const AuthPage = () => {
                   <input
                     id="loginInput"
                     type="text"
+                    name="username"
                     value={loginInput}
                     onChange={(e) => setLoginInput(e.target.value)}
                     disabled={loading}
                     placeholder="Введите логин или номер телефона"
+                    autoComplete="username"
                   />
                 </div>
 
@@ -153,10 +154,12 @@ export const AuthPage = () => {
                   <input
                     id="password"
                     type="password"
+                    name="current-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
                     disabled={loading}
+                    autoComplete="current-password"
                   />
                 </div>
               </>
@@ -167,10 +170,12 @@ export const AuthPage = () => {
                   <input
                     id="lastName"
                     type="text"
+                    name="family-name"
                     value={lastName}
                     onChange={(e) => setLastName(e.target.value)}
                     required
                     disabled={loading}
+                    autoComplete="family-name"
                   />
                 </div>
 
@@ -179,10 +184,12 @@ export const AuthPage = () => {
                   <input
                     id="firstName"
                     type="text"
+                    name="given-name"
                     value={firstName}
                     onChange={(e) => setFirstName(e.target.value)}
                     required
                     disabled={loading}
+                    autoComplete="given-name"
                   />
                 </div>
 
@@ -191,24 +198,27 @@ export const AuthPage = () => {
                   <input
                     id="phone"
                     type="tel"
+                    name="tel"
                     value={phone}
                     onChange={handlePhoneChange}
                     placeholder="+7 (___) ___-__-__"
                     required
                     disabled={loading}
+                    autoComplete="tel"
                   />
                 </div>
 
-                {/* Новое поле — необязательный логин */}
                 <div className="input-group">
                   <label htmlFor="customLogin">Логин (необязательно)</label>
                   <input
                     id="customLogin"
                     type="text"
+                    name="nickname"
                     value={customLogin}
                     onChange={(e) => setCustomLogin(e.target.value)}
                     disabled={loading}
                     placeholder="Оставьте пустым — будет сгенерирован автоматически"
+                    autoComplete="nickname"
                   />
                   <p style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>
                     Если не указать, система сама создаст логин на основе номера телефона
@@ -220,11 +230,13 @@ export const AuthPage = () => {
                   <input
                     id="password"
                     type="password"
+                    name="new-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
                     minLength={6}
                     disabled={loading}
+                    autoComplete="new-password"
                   />
                 </div>
 
@@ -233,11 +245,13 @@ export const AuthPage = () => {
                   <input
                     id="passwordConfirm"
                     type="password"
+                    name="new-password-confirm"
                     value={passwordConfirm}
                     onChange={(e) => setPasswordConfirm(e.target.value)}
                     required
                     minLength={6}
                     disabled={loading}
+                    autoComplete="new-password"
                   />
                 </div>
               </>
