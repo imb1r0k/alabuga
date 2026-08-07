@@ -56,9 +56,10 @@ export const AdminLayout: React.FC<{ children?: React.ReactNode }> = ({ children
   ];
 
   return (
-    <div style={{ display: 'flex', minHeight: 'calc(100vh - 64px)', backgroundColor: '#f4f6f9' }}>
+    <div className="admin-layout" style={{ display: 'flex', minHeight: 'calc(100vh - 64px)', backgroundColor: '#f4f6f9' }}>
       {/* Боковая навигация слева */}
       <aside
+        className="admin-sidebar"
         style={{
           width: collapsed ? '68px' : '230px',
           backgroundColor: '#1e293b',
@@ -69,7 +70,10 @@ export const AdminLayout: React.FC<{ children?: React.ReactNode }> = ({ children
           justifyContent: 'space-between',
           zIndex: 100,
           borderRight: '1px solid #0f172a',
-          flexShrink: 0
+          flexShrink: 0,
+          position: 'sticky',
+          top: 0,
+          height: '100vh',
         }}
       >
         <div>
@@ -147,7 +151,7 @@ export const AdminLayout: React.FC<{ children?: React.ReactNode }> = ({ children
       </aside>
 
       {/* Основное содержимое */}
-      <main style={{ flex: 1, overflowX: 'auto', padding: '0', display: 'flex', flexDirection: 'column' }}>
+      <main className="admin-content" style={{ flex: 1, overflowX: 'auto', padding: '0', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <div style={{ flex: 1, padding: '20px' }}>
           {children || <Outlet />}
         </div>

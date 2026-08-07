@@ -116,3 +116,116 @@ body {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
+
+/* ===== Адаптивность ===== */
+
+/* Для планшетов и мобильных */
+@media (max-width: 992px) {
+  /* Сетка админки корпусов: делаем сайдбар сверху */
+  .admin-buildings-grid {
+    grid-template-columns: 1fr !important;
+    grid-template-areas: "sidebar" "main" !important;
+  }
+  .admin-buildings-sidebar {
+    max-height: none !important;
+  }
+  
+  /* Админ-лейаут: делаем сайдбар компактным */
+  .admin-layout {
+    flex-direction: column !important;
+  }
+  .admin-sidebar {
+    width: 100% !important;
+    height: auto !important;
+    position: static !important;
+    flex-direction: row !important;
+    align-items: center;
+    overflow-x: auto;
+    border-right: none !important;
+    border-bottom: 1px solid #0f172a;
+    min-height: auto;
+  }
+  .admin-sidebar > div:first-child {
+    display: flex;
+    align-items: center;
+    flex: 1;
+  }
+  .admin-sidebar nav {
+    display: flex;
+    flex-direction: row !important;
+    gap: 4px;
+    padding: 8px !important;
+    overflow-x: auto;
+  }
+  .admin-sidebar nav a {
+    padding: 8px 12px !important;
+    font-size: 13px !important;
+    white-space: nowrap;
+  }
+  .admin-sidebar nav a span {
+    display: inline !important;
+  }
+  .admin-sidebar > div:last-child {
+    display: none;
+  }
+  .admin-content {
+    padding: 0 !important;
+  }
+  .admin-content > div {
+    padding: 16px !important;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Поворачиваем макет этажа на 90° для мобильных */
+  .floor-layout-container {
+    width: 100%;
+    height: 400px; /* Примерная высота */
+    overflow: auto;
+    position: relative;
+  }
+  
+  .floor-layout {
+    transform: rotate(90deg);
+    transform-origin: top left;
+    width: calc(100vh - 20px); /* Используем высоту экрана для ширины */
+    height: auto;
+    margin-top: 20px;
+  }
+  
+  body {
+    overflow-x: hidden;
+  }
+  
+  table {
+    font-size: 13px;
+  }
+  
+  .admin-buildings-main {
+    padding: 12px !important;
+  }
+  
+  .admin-buildings-sidebar {
+    padding: 12px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .admin-buildings-grid {
+    gap: 12px !important;
+  }
+  
+  .btn {
+    padding: 8px 12px;
+    font-size: 14px;
+  }
+  
+  .admin-buildings-main h2 {
+    font-size: 18px !important;
+  }
+  
+  .admin-buildings-main .btn {
+    font-size: 12px;
+    padding: 6px 10px;
+  }
+}

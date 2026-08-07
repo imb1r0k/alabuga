@@ -39,7 +39,9 @@ import {
   Users,
   AlertTriangle,
   Save,
-  RotateCcw
+  RotateCcw,
+  Hash,
+  Pencil
 } from 'lucide-react';
 
 type TileType = 'room' | 'elevator' | 'stairs' | 'tech' | 'gen-start' | 'gen-turn' | 'gen-end';
@@ -67,37 +69,14 @@ const GEN_TEMPLATES: TileTemplate[] = [
   { type: 'gen-end', title: 'Конец генерации', icon: Square, bg: '#f8d7da', borderColor: '#dc3545', textColor: '#842029' },
 ];
 
-// Вспомогательный круглый значок пола
 const GenderBadge: React.FC<{ gender?: string; size?: number }> = ({ gender = 'MIXED', size = 20 }) => {
   let label = 'С';
   let bg = '#8b5cf6';
-
-  if (gender === 'M') {
-    label = 'М';
-    bg = '#0284c7';
-  } else if (gender === 'F') {
-    label = 'Ж';
-    bg = '#e11d48';
-  }
-
+  if (gender === 'M') { label = 'М'; bg = '#0284c7'; }
+  else if (gender === 'F') { label = 'Ж'; bg = '#e11d48'; }
   return (
-    <span
-      title={`Пол: ${gender === 'M' ? 'Мужской' : gender === 'F' ? 'Женский' : 'Смешанный'}`}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: `${size}px`,
-        height: `${size}px`,
-        borderRadius: '50%',
-        backgroundColor: bg,
-        color: '#ffffff',
-        fontSize: `${Math.round(size * 0.55)}px`,
-        fontWeight: 'bold',
-        lineHeight: 1,
-        flexShrink: 0
-      }}
-    >
+    <span title={`Пол: ${gender === 'M' ? 'Мужской' : gender === 'F' ? 'Женский' : 'Смешанный'}`}
+      style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: `${size}px`, height: `${size}px`, borderRadius: '50%', backgroundColor: bg, color: '#fff', fontSize: `${Math.round(size*0.55)}px`, fontWeight: 'bold', lineHeight: 1, flexShrink: 0 }}>
       {label}
     </span>
   );
@@ -298,7 +277,6 @@ export const AdminBuildingsPage: React.FC = () => {
     setStartNumMode('default');
     setCustomStartRoomNum('');
     setNewFloorOrderType('clockwise');
-    setShowAddFloorModal(false);
     setShowAddFloorModal(true);
   };
 
@@ -675,10 +653,10 @@ export const AdminBuildingsPage: React.FC = () => {
         {buildingsLoading ? (
           <Skeleton width="100%" height={250} />
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: '290px 1fr', gap: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '290px 1fr', gap: '20px', gridTemplateAreas: '"sidebar main"' }} className="admin-buildings-grid">
             
             {/* Сайдбар выбора и создания корпуса */}
-            <div style={{ backgroundColor: '#fff', padding: '16px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+            <div style={{ backgroundColor: '#fff', padding: '16px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', gridArea: 'sidebar' }} className="admin-buildings-sidebar">
               <h4 style={{ fontSize: '16px', marginBottom: '14px', color: '#1e293b' }}>Список корпусов</h4>
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
@@ -773,26 +751,25 @@ export const AdminBuildingsPage: React.FC = () => {
             </div>
 
             {/* Основной редактор этажей */}
-            <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+            <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', gridArea: 'main' }} className="admin-buildings-main">
               {selectedBuilding ? (
                 <div>
                   {/* Шапка корпуса */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                       <GenderBadge gender={selectedBuilding.gender} size={28} />
                       <h2 style={{ fontSize: '20px', color: '#0f172a', margin: 0 }}>{selectedBuilding.name}</h2>
                       {(() => {
                         const bStats = getBuildingStats(selectedBuilding.id);
                         return (
                           <span style={{ fontSize: '12px', padding: '3px 10px', borderRadius: '12px', backgroundColor: '#f1f5f9', color: '#475569', fontWeight: 600 }}>
-                            Количество занятых мест всего в корпусе: {bStats.booked} / {bStats.total} мест
+                            Занято: {bStats.booked} / {bStats.total} мест
                           </span>
                         );
                       })()}
                     </div>
 
-                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                      {/* Сохранение изменений макета */}
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                       {hasUnsavedChanges && (
                         <div style={{ display: 'flex', gap: '6px' }}>
                           <button
@@ -824,7 +801,6 @@ export const AdminBuildingsPage: React.FC = () => {
                         </div>
                       )}
 
-                      {/* Кнопка режима редактирования */}
                       <button
                         onClick={() => {
                           setIsEditLayout(!isEditLayout);
@@ -842,7 +818,7 @@ export const AdminBuildingsPage: React.FC = () => {
                         }}
                       >
                         {isEditLayout ? <Eye size={16} /> : <Edit3 size={16} />}
-                        {isEditLayout ? 'Режим просмотра' : '✏️ Редактировать макет'}
+                        {isEditLayout ? 'Просмотр' : '✏️ Редактировать'}
                       </button>
 
                       {isEditLayout && (
@@ -868,7 +844,7 @@ export const AdminBuildingsPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Список этажей с цифрами занятых/всего мест */}
+                  {/* Список этажей */}
                   <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
                     {floors.map((f) => {
                       const effectiveFloorGender = getEffectiveGender(f.gender, selectedBuilding.gender);
@@ -952,7 +928,7 @@ export const AdminBuildingsPage: React.FC = () => {
                           </div>
 
                           <div>
-                            <label style={{ marginRight: '6px', fontWeight: 500, color: '#475569' }}>Начальный № комнат:</label>
+                            <label style={{ marginRight: '6px', fontWeight: 500, color: '#475569' }}>Нач. №:</label>
                             <input
                               type="number"
                               placeholder="Авто"
@@ -963,38 +939,38 @@ export const AdminBuildingsPage: React.FC = () => {
                           </div>
 
                           <div>
-                            <label style={{ marginRight: '6px', fontWeight: 500, color: '#475569' }}>Порядок комнат:</label>
+                            <label style={{ marginRight: '6px', fontWeight: 500, color: '#475569' }}>Порядок:</label>
                             <select
                               value={selectedFloor.room_order_type || 'clockwise'}
                               onChange={(e) => handleUpdateFloorOrderType(e.target.value as any)}
                               style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
                             >
                               <option value="clockwise">По часовой</option>
-                              <option value="column_wise">Сверху вниз (по столбцам)</option>
+                              <option value="column_wise">Сверху вниз</option>
                             </select>
                           </div>
 
                           <div>
-                            <label style={{ marginRight: '6px', fontWeight: 500, color: '#475569' }}>Пол этажа:</label>
+                            <label style={{ marginRight: '6px', fontWeight: 500, color: '#475569' }}>Пол:</label>
                             <select
                               value={selectedFloor.gender || 'DEFAULT'}
                               onChange={(e) => handleUpdateFloorGender(e.target.value)}
                               style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
                             >
-                              <option value="DEFAULT">От корпуса ({selectedBuilding.gender === 'M' ? 'Муж' : selectedBuilding.gender === 'F' ? 'Жен' : 'Смеш'})</option>
-                              <option value="MIXED">Смешанный (С)</option>
-                              <option value="M">Мужской (М)</option>
-                              <option value="F">Женский (Ж)</option>
+                              <option value="DEFAULT">От корпуса</option>
+                              <option value="MIXED">Смешанный</option>
+                              <option value="M">Мужской</option>
+                              <option value="F">Женский</option>
                             </select>
                           </div>
                         </div>
                       )}
 
-                      {/* Палитра плиток в режиме редактирования */}
+                      {/* Палитра плиток */}
                       {isEditLayout && (
                         <div style={{ marginBottom: '16px' }}>
                           <div style={{ fontSize: '13px', fontWeight: 600, color: '#475569', marginBottom: '8px' }}>
-                            {genMode ? 'Маркеры автогенерации (перетащите на сетку или кликните):' : 'Заготовки помещений (Drag & Drop или клик):'}
+                            {genMode ? 'Маркеры автогенерации:' : 'Заготовки помещений (Drag & Drop):'}
                           </div>
                           
                           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1032,7 +1008,7 @@ export const AdminBuildingsPage: React.FC = () => {
 
                             {genMode && (selectedTool === 'gen-start' || selectedTool === 'gen-turn') && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '12px', padding: '4px 10px', backgroundColor: '#f3e8ff', borderRadius: '6px', border: '1px solid #c084fc' }}>
-                                <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b21a8' }}>Направление плитки:</span>
+                                <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b21a8' }}>Направление:</span>
                                 {([
                                   { dir: 'right', icon: ArrowRight },
                                   { dir: 'down', icon: ArrowDown },
@@ -1069,19 +1045,19 @@ export const AdminBuildingsPage: React.FC = () => {
                           </h4>
                           <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
                             <div>
-                              <label style={{ fontSize: '12px', fontWeight: 600, marginRight: '6px' }}>Начальная квартира:</label>
+                              <label style={{ fontSize: '12px', fontWeight: 600, marginRight: '6px' }}>Нач. кв.:</label>
                               <input type="number" value={genFrom} onChange={(e) => setGenFrom(Number(e.target.value))} style={{ width: '80px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #8b5cf6' }} />
                             </div>
                             <div>
-                              <label style={{ fontSize: '12px', fontWeight: 600, marginRight: '6px' }}>Конечная квартира:</label>
+                              <label style={{ fontSize: '12px', fontWeight: 600, marginRight: '6px' }}>Кон. кв.:</label>
                               <input type="number" value={genTo} onChange={(e) => setGenTo(Number(e.target.value))} style={{ width: '80px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #8b5cf6' }} />
                             </div>
                             <div>
-                              <label style={{ fontSize: '12px', fontWeight: 600, marginRight: '6px' }}>Мест в комнате:</label>
+                              <label style={{ fontSize: '12px', fontWeight: 600, marginRight: '6px' }}>Мест:</label>
                               <input type="number" value={genSeats} onChange={(e) => setGenSeats(Number(e.target.value))} style={{ width: '60px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #8b5cf6' }} />
                             </div>
                             <button onClick={handleRunGeneration} className="btn btn-primary" style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#7c3aed' }}>
-                              <Play size={16} /> Запустить генерацию
+                              <Play size={16} /> Запустить
                             </button>
                           </div>
                           {genStatusMsg && <div style={{ marginTop: '10px', fontSize: '13px', fontWeight: 600, color: genStatusMsg.includes('Ошибка') ? '#dc2626' : '#15803d' }}>{genStatusMsg}</div>}
@@ -1089,13 +1065,14 @@ export const AdminBuildingsPage: React.FC = () => {
                       )}
 
                       {/* СЕТКА ЭТАЖА */}
-                      <div style={{ overflowX: 'auto', padding: '10px 0' }}>
-                        <div style={{
-                          display: 'grid',
-                          gridTemplateColumns: `repeat(${Number(selectedFloor.width) || 8}, 95px)`,
-                          gap: '8px',
-                          justifyContent: 'start',
-                        }}>
+                      <div style={{ overflowX: 'auto', padding: '10px 0' }} className="floor-layout-container">
+                        <div className="floor-layout"
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: `repeat(${Number(selectedFloor.width) || 8}, 95px)`,
+                            gap: '8px',
+                            justifyContent: 'start',
+                          }}>
                           {/* ВЕРХНИЙ РЯД (y = 0) */}
                           {Array.from({ length: Number(selectedFloor.width) || 8 }).map((_, x) => {
                             const room = localRooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === 0);
@@ -1139,7 +1116,7 @@ export const AdminBuildingsPage: React.FC = () => {
                                           setLocalRooms((prev) => prev.filter((r) => !(Number(r.x_pos) === x && Number(r.y_pos) === 0)));
                                           setHasUnsavedChanges(true);
                                         }}
-                                        title="Удалить помещение"
+                                        title="Удалить"
                                         style={{ border: 'none', background: 'rgba(239, 68, 68, 0.85)', color: '#fff', borderRadius: '50%', width: '15px', height: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
                                       >
                                         <X size={9} />
@@ -1155,11 +1132,10 @@ export const AdminBuildingsPage: React.FC = () => {
 
                                     {room.room_type === 'room' && (
                                       <span style={{ fontSize: '10px', marginTop: '2px', fontWeight: 600, color: bookedCount >= room.capacity ? '#dc2626' : '#16a34a' }}>
-                                        {bookedCount} / {room.capacity} мест
+                                        {bookedCount} / {room.capacity}
                                       </span>
                                     )}
 
-                                    {/* СТРЕЛКИ НАПРАВЛЕНИЯ ДЛЯ ПЛИТОК НАЧАЛА И ПОВОРОТА ГЕНЕРАЦИИ */}
                                     {isEditLayout && (room.room_type === 'gen-start' || room.room_type === 'gen-turn') && (
                                       <div style={{ display: 'flex', gap: '3px', marginTop: '4px', backgroundColor: 'rgba(255,255,255,0.85)', padding: '2px 4px', borderRadius: '4px', zIndex: 10 }}>
                                         {([
@@ -1261,7 +1237,7 @@ export const AdminBuildingsPage: React.FC = () => {
                                           setLocalRooms((prev) => prev.filter((r) => !(Number(r.x_pos) === x && Number(r.y_pos) === 2)));
                                           setHasUnsavedChanges(true);
                                         }}
-                                        title="Удалить помещение"
+                                        title="Удалить"
                                         style={{ border: 'none', background: 'rgba(239, 68, 68, 0.85)', color: '#fff', borderRadius: '50%', width: '15px', height: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
                                       >
                                         <X size={9} />
@@ -1277,11 +1253,10 @@ export const AdminBuildingsPage: React.FC = () => {
 
                                     {room.room_type === 'room' && (
                                       <span style={{ fontSize: '10px', marginTop: '2px', fontWeight: 600, color: bookedCount >= room.capacity ? '#dc2626' : '#16a34a' }}>
-                                        {bookedCount} / {room.capacity} мест
+                                        {bookedCount} / {room.capacity}
                                       </span>
                                     )}
 
-                                    {/* СТРЕЛКИ НАПРАВЛЕНИЯ ДЛЯ ПЛИТОК НАЧАЛА И ПОВОРОТА ГЕНЕРАЦИИ */}
                                     {isEditLayout && (room.room_type === 'gen-start' || room.room_type === 'gen-turn') && (
                                       <div style={{ display: 'flex', gap: '3px', marginTop: '4px', backgroundColor: 'rgba(255,255,255,0.85)', padding: '2px 4px', borderRadius: '4px', zIndex: 10 }}>
                                         {([
@@ -1338,16 +1313,15 @@ export const AdminBuildingsPage: React.FC = () => {
                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                               <GenderBadge gender={getEffectiveGender(selectedRoom.gender, selectedFloor.gender)} size={24} />
                               <h3 style={{ margin: 0, fontSize: '16px', color: '#1e293b' }}>
-                                Информация о комнате {selectedRoom.room_number || selectedRoom.name}
+                                Комната {selectedRoom.room_number || selectedRoom.name}
                               </h3>
                             </div>
                             <button onClick={() => setSelectedRoom(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '18px' }}>✕</button>
                           </div>
 
-                          {/* Секция списка бронирований этой комнаты */}
                           <div style={{ marginBottom: '20px', backgroundColor: '#ffffff', padding: '14px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
                             <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: '#334155', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <Users size={16} /> Бронирования в этой комнате ({roomBookings.length} / {selectedRoom.capacity} мест)
+                              <Users size={16} /> Бронирования ({roomBookings.length} / {selectedRoom.capacity} мест)
                             </h4>
 
                             {roomBookings.length > 0 ? (
@@ -1356,8 +1330,7 @@ export const AdminBuildingsPage: React.FC = () => {
                                   <tr style={{ backgroundColor: '#f1f5f9', textTransform: 'uppercase', fontSize: '11px', color: '#64748b' }}>
                                     <th style={{ padding: '6px', textAlign: 'left' }}>#</th>
                                     <th style={{ padding: '6px', textAlign: 'left' }}>ФИО</th>
-                                    <th style={{ padding: '6px', textAlign: 'left' }}>Телефон</th>
-                                    <th style={{ padding: '6px', textAlign: 'left' }}>Email</th>
+                                    <th style={{ padding: '6px', textAlign: 'left' }}>Тел.</th>
                                     <th style={{ padding: '6px', textAlign: 'left' }}>Статус</th>
                                     <th style={{ padding: '6px', textAlign: 'left' }}>Действие</th>
                                   </tr>
@@ -1368,7 +1341,6 @@ export const AdminBuildingsPage: React.FC = () => {
                                       <td style={{ padding: '6px' }}>#{b.id}</td>
                                       <td style={{ padding: '6px', fontWeight: 600 }}>{b.last_name} {b.first_name || b.user_name}</td>
                                       <td style={{ padding: '6px' }}>{b.user_phone || '-'}</td>
-                                      <td style={{ padding: '6px' }}>{b.user_email}</td>
                                       <td style={{ padding: '6px' }}>
                                         <span style={{
                                           padding: '2px 6px',
@@ -1396,14 +1368,13 @@ export const AdminBuildingsPage: React.FC = () => {
                                 </tbody>
                               </table>
                             ) : (
-                              <p style={{ margin: 0, fontSize: '13px', color: '#94a3b8' }}>На эту комнату нет активных бронирований.</p>
+                              <p style={{ margin: 0, fontSize: '13px', color: '#94a3b8' }}>Нет бронирований.</p>
                             )}
                           </div>
 
-                          {/* Форма редактирования параметров комнаты */}
                           <form onSubmit={handleSaveRoomDetailsLocally} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                             <div className="input-group" style={{ marginBottom: 0 }}>
-                              <label style={{ fontSize: '12px', fontWeight: 600 }}>Номер комнаты</label>
+                              <label style={{ fontSize: '12px', fontWeight: 600 }}>Номер</label>
                               <input
                                 type="text"
                                 value={selectedRoom.room_number}
@@ -1412,7 +1383,7 @@ export const AdminBuildingsPage: React.FC = () => {
                             </div>
 
                             <div className="input-group" style={{ marginBottom: 0 }}>
-                              <label style={{ fontSize: '12px', fontWeight: 600 }}>Название объекта</label>
+                              <label style={{ fontSize: '12px', fontWeight: 600 }}>Название</label>
                               <input
                                 type="text"
                                 value={selectedRoom.name || ''}
@@ -1421,7 +1392,7 @@ export const AdminBuildingsPage: React.FC = () => {
                             </div>
 
                             <div className="input-group" style={{ marginBottom: 0 }}>
-                              <label style={{ fontSize: '12px', fontWeight: 600 }}>Вместимость мест</label>
+                              <label style={{ fontSize: '12px', fontWeight: 600 }}>Вместимость</label>
                               <input
                                 type="number"
                                 min={0}
@@ -1432,22 +1403,22 @@ export const AdminBuildingsPage: React.FC = () => {
                             </div>
 
                             <div className="input-group" style={{ marginBottom: 0 }}>
-                              <label style={{ fontSize: '12px', fontWeight: 600 }}>Пол комнаты</label>
+                              <label style={{ fontSize: '12px', fontWeight: 600 }}>Пол</label>
                               <select
                                 value={selectedRoom.gender || 'DEFAULT'}
                                 onChange={(e) => setSelectedRoom({ ...selectedRoom, gender: e.target.value })}
                                 style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
                               >
-                                <option value="DEFAULT">По умолчанию от этажа/корпуса</option>
-                                <option value="MIXED">Смешанный (С)</option>
-                                <option value="M">Мужской (М)</option>
-                                <option value="F">Женский (Ж)</option>
+                                <option value="DEFAULT">По умолчанию</option>
+                                <option value="MIXED">Смешанный</option>
+                                <option value="M">Мужской</option>
+                                <option value="F">Женский</option>
                               </select>
                             </div>
 
                             <div style={{ gridColumn: '1 / -1', marginTop: '10px', display: 'flex', gap: '10px' }}>
                               <button type="submit" className="btn btn-primary" disabled={savingRoom} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <SquareCheck size={16} /> Применить локально
+                                <SquareCheck size={16} /> Применить
                               </button>
 
                               {isEditLayout && (
@@ -1461,7 +1432,7 @@ export const AdminBuildingsPage: React.FC = () => {
                                   }}
                                   style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                                 >
-                                  <Trash2 size={16} /> Удалить комнату
+                                  <Trash2 size={16} /> Удалить
                                 </button>
                               )}
                             </div>
@@ -1490,9 +1461,10 @@ export const AdminBuildingsPage: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            zIndex: 1000
+            zIndex: 1000,
+            padding: '16px'
           }}>
-            <div style={{ backgroundColor: '#fff', padding: '24px', borderRadius: '8px', maxWidth: '440px', width: '90%', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+            <div style={{ backgroundColor: '#fff', padding: '24px', borderRadius: '8px', maxWidth: '440px', width: '100%', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
               <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', color: '#0f172a' }}>Добавление этажа</h3>
               <form onSubmit={handleCreateFloorSubmit}>
                 <div className="input-group">
@@ -1506,30 +1478,53 @@ export const AdminBuildingsPage: React.FC = () => {
                   />
                 </div>
 
+                {/* Красивый переключатель нумерации */}
                 <div className="input-group">
-                  <label style={{ fontSize: '13px', fontWeight: 600 }}>Нумерация комнат</label>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
-                    <label style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                      <input
-                        type="radio"
-                        name="startNumMode"
-                        checked={startNumMode === 'default'}
-                        onChange={() => setStartNumMode('default')}
-                      />
-                      <span>
-                        Нумерация по умолчанию (с <strong>№{getDefaultNextStartRoomNum()}</strong>)
-                      </span>
-                    </label>
+                  <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '8px' }}>Нумерация комнат</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    {/* Автоматическая нумерация */}
+                    <div
+                      onClick={() => setStartNumMode('default')}
+                      style={{
+                        border: `2px solid ${startNumMode === 'default' ? '#0284c7' : '#cbd5e1'}`,
+                        borderRadius: '10px',
+                        padding: '14px 12px',
+                        cursor: 'pointer',
+                        backgroundColor: startNumMode === 'default' ? '#f0f9ff' : '#fff',
+                        transition: 'all 0.15s ease',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '6px',
+                        textAlign: 'center'
+                      }}
+                    >
+                      <Hash size={24} color={startNumMode === 'default' ? '#0284c7' : '#64748b'} />
+                      <strong style={{ fontSize: '13px', color: '#0f172a' }}>Автоматически</strong>
+                      <span style={{ fontSize: '11px', color: '#64748b' }}>Начнёт с №{getDefaultNextStartRoomNum()}</span>
+                    </div>
 
-                    <label style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                      <input
-                        type="radio"
-                        name="startNumMode"
-                        checked={startNumMode === 'custom'}
-                        onChange={() => setStartNumMode('custom')}
-                      />
-                      <span>Указать номер начала отсчета комнат</span>
-                    </label>
+                    {/* Ручная нумерация */}
+                    <div
+                      onClick={() => setStartNumMode('custom')}
+                      style={{
+                        border: `2px solid ${startNumMode === 'custom' ? '#0284c7' : '#cbd5e1'}`,
+                        borderRadius: '10px',
+                        padding: '14px 12px',
+                        cursor: 'pointer',
+                        backgroundColor: startNumMode === 'custom' ? '#f0f9ff' : '#fff',
+                        transition: 'all 0.15s ease',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '6px',
+                        textAlign: 'center'
+                      }}
+                    >
+                      <Pencil size={24} color={startNumMode === 'custom' ? '#0284c7' : '#64748b'} />
+                      <strong style={{ fontSize: '13px', color: '#0f172a' }}>Указать вручную</strong>
+                      <span style={{ fontSize: '11px', color: '#64748b' }}>Введите свой номер</span>
+                    </div>
                   </div>
 
                   {startNumMode === 'custom' && (
@@ -1539,8 +1534,9 @@ export const AdminBuildingsPage: React.FC = () => {
                       value={customStartRoomNum}
                       onChange={(e) => setCustomStartRoomNum(e.target.value ? Number(e.target.value) : '')}
                       placeholder="Введите начальный номер, например 101"
-                      style={{ marginTop: '8px' }}
+                      style={{ marginTop: '10px', paddingLeft: '10px' }}
                       required
+                      autoFocus
                     />
                   )}
                 </div>
@@ -1575,9 +1571,10 @@ export const AdminBuildingsPage: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            zIndex: 1000
+            zIndex: 1000,
+            padding: '16px'
           }}>
-            <div style={{ backgroundColor: '#fff', padding: '24px', borderRadius: '8px', maxWidth: '400px', width: '90%', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+            <div style={{ backgroundColor: '#fff', padding: '24px', borderRadius: '8px', maxWidth: '400px', width: '100%', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#dc2626', marginBottom: '12px' }}>
                 <AlertTriangle size={24} />
                 <h3 style={{ margin: 0, fontSize: '18px' }}>Подтверждение удаления</h3>
