@@ -80,8 +80,8 @@ export const DashboardPage = () => {
           </div>
           
           <div style={{ marginBottom: '16px' }}>
-            <label style={{ fontSize: '14px', color: '#666', display: 'block' }}>Email</label>
-            <p style={{ fontSize: '18px', color: '#333' }}>{user?.email}</p>
+            <label style={{ fontSize: '14px', color: '#666', display: 'block' }}>Логин</label>
+            <p style={{ fontSize: '18px', color: '#333' }}>{user?.login}</p>
           </div>
           
           <div>

@@ -66,4 +66,64 @@ export const getAdminBookings = async () => {
   return response.data;
 };
 
-// ... остальные методы без изменений
+export const getRoomBookings = async (roomId: number) => {
+  const response = await api.get(`/admin/room-bookings?room_id=${roomId}`);
+  return response.data;
+};
+
+export const updateAdminBooking = async (bookingData: any) => {
+  const response = await api.post('/admin/bookings', bookingData);
+  return response.data;
+};
+
+// Корпуса и этажи
+export const getAdminBuildings = async () => {
+  const response = await api.get('/admin/buildings');
+  return response.data;
+};
+
+export const saveAdminBuilding = async (buildingData: any) => {
+  const response = await api.post('/admin/buildings', buildingData);
+  return response.data;
+};
+
+export const deleteAdminBuilding = async (id: number) => {
+  const response = await api.post('/admin/buildings', { action: 'delete', id });
+  return response.data;
+};
+
+export const getAdminFloors = async (buildingId: number) => {
+  const response = await api.get(`/admin/floors?building_id=${buildingId}`);
+  return response.data;
+};
+
+export const saveAdminFloor = async (floorData: any) => {
+  const response = await api.post('/admin/floors', floorData);
+  return response.data;
+};
+
+export const deleteAdminFloor = async (id: number) => {
+  const response = await api.post('/admin/floors', { action: 'delete', id });
+  return response.data;
+};
+
+// Комнаты
+export const getAdminRooms = async (floorId: number) => {
+  const response = await api.get(`/admin/rooms?floor_id=${floorId}`);
+  return response.data;
+};
+
+export const saveAdminRoom = async (roomData: any) => {
+  const response = await api.post('/admin/rooms', roomData);
+  return response.data;
+};
+
+export const deleteAdminRoom = async (id: number) => {
+  const response = await api.post('/admin/rooms', { action: 'delete', id });
+  return response.data;
+};
+
+export const getAllRooms = async () => {
+  const response = await api.get('/admin/all-rooms');
+  return response.data;
+};
