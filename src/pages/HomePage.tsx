@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Zap, CheckCircle, ArrowRight, Building, Users, Calendar } from 'lucide-react';
+import { Shield, Zap, CheckCircle, ArrowRight } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export const HomePage: React.FC = () => {
