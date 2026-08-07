@@ -15,7 +15,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (loginOrPhone: string, password: string) => Promise<void>;
-  register: (lastName: string, firstName: string, phone: string, password: string) => Promise<any>;
+  register: (lastName: string, firstName: string, phone: string, password: string, customLogin?: string) => Promise<any>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   isAuthenticated: boolean;
@@ -69,13 +69,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     await fetchUser();
   };
 
-  const register = async (lastName: string, firstName: string, phone: string, password: string) => {
-    const response = await api.post('/register', {
+  const register = async (lastName: string, firstName: string, phone: string, password: string, customLogin?: string) => {
+    const payload: any = {
       last_name: lastName,
       first_name: firstName,
       phone,
       password
-    });
+    };
+    if (customLogin && customLogin.trim()) {
+      payload.login = customLogin.trim();
+    }
+    const response = await api.post('/register', payload);
     const { token, user } = response.data;
     localStorage.setItem('token', token);
     setUser(user);

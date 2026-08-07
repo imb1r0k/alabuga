@@ -13,6 +13,7 @@ export const AuthPage = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [regSuccess, setRegSuccess] = useState<any>(null);
+  const [customLogin, setCustomLogin] = useState(''); // новое поле для логина при регистрации
   
   const { login, register } = useAuth();
   const navigate = useNavigate();
@@ -75,7 +76,8 @@ export const AuthPage = () => {
           setLoading(false);
           return;
         }
-        const userData = await register(lastName, firstName, phone, password);
+        // Передаём пользовательский логин (может быть пустой — тогда сервер сгенерирует сам)
+        const userData = await register(lastName, firstName, phone, password, customLogin);
         setRegSuccess(userData);
       }
     } catch (err: any) {
@@ -197,6 +199,22 @@ export const AuthPage = () => {
                   />
                 </div>
 
+                {/* Новое поле — необязательный логин */}
+                <div className="input-group">
+                  <label htmlFor="customLogin">Логин (необязательно)</label>
+                  <input
+                    id="customLogin"
+                    type="text"
+                    value={customLogin}
+                    onChange={(e) => setCustomLogin(e.target.value)}
+                    disabled={loading}
+                    placeholder="Оставьте пустым — будет сгенерирован автоматически"
+                  />
+                  <p style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>
+                    Если не указать, система сама создаст логин на основе номера телефона
+                  </p>
+                </div>
+
                 <div className="input-group">
                   <label htmlFor="password">Пароль (минимум 6 символов)</label>
                   <input
@@ -244,6 +262,7 @@ export const AuthPage = () => {
                 setError('');
                 setPassword('');
                 setPasswordConfirm('');
+                setCustomLogin('');
               }}
               style={{
                 background: 'none',
