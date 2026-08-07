@@ -16,9 +16,6 @@ import {
   Footprints, 
   Wrench, 
   Plus, 
-  Sparkles, 
-  Trash2, 
-  Check, 
   SquareCheck,
   Play,
   RotateCw,
@@ -28,7 +25,8 @@ import {
   ArrowDown,
   Square,
   Zap,
-  X
+  X,
+  Check
 } from 'lucide-react';
 
 type TileType = 'room' | 'elevator' | 'stairs' | 'tech' | 'gen-start' | 'gen-turn' | 'gen-end';
@@ -41,7 +39,6 @@ interface TileTemplate {
   bg: string;
   borderColor: string;
   textColor: string;
-  dir?: Direction;
 }
 
 const STANDARD_TEMPLATES: TileTemplate[] = [
@@ -52,8 +49,8 @@ const STANDARD_TEMPLATES: TileTemplate[] = [
 ];
 
 const GEN_TEMPLATES: TileTemplate[] = [
-  { type: 'gen-start', title: 'Начало генерации', icon: Play, bg: '#d1e7dd', borderColor: '#198754', textColor: '#0f5132', dir: 'right' },
-  { type: 'gen-turn', title: 'Поворот генерации', icon: RotateCw, bg: '#cff4fc', borderColor: '#0dcaf0', textColor: '#055160', dir: 'right' },
+  { type: 'gen-start', title: 'Начало генерации', icon: Play, bg: '#d1e7dd', borderColor: '#198754', textColor: '#0f5132' },
+  { type: 'gen-turn', title: 'Поворот генерации', icon: RotateCw, bg: '#cff4fc', borderColor: '#0dcaf0', textColor: '#055160' },
   { type: 'gen-end', title: 'Конец генерации', icon: Square, bg: '#f8d7da', borderColor: '#dc3545', textColor: '#842029' },
 ];
 
@@ -77,6 +74,9 @@ export const AdminBuildingsPage: React.FC = () => {
   const [genMode, setGenMode] = useState(false);
   const [selectedTool, setSelectedTool] = useState<TileType>('room');
   const [selectedDir, setSelectedDir] = useState<Direction>('right');
+
+  // Хранение перетаскиваемой плитки для гарантии Drag & Drop
+  const [draggedTile, setDraggedTile] = useState<{ type: TileType; dir: Direction } | null>(null);
 
   // Параметры алгоритма генератора
   const [genFrom, setGenFrom] = useState(101);
@@ -210,13 +210,14 @@ export const AdminBuildingsPage: React.FC = () => {
     return `${floorNum}${suffix}`;
   };
 
-  // Размещение ячейки (по клику или D&D)
+  // Главная функция размещения элемента в ячейку (x, y)
   const placeTileAt = async (x: number, y: number, type: TileType, dir: Direction = 'right') => {
     if (y === 1 || !selectedFloor || !selectedBuilding) return;
 
-    const width = selectedFloor.width || 8;
-    const existing = rooms.find((r) => r.x_pos === x && r.y_pos === y);
-    const autoNum = calculateAutoRoomNumber(x, y, width, selectedFloor.floor_number);
+    const width = Number(selectedFloor.width) || 8;
+    // ВАЖНО: Приводим координаты из MySQL к числу через Number(...)
+    const existing = rooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === y);
+    const autoNum = calculateAutoRoomNumber(x, y, width, Number(selectedFloor.floor_number));
 
     let name = 'Комната';
     let capacity = 2;
@@ -240,8 +241,8 @@ export const AdminBuildingsPage: React.FC = () => {
 
     const roomData = {
       id: existing?.id,
-      floor_id: selectedFloor.id,
-      building_id: selectedBuilding.id,
+      floor_id: Number(selectedFloor.id),
+      building_id: Number(selectedBuilding.id),
       room_number: existing?.room_number || autoNum,
       name,
       capacity,
@@ -252,9 +253,16 @@ export const AdminBuildingsPage: React.FC = () => {
       y_pos: y,
     };
 
+    // Мгновенное (Optimistic) обновление состояния в интерфейсе
+    setRooms((prevRooms) => {
+      const filtered = prevRooms.filter((r) => !(Number(r.x_pos) === x && Number(r.y_pos) === y));
+      return [...filtered, roomData];
+    });
+
     try {
       await saveAdminRoom(roomData);
-      handleSelectFloor(selectedFloor);
+      const updatedRooms = await getAdminRooms(selectedFloor.id);
+      setRooms(updatedRooms);
     } catch (err) {
       console.error('Ошибка сохранения ячейки:', err);
     }
@@ -262,7 +270,7 @@ export const AdminBuildingsPage: React.FC = () => {
 
   const handleCellClick = (x: number, y: number) => {
     if (y === 1) return;
-    const existing = rooms.find((r) => r.x_pos === x && r.y_pos === y);
+    const existing = rooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === y);
     if (existing && !genMode) {
       setSelectedRoom({ ...existing });
     } else {
@@ -270,33 +278,43 @@ export const AdminBuildingsPage: React.FC = () => {
     }
   };
 
-  // Drag & Drop
+  // Drag & Drop события
   const handleDragStart = (e: React.DragEvent, type: TileType) => {
-    e.dataTransfer.setData('application/json', JSON.stringify({ type, dir: selectedDir }));
+    const item = { type, dir: selectedDir };
+    setDraggedTile(item);
+    try {
+      e.dataTransfer.setData('text/plain', type);
+      e.dataTransfer.effectAllowed = 'copy';
+    } catch (_) {}
   };
 
-  const handleDrop = (e: React.DragEvent, x: number, y: number) => {
+  const handleDrop = async (e: React.DragEvent, x: number, y: number) => {
     e.preventDefault();
-    if (y === 1) return;
+    e.stopPropagation();
+    if (y === 1 || !selectedFloor) return;
+
+    let typeToPlace = draggedTile?.type || selectedTool;
+    let dirToPlace = draggedTile?.dir || selectedDir;
+
     try {
-      const raw = e.dataTransfer.getData('application/json');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        placeTileAt(x, y, parsed.type || selectedTool, parsed.dir || selectedDir);
-      } else {
-        placeTileAt(x, y, selectedTool, selectedDir);
+      const textData = e.dataTransfer.getData('text/plain') as TileType;
+      if (textData && ['room', 'elevator', 'stairs', 'tech', 'gen-start', 'gen-turn', 'gen-end'].includes(textData)) {
+        typeToPlace = textData;
       }
-    } catch (_) {
-      placeTileAt(x, y, selectedTool, selectedDir);
-    }
+    } catch (_) {}
+
+    await placeTileAt(x, y, typeToPlace, dirToPlace);
+    setDraggedTile(null);
   };
 
   // Удаление помещения из ячейки
-  const handleDeleteRoom = async (e: React.MouseEvent, roomId: number) => {
+  const handleDeleteRoom = async (e: React.MouseEvent, roomId: number, x: number, y: number) => {
     e.stopPropagation();
+    setRooms((prev) => prev.filter((r) => !(Number(r.x_pos) === x && Number(r.y_pos) === y)));
     try {
-      await api.post('/admin/rooms', { id: roomId, room_number: '', capacity: 0, room_type: 'empty' });
-      handleSelectFloor(selectedFloor);
+      await api.post('/admin/rooms', { id: roomId, room_type: 'empty' });
+      const updatedRooms = await getAdminRooms(selectedFloor.id);
+      setRooms(updatedRooms);
       setSelectedRoom(null);
     } catch (err) {
       console.error(err);
@@ -310,12 +328,14 @@ export const AdminBuildingsPage: React.FC = () => {
     if (room.room_type === 'gen-start') name = `[Старт -> ${newDir}]`;
     if (room.room_type === 'gen-turn') name = `[Поворот -> ${newDir}]`;
 
+    const updatedRoom = { ...room, name };
+
+    setRooms((prev) => prev.map((r) => (r.id === room.id ? updatedRoom : r)));
+
     try {
-      await saveAdminRoom({
-        ...room,
-        name,
-      });
-      handleSelectFloor(selectedFloor);
+      await saveAdminRoom(updatedRoom);
+      const updatedRooms = await getAdminRooms(selectedFloor.id);
+      setRooms(updatedRooms);
     } catch (err) {
       console.error(err);
     }
@@ -333,12 +353,11 @@ export const AdminBuildingsPage: React.FC = () => {
       return;
     }
 
-    const width = selectedFloor.width || 8;
+    const width = Number(selectedFloor.width) || 8;
     let currentNum = genFrom;
-    let rX = startRoom.x_pos;
-    let rY = startRoom.y_pos;
+    let rX = Number(startRoom.x_pos);
+    let rY = Number(startRoom.y_pos);
 
-    // Определяем начальное направление из имени или по умолчанию
     let currentDir: Direction = 'right';
     if (startRoom.name.includes('down')) currentDir = 'down';
     if (startRoom.name.includes('left')) currentDir = 'left';
@@ -347,24 +366,23 @@ export const AdminBuildingsPage: React.FC = () => {
     const STEP: Record<Direction, [number, number]> = {
       right: [1, 0],
       left: [-1, 0],
-      down: [0, 2], // Переход между верхним и нижним рядом через коридор
+      down: [0, 2],
       up: [0, -2],
     };
 
     let placedCount = 0;
-    let stepsLimit = 200; // зашита от циклов
+    let stepsLimit = 200;
 
     while (currentNum <= genTo && stepsLimit > 0) {
       stepsLimit--;
 
-      // Создаем/обновляем комнату в текущих координатах (rX, rY)
-      const existing = rooms.find((r) => r.x_pos === rX && r.y_pos === rY);
+      const existing = rooms.find((r) => Number(r.x_pos) === rX && Number(r.y_pos) === rY);
       const roomNumStr = `${currentNum}`;
 
       await saveAdminRoom({
         id: existing?.id,
-        floor_id: selectedFloor.id,
-        building_id: selectedBuilding.id,
+        floor_id: Number(selectedFloor.id),
+        building_id: Number(selectedBuilding.id),
         room_number: roomNumStr,
         name: `Комната ${roomNumStr}`,
         capacity: genSeats,
@@ -378,25 +396,21 @@ export const AdminBuildingsPage: React.FC = () => {
       placedCount++;
       currentNum++;
 
-      // Считаем следующий шаг
       const [dCols, dRows] = STEP[currentDir];
       let nextX = rX + dCols;
       let nextY = rY + dRows;
 
-      // Проверяем границы сетки
       if (nextX < 0 || nextX >= width || nextY < 0 || nextY > 2) {
-        break; // Достигли края
+        break;
       }
 
-      // Проверяем объект в следующей ячейке
-      const nextTile = rooms.find((r) => r.x_pos === nextX && r.y_pos === nextY);
+      const nextTile = rooms.find((r) => Number(r.x_pos) === nextX && Number(r.y_pos) === nextY);
 
       if (nextTile?.room_type === 'gen-end') {
-        // Заполняем последнюю комнату на месте gen-end и выходим
         await saveAdminRoom({
           id: nextTile.id,
-          floor_id: selectedFloor.id,
-          building_id: selectedBuilding.id,
+          floor_id: Number(selectedFloor.id),
+          building_id: Number(selectedBuilding.id),
           room_number: `${currentNum}`,
           name: `Комната ${currentNum}`,
           capacity: genSeats,
@@ -411,13 +425,11 @@ export const AdminBuildingsPage: React.FC = () => {
       }
 
       if (nextTile?.room_type === 'gen-turn') {
-        // Поворот траектории
         if (nextTile.name.includes('down')) currentDir = 'down';
         else if (nextTile.name.includes('left')) currentDir = 'left';
         else if (nextTile.name.includes('up')) currentDir = 'up';
         else if (nextTile.name.includes('right')) currentDir = 'right';
         else {
-          // Если не указан явно, поворачиваем вниз/вверх в зависимости от текущего ряда
           currentDir = rY === 0 ? 'down' : 'up';
         }
       }
@@ -426,7 +438,7 @@ export const AdminBuildingsPage: React.FC = () => {
       rY = nextY;
     }
 
-    setGenStatusMsg(`✅ Успешно сгенерировано ${placedCount} комнат (${genFrom}–${genFrom + placedCount - 1})`);
+    setGenStatusMsg(`✅ Сгенерировано ${placedCount} комнат (${genFrom}–${genFrom + placedCount - 1})`);
     handleSelectFloor(selectedFloor);
   };
 
@@ -721,14 +733,14 @@ export const AdminBuildingsPage: React.FC = () => {
                       <div style={{ overflowX: 'auto', padding: '10px 0' }}>
                         <div style={{
                           display: 'grid',
-                          gridTemplateColumns: `repeat(${selectedFloor.width || 8}, 90px)`,
+                          gridTemplateColumns: `repeat(${Number(selectedFloor.width) || 8}, 90px)`,
                           gap: '8px',
                           justifyContent: 'start',
                         }}>
                           {/* ВЕРХНИЙ РЯД (y = 0) */}
-                          {Array.from({ length: selectedFloor.width || 8 }).map((_, x) => {
-                            const room = rooms.find((r) => r.x_pos === x && r.y_pos === 0);
-                            const cwIdx = getCellClockwiseIndex(x, 0, selectedFloor.width || 8);
+                          {Array.from({ length: Number(selectedFloor.width) || 8 }).map((_, x) => {
+                            const room = rooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === 0);
+                            const cwIdx = getCellClockwiseIndex(x, 0, Number(selectedFloor.width) || 8);
                             const tmpl = [...STANDARD_TEMPLATES, ...GEN_TEMPLATES].find((t) => t.type === room?.room_type);
                             const IconComp = tmpl?.icon || Bed;
 
@@ -736,7 +748,11 @@ export const AdminBuildingsPage: React.FC = () => {
                               <div
                                 key={`top-${x}`}
                                 onClick={() => handleCellClick(x, 0)}
-                                onDragOver={(e) => e.preventDefault()}
+                                onDragOver={(e) => {
+                                  e.preventDefault();
+                                  e.dataTransfer.dropEffect = 'copy';
+                                }}
+                                onDragEnter={(e) => e.preventDefault()}
                                 onDrop={(e) => handleDrop(e, x, 0)}
                                 style={{
                                   height: '85px',
@@ -762,7 +778,7 @@ export const AdminBuildingsPage: React.FC = () => {
 
                                 {room && (
                                   <button
-                                    onClick={(e) => handleDeleteRoom(e, room.id)}
+                                    onClick={(e) => handleDeleteRoom(e, room.id, x, 0)}
                                     title="Удалить помещение"
                                     style={{
                                       position: 'absolute',
@@ -790,7 +806,6 @@ export const AdminBuildingsPage: React.FC = () => {
                                     <IconComp size={20} style={{ marginBottom: '2px' }} />
                                     <strong>{room.room_number || room.name}</strong>
 
-                                    {/* Переключатели стрелок для генераторов */}
                                     {(room.room_type === 'gen-start' || room.room_type === 'gen-turn') && (
                                       <div style={{ display: 'flex', gap: '2px', marginTop: '2px' }}>
                                         <button onClick={(e) => handleSetDirectionForCell(e, room, 'right')} style={{ padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}><ArrowRight size={12} /></button>
@@ -815,7 +830,7 @@ export const AdminBuildingsPage: React.FC = () => {
 
                           {/* КОРИДОР (y = 1) */}
                           <div style={{
-                            gridColumn: `1 / span ${selectedFloor.width || 8}`,
+                            gridColumn: `1 / span ${Number(selectedFloor.width) || 8}`,
                             height: '36px',
                             backgroundColor: '#e2e8f0',
                             border: '1px solid #cbd5e1',
@@ -832,9 +847,9 @@ export const AdminBuildingsPage: React.FC = () => {
                           </div>
 
                           {/* НИЖНИЙ РЯД (y = 2) */}
-                          {Array.from({ length: selectedFloor.width || 8 }).map((_, x) => {
-                            const room = rooms.find((r) => r.x_pos === x && r.y_pos === 2);
-                            const cwIdx = getCellClockwiseIndex(x, 2, selectedFloor.width || 8);
+                          {Array.from({ length: Number(selectedFloor.width) || 8 }).map((_, x) => {
+                            const room = rooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === 2);
+                            const cwIdx = getCellClockwiseIndex(x, 2, Number(selectedFloor.width) || 8);
                             const tmpl = [...STANDARD_TEMPLATES, ...GEN_TEMPLATES].find((t) => t.type === room?.room_type);
                             const IconComp = tmpl?.icon || Bed;
 
@@ -842,7 +857,11 @@ export const AdminBuildingsPage: React.FC = () => {
                               <div
                                 key={`bot-${x}`}
                                 onClick={() => handleCellClick(x, 2)}
-                                onDragOver={(e) => e.preventDefault()}
+                                onDragOver={(e) => {
+                                  e.preventDefault();
+                                  e.dataTransfer.dropEffect = 'copy';
+                                }}
+                                onDragEnter={(e) => e.preventDefault()}
                                 onDrop={(e) => handleDrop(e, x, 2)}
                                 style={{
                                   height: '85px',
@@ -868,7 +887,7 @@ export const AdminBuildingsPage: React.FC = () => {
 
                                 {room && (
                                   <button
-                                    onClick={(e) => handleDeleteRoom(e, room.id)}
+                                    onClick={(e) => handleDeleteRoom(e, room.id, x, 2)}
                                     title="Удалить помещение"
                                     style={{
                                       position: 'absolute',
@@ -896,7 +915,6 @@ export const AdminBuildingsPage: React.FC = () => {
                                     <IconComp size={20} style={{ marginBottom: '2px' }} />
                                     <strong>{room.room_number || room.name}</strong>
 
-                                    {/* Переключатели стрелок для генераторов */}
                                     {(room.room_type === 'gen-start' || room.room_type === 'gen-turn') && (
                                       <div style={{ display: 'flex', gap: '2px', marginTop: '2px' }}>
                                         <button onClick={(e) => handleSetDirectionForCell(e, room, 'right')} style={{ padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}><ArrowRight size={12} /></button>
@@ -932,7 +950,7 @@ export const AdminBuildingsPage: React.FC = () => {
                         }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                             <h4 style={{ margin: 0, fontSize: '14px', color: '#1e293b' }}>
-                              Редактирование ячейки [{selectedRoom.x_pos + 1}, {selectedRoom.y_pos === 0 ? 'Верх' : 'Низ'}]
+                              Редактирование ячейки [{Number(selectedRoom.x_pos) + 1}, {Number(selectedRoom.y_pos) === 0 ? 'Верх' : 'Низ'}]
                             </h4>
                             <button onClick={() => setSelectedRoom(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '16px' }}>✕</button>
                           </div>

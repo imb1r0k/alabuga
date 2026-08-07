@@ -125,7 +125,6 @@ function initFreshDatabase($pdo) {
     $stmt->execute(['Админ', 'Главный', 'Администратор', 'admin@alabuga.ru', '+79990000000', $adminPassword, 'admin', 'Оргкомитет']);
 }
 
-// Безопасное автосоздание всех таблиц при необходимости
 function ensureTablesExist($pdo) {
     $queries = [
         "CREATE TABLE IF NOT EXISTS `settings` (
@@ -203,14 +202,13 @@ function ensureTablesExist($pdo) {
         try {
             $pdo->exec($q);
         } catch (Exception $e) {
-            // Игнорируем дублирующиеся типы
+            // Игнорируем
         }
     }
 }
 
 ensureTablesExist($pdo);
 
-// Определение запрашиваемого маршрута
 $uri = '';
 if (!empty($_GET['route'])) {
     $uri = $_GET['route'];
@@ -598,13 +596,21 @@ try {
                 echo json_encode($stmt->fetchAll());
             } elseif ($method === 'POST') {
                 $id = $input['id'] ?? null;
+                $roomType = $input['room_type'] ?? 'room';
+
+                if ($roomType === 'empty' && $id) {
+                    $stmt = $pdo->prepare('DELETE FROM rooms WHERE id = ?');
+                    $stmt->execute([$id]);
+                    echo json_encode(['success' => true]);
+                    break;
+                }
+
                 $floorId = $input['floor_id'] ?? null;
                 $buildingId = $input['building_id'] ?? null;
                 $roomNumber = $input['room_number'] ?? '';
                 $name = $input['name'] ?? '';
                 $capacity = $input['capacity'] ?? 2;
                 $isTechnical = isset($input['is_technical']) ? (int)$input['is_technical'] : 0;
-                $roomType = $input['room_type'] ?? 'room';
                 $gender = $input['gender'] ?? 'DEFAULT';
                 $xPos = $input['x_pos'] ?? 0;
                 $yPos = $input['y_pos'] ?? 0;
