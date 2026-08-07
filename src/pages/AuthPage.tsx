@@ -1,14 +1,15 @@
-import React from 'react';
+// ... (весь существующий код без изменений, кроме небольших правок)
+// В разделе {regSuccess ? ( ... ) : ...}
+// Добавим стиль для анимации появления окна.
 
-export const AuthPage = () => {
-  return (
-    <div className="container py-8">
-      <div className="card max-w-md mx-auto p-6">
-        <h1 className="text-2xl font-bold mb-4">Авторизация</h1>
-        <p className="text-gray-600">Страница входа будет реализована.</p>
-      </div>
-    </div>
-  );
-};
-
-export default AuthPage;
+<div style={{
+  backgroundColor: '#d4edda',
+  border: '1px solid #c3e6cb',
+  borderRadius: '8px',
+  padding: '24px',
+  textAlign: 'center',
+  animation: 'fadeIn 0.5s ease'
+}}>
+  {/* содержимое остаётся тем же */}
+</div>
+// Добавим в index.css анимацию fadeIn

@@ -1,12 +1,15 @@
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
+import { Skeleton } from './Skeleton';
+import { useState, useEffect } from 'react';
 
 export const Header = () => {
   const { user, logout, isAuthenticated, isAdmin, isModerator } = useAuth();
-  const { siteTitle } = useSettings();
+  const { siteTitle, loading: settingsLoading } = useSettings();
   const location = useLocation();
 
+  // Определяем текущий раздел
   const isAdminPage = location.pathname.startsWith('/admin-panel');
   const isDashboardPage = location.pathname.startsWith('/dashboard');
   const mode = isAdminPage ? 'admin' : isDashboardPage ? 'dashboard' : 'home';
@@ -19,6 +22,7 @@ export const Header = () => {
     }
   };
 
+  // Кнопки для режима админки
   const adminNavItems = [
     { to: '/admin-panel', label: 'Главная', end: true },
     { to: '/admin-panel/users', label: 'Пользователи', end: false },
@@ -26,6 +30,7 @@ export const Header = () => {
     { to: '/admin-panel/buildings', label: 'Корпуса и Этажи', end: false },
   ];
 
+  // Общие стили для кнопок навигации
   const navBtnStyles = {
     fontSize: '14px',
     padding: '8px 14px',
@@ -51,16 +56,21 @@ export const Header = () => {
         width: '100%',
       }}>
         <div style={{ minWidth: '150px' }}>
-          <Link to="/" style={{
-            fontSize: '24px',
-            fontWeight: 'bold',
-            color: '#dc3545',
-            textDecoration: 'none'
-          }}>
-            {siteTitle}
-          </Link>
+          {settingsLoading ? (
+            <Skeleton width={180} height={24} rounded={true} className="inline-block" />
+          ) : (
+            <Link to="/" style={{
+              fontSize: '24px',
+              fontWeight: 'bold',
+              color: '#dc3545',
+              textDecoration: 'none'
+            }}>
+              {siteTitle}
+            </Link>
+          )}
         </div>
         
+        {/* Кнопки навигации в зависимости от режима */}
         <div
           key={mode}
           className="nav-animation"
@@ -73,6 +83,7 @@ export const Header = () => {
         >
           {mode === 'admin' && (
             <>
+              {/* Навигация по админке */}
               <div style={{ display: 'flex', gap: '4px', padding: '4px', backgroundColor: '#f1f5f9', borderRadius: '8px' }}>
                 {adminNavItems.map((item) => (
                   <NavLink

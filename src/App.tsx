@@ -3,7 +3,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { HomePage } from './pages/HomePage';
-import AuthPage from './pages/AuthPage';
+import { AuthPage } from './pages/AuthPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { AdminHomePage } from './pages/admin/AdminHomePage';
 import { AdminUsersPage } from './pages/admin/AdminUsersPage';
