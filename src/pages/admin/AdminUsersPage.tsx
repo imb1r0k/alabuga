@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Skeleton } from '../../components/Skeleton';
 import { AdminLayout } from '../../components/AdminLayout';
-import { getAdminUsers, updateAdminUser, getUserDetails, getAdminTeams } from '../../services/api';
+import { getAdminUsers, updateAdminUser, getUserDetails } from '../../services/api';
 
 export const AdminUsersPage: React.FC = () => {
   const [users, setUsers] = useState<any[]>([]);
-  const [teams, setTeams] = useState<any[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [userFormData, setUserFormData] = useState<any>({});
@@ -15,17 +14,7 @@ export const AdminUsersPage: React.FC = () => {
 
   useEffect(() => {
     loadUsers();
-    loadTeams();
   }, []);
-
-  const loadTeams = async () => {
-    try {
-      const data = await getAdminTeams();
-      setTeams(data);
-    } catch (err) {
-      console.error('Ошибка загрузки команд:', err);
-    }
-  };
 
   const loadUsers = async () => {
     setUsersLoading(true);
@@ -48,7 +37,7 @@ export const AdminUsersPage: React.FC = () => {
       phone: u.phone || '',
       email: u.email || '',
       role: u.role || 'user',
-      team_id: u.team_id || '',
+      team_name: u.team_name || '',
       password: '',
     });
     setUserMsg('');
@@ -75,12 +64,6 @@ export const AdminUsersPage: React.FC = () => {
     }
   };
 
-  // Сопоставление id команды с названием
-  const getTeamName = (id: any) => {
-    const team = teams.find(t => t.id === Number(id));
-    return team ? team.name : '—';
-  };
-
   return (
     <AdminLayout>
       <div>
@@ -99,7 +82,6 @@ export const AdminUsersPage: React.FC = () => {
                       <th style={{ padding: '8px' }}>Телефон</th>
                       <th style={{ padding: '8px' }}>Логин (Email)</th>
                       <th style={{ padding: '8px' }}>Роль</th>
-                      <th style={{ padding: '8px' }}>Команда</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -128,7 +110,6 @@ export const AdminUsersPage: React.FC = () => {
                             {u.role}
                           </span>
                         </td>
-                        <td style={{ padding: '8px' }}>{getTeamName(u.team_id)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -211,16 +192,11 @@ export const AdminUsersPage: React.FC = () => {
 
                   <div className="input-group">
                     <label>Команда</label>
-                    <select
-                      value={userFormData.team_id}
-                      onChange={(e) => setUserFormData({ ...userFormData, team_id: e.target.value ? Number(e.target.value) : '' })}
-                      style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
-                    >
-                      <option value="">— Без команды —</option>
-                      {teams.map(t => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                    </select>
+                    <input
+                      type="text"
+                      value={userFormData.team_name}
+                      onChange={(e) => setUserFormData({ ...userFormData, team_name: e.target.value })}
+                    />
                   </div>
 
                   <button type="submit" className="btn btn-primary" disabled={savingUser} style={{ width: '100%', marginTop: '10px' }}>

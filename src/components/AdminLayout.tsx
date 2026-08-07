@@ -53,10 +53,8 @@ export const AdminLayout: React.FC<{ children?: React.ReactNode }> = ({ children
     { to: '/admin-panel/users', label: 'Пользователи', icon: Users, end: false },
     { to: '/admin-panel/bookings', label: 'Бронирования', icon: BookmarkCheck, end: false },
     { to: '/admin-panel/buildings', label: 'Корпуса и Этажи', icon: Building2, end: false },
-    { to: '/admin-panel/teams', label: 'Команды', icon: Users, end: false },
   ];
 
-  // ... остальной код без изменений (возвращаемый JSX и логика)
   return (
     <div className="admin-layout" style={{ display: 'flex', minHeight: 'calc(100vh - 64px)', backgroundColor: '#f4f6f9' }}>
       {/* Боковая навигация слева */}

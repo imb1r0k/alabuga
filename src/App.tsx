@@ -9,7 +9,6 @@ import { AdminHomePage } from './pages/admin/AdminHomePage';
 import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 import { AdminBookingsPage } from './pages/admin/AdminBookingsPage';
 import { AdminBuildingsPage } from './pages/admin/AdminBuildingsPage';
-import { AdminTeamsPage } from './pages/admin/AdminTeamsPage';
 import { Header } from './components/Header';
 
 function App() {
@@ -62,14 +61,6 @@ function App() {
                   element={
                     <ProtectedRoute>
                       <AdminBuildingsPage />
-                    </ProtectedRoute>
-                  } 
-                />
-                <Route 
-                  path="/admin-panel/teams" 
-                  element={
-                    <ProtectedRoute>
-                      <AdminTeamsPage />
                     </ProtectedRoute>
                   } 
                 />
