@@ -75,6 +75,9 @@ export const AdminHomePage: React.FC = () => {
                 required
                 disabled={saving}
               />
+              <small style={{ color: '#64748b', fontSize: '12px' }}>
+                Можно вставить текст или прямую ссылку на изображение (svg/png) — тогда в шапке будет отображаться картинка.
+              </small>
             </div>
           </div>
 

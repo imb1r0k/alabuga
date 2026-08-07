@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
+import { Skeleton } from './Skeleton';
 import {
   Home,
   User,
@@ -14,9 +15,16 @@ import {
   ShieldCheck
 } from 'lucide-react';
 
+// Проверяем, является ли значение ссылкой на изображение (svg, png и др.)
+const isImageUrl = (value: string) => {
+  if (!value) return false;
+  const trimmed = value.trim();
+  return /\.(svg|png|jpe?g|gif|webp|ico)(\?.*)?$/i.test(trimmed) || /^data:image\//i.test(trimmed);
+};
+
 export const Header: React.FC = () => {
   const { user, isAuthenticated, logout, isAdmin, isModerator } = useAuth();
-  const { siteTitle } = useSettings();
+  const { siteTitle, loading: settingsLoading } = useSettings();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -60,24 +68,19 @@ export const Header: React.FC = () => {
               alignItems: 'center',
             }}>
               
-              {/* Логотип */}
-              <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fff', textDecoration: 'none', fontWeight: 'bold', fontSize: '18px', marginRight: 'auto' }}>
-                <div style={{
-                  width: '36px',
-                  height: '36px',
-                  borderRadius: '8px',
-                  backgroundColor: '#0284c7',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#fff',
-                  fontSize: '14px',
-                  fontWeight: 800,
-                  boxShadow: '0 4px 12px rgba(2, 132, 199, 0.3)'
-                }}>
-                  A
-                </div>
-                <span style={{ letterSpacing: '0.5px' }}>{siteTitle}</span>
+              {/* Логотип: картинка (svg/png) или текст из БД */}
+              <Link to="/" style={{ display: 'flex', alignItems: 'center', color: '#fff', textDecoration: 'none', fontWeight: 'bold', fontSize: '18px', marginRight: 'auto', minWidth: 0 }}>
+                {settingsLoading ? (
+                  <Skeleton width="200px" height="28px" rounded="6px" />
+                ) : isImageUrl(siteTitle) ? (
+                  <img
+                    src={siteTitle}
+                    alt="Логотип сайта"
+                    style={{ height: '36px', width: 'auto', maxWidth: '220px', objectFit: 'contain', display: 'block' }}
+                  />
+                ) : (
+                  <span style={{ letterSpacing: '0.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{siteTitle}</span>
+                )}
               </Link>
       
               {/* Навигация ПК */}
