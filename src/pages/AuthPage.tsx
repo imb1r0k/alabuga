@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 export const AuthPage = () => {
@@ -8,7 +9,9 @@ export const AuthPage = () => {
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  
   const { login, register } = useAuth();
+  const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,8 +29,9 @@ export const AuthPage = () => {
         }
         await register(name, email, password);
       }
+      navigate('/');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Произошла ошибка');
+      setError(err.response?.data?.error || 'Произошла ошибка при авторизации');
     } finally {
       setLoading(false);
     }

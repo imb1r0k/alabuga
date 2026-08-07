@@ -5,7 +5,7 @@ interface User {
   id: number;
   email: string;
   name: string;
-  role: 'user' | 'admin' | 'moderator';
+  role: string;
 }
 
 interface AuthContextType {
@@ -14,6 +14,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
   isAuthenticated: boolean;
   isAdmin: boolean;
   isModerator: boolean;
@@ -29,6 +30,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const fetchUser = async () => {
+    try {
+      const response = await api.get('/user');
+      setUser(response.data);
+    } catch (error) {
+      localStorage.removeItem('token');
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
@@ -38,37 +51,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   }, []);
 
-  const fetchUser = async () => {
-    try {
-      const response = await api.get('/user');
-      setUser(response.data);
-    } catch (error) {
-      localStorage.removeItem('token');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const login = async (email: string, password: string) => {
-    try {
-      const response = await api.post('/login', { email, password });
-      const { token, user } = response.data;
-      localStorage.setItem('token', token);
-      setUser(user);
-    } catch (error: any) {
-      throw error;
-    }
+    const response = await api.post('/login', { email, password });
+    const { token, user } = response.data;
+    localStorage.setItem('token', token);
+    setUser(user);
+    await fetchUser(); // Обновляем профиль с бэкенда для получения актуальной роли
   };
 
   const register = async (name: string, email: string, password: string) => {
-    try {
-      const response = await api.post('/register', { name, email, password });
-      const { token, user } = response.data;
-      localStorage.setItem('token', token);
-      setUser(user);
-    } catch (error: any) {
-      throw error;
-    }
+    const response = await api.post('/register', { name, email, password });
+    const { token, user } = response.data;
+    localStorage.setItem('token', token);
+    setUser(user);
+    await fetchUser();
   };
 
   const logout = async () => {
@@ -87,6 +83,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  const roleNormalized = user?.role ? String(user.role).trim().toLowerCase() : '';
+  const isAdmin = roleNormalized === 'admin';
+  const isModerator = roleNormalized === 'moderator' || isAdmin;
+
   return (
     <AuthContext.Provider
       value={{
@@ -95,9 +95,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         login,
         register,
         logout,
+        refreshUser: fetchUser,
         isAuthenticated: !!user,
-        isAdmin: user?.role === 'admin',
-        isModerator: user?.role === 'moderator',
+        isAdmin,
+        isModerator,
       }}
     >
       {children}

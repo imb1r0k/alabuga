@@ -36,32 +36,36 @@ export const Header = () => {
           Алабуга - форум 2025
         </Link>
         
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {isAuthenticated ? (
             <>
-              <span style={{ fontSize: '14px', color: '#666' }}>
-                {user?.name || user?.email}
+              <span style={{ fontSize: '14px', color: '#666', marginRight: '8px' }}>
+                {user?.name || user?.email} ({user?.role})
               </span>
+
+              {(isAdmin || isModerator) && (
+                <Link
+                  to="/admin-panel"
+                  className="btn btn-secondary"
+                  style={{ backgroundColor: '#28a745' }}
+                >
+                  Админка
+                </Link>
+              )}
+
+              <Link
+                to="/dashboard"
+                className="btn btn-primary"
+              >
+                Кабинет
+              </Link>
+
               <button
                 onClick={handleLogout}
                 className="btn btn-danger"
               >
                 Выйти
               </button>
-              <Link
-                to="/dashboard"
-                className="btn btn-primary"
-              >
-                Личный кабинет
-              </Link>
-              {isAdmin || isModerator ? (
-                <Link
-                  to="/admin-panel"
-                  className="btn btn-secondary"
-                >
-                  Админ панель
-                </Link>
-              ) : null}
             </>
           ) : (
             <Link
