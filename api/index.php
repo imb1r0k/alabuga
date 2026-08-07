@@ -28,6 +28,8 @@ try {
     exit();
 }
 
+// ─── Инициализация БД ───────────────────────────────────────────────────────
+
 function initFreshDatabase($pdo) {
     $sql = "
         SET FOREIGN_KEY_CHECKS = 0;
@@ -50,7 +52,13 @@ function initFreshDatabase($pdo) {
           `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-        INSERT INTO `settings` (`key`, `value`) VALUES ('site_title', 'Алабуга - форум 2025');
+        INSERT INTO `settings` (`key`, `value`) VALUES
+        ('site_title', 'Алабуга - форум 2025'),
+        ('hero_badge', 'Форум 2025'),
+        ('hero_title', 'Добро пожаловать в систему проживания <span style=\"color: #38bdf8\">Алабуга</span>'),
+        ('hero_description', 'Интерактивный сервис бронирования жилых помещений, работы с командами и расселения участников форума в реальном времени.'),
+        ('hero_button_text', 'Войти / Зарегистрироваться'),
+        ('hero_button_text_auth', 'Перейти в личный кабинет');
 
         CREATE TABLE `users` (
           `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -166,10 +174,9 @@ function initFreshDatabase($pdo) {
 
     $pdo->exec($sql);
 
-    // Создаём админа
-    $adminPassword = password_hash('admin123', PASSWORD_DEFAULT);
-    $stmt = $pdo->prepare("INSERT INTO `users` (`first_name`, `last_name`, `name`, `login`, `phone`, `password`, `role`, `team_name`) VALUES (?, ?, ?, ?, ?, ?, ?, 'Оргкомитет')");
-    $stmt->execute(['Админ', 'Главный', 'Администратор', 'admin', '+79990000000', $adminPassword, 'admin']);
+    $adminHash = password_hash('admin123', PASSWORD_DEFAULT);
+    $stmt = $pdo->prepare("INSERT INTO `users` (`first_name`, `last_name`, `name`, `login`, `phone`, `password`, `role`, `team_name`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->execute(['Админ', 'Главный', 'Администратор', 'admin', '+79990000000', $adminHash, 'admin', 'Оргкомитет']);
 }
 
 function ensureTablesExist($pdo) {
@@ -181,6 +188,8 @@ function ensureTablesExist($pdo) {
 }
 
 ensureTablesExist($pdo);
+
+// ─── Вспомогательные функции ─────────────────────────────────────────────────
 
 function getBearerToken() {
     $headers = null;
@@ -211,12 +220,30 @@ function getAuthUser($pdo) {
     return $stmt->fetch() ?: null;
 }
 
-function generateToken($userId) {
-    return bin2hex(random_bytes(32));
+function jsonResponse($data, $code = 200) {
+    http_response_code($code);
+    echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    exit();
 }
 
-$rawInput = file_get_contents('php://input');
-$data = json_decode($rawInput, true) ?: [];
+function jsonError($message, $code = 400) {
+    jsonResponse(['error' => $message], $code);
+}
+
+function requireAuth($pdo) {
+    $user = getAuthUser($pdo);
+    if (!$user) jsonError('Не авторизован', 401);
+    return $user;
+}
+
+function requireAdmin($pdo) {
+    $user = requireAuth($pdo);
+    $role = strtolower(trim($user['role']));
+    if (!in_array($role, ['admin', 'moderator'])) jsonError('Доступ запрещён', 403);
+    return $user;
+}
+
+// ─── Определение маршрута ────────────────────────────────────────────────────
 
 $uri = $_GET['route'] ?? '';
 if (!$uri) {
@@ -226,136 +253,169 @@ if (!$uri) {
 
 $method = $_SERVER['REQUEST_METHOD'];
 
+$rawInput = file_get_contents('php://input');
+$data = json_decode($rawInput, true) ?: [];
+
 try {
+
+    // ─── Инициализация БД вручную ─────────────────────────────────────────
+
     if ($uri === 'init-db') {
         initFreshDatabase($pdo);
-        echo json_encode(['success' => true, 'message' => 'База данных успешно инициализирована заново. Логин: admin / Пароль: admin123']);
-        exit();
+        jsonResponse(['success' => true, 'message' => 'База данных успешно инициализирована заново. Логин: admin / Пароль: admin123']);
     }
+
+    // ─── Настройки (публичные + админские) ─────────────────────────────────
 
     if ($uri === 'settings') {
         if ($method === 'GET') {
-            $stmt = $pdo->prepare("SELECT `value` FROM settings WHERE `key` = 'site_title'");
-            $stmt->execute();
-            $val = $stmt->fetchColumn();
-            echo json_encode(['site_title' => $val ?: 'Алабуга - форум 2025']);
-        } else if ($method === 'POST') {
-            $user = getAuthUser($pdo);
-            if (!$user || $user['role'] !== 'admin') {
-                http_response_code(403);
-                echo json_encode(['error' => 'Доступ запрещён']);
-                exit();
+            // Возвращаем все настройки
+            $stmt = $pdo->query("SELECT `key`, `value` FROM settings");
+            $rows = $stmt->fetchAll();
+            $settings = [];
+            foreach ($rows as $row) {
+                $settings[$row['key']] = $row['value'];
             }
-            $title = trim($data['site_title'] ?? '');
-            if (!$title) {
-                http_response_code(400);
-                echo json_encode(['error' => 'Название сайта не может быть пустым']);
-                exit();
-            }
-            $stmt = $pdo->prepare("INSERT INTO settings (`key`, `value`) VALUES ('site_title', ?) ON DUPLICATE KEY UPDATE `value` = ?");
-            $stmt->execute([$title, $title]);
-            echo json_encode(['success' => true, 'site_title' => $title]);
+            jsonResponse($settings);
         }
-        exit();
+
+        if ($method === 'POST') {
+            $user = requireAdmin($pdo);
+
+            // Принимаем объект с несколькими настройками: { site_title: "...", hero_badge: "...", ... }
+            foreach ($data as $key => $value) {
+                // Разрешаем только определённые ключи
+                $allowed = ['site_title', 'hero_badge', 'hero_title', 'hero_description', 'hero_button_text', 'hero_button_text_auth'];
+                if (!in_array($key, $allowed)) continue;
+                $val = trim((string)$value);
+                if ($val === '') continue;
+                $stmt = $pdo->prepare("INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = ?");
+                $stmt->execute([$key, $val, $val]);
+            }
+
+            jsonResponse(['success' => true]);
+        }
+
+        jsonError('Метод не поддерживается', 405);
     }
 
-    if ($uri === 'login') {
-        if ($method === 'POST') {
-            $loginInput = trim($data['login'] ?? $data['phone'] ?? $data['email'] ?? '');
-            $password = trim($data['password'] ?? '');
-            if (!$loginInput || !$password) {
-                http_response_code(400);
-                echo json_encode(['error' => 'Заполните логин/телефон и пароль']);
-                exit();
-            }
-            $phoneDigits = preg_replace('/\D/', '', $loginInput);
-            $stmt = $pdo->prepare("
-                SELECT * FROM users 
-                WHERE login = :input 
-                   OR phone = :input 
-                   OR (CHAR_LENGTH(:digits) >= 10 AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, '+', ''), ' ', ''), '(', ''), ')', ''), '-', '') LIKE CONCAT('%', :digits))
-                LIMIT 1
-            ");
-            $stmt->execute(['input' => $loginInput, 'digits' => $phoneDigits]);
-            $user = $stmt->fetch();
-            if (!$user || !password_verify($password, $user['password'])) {
-                http_response_code(401);
-                echo json_encode(['error' => 'Неверный логин/телефон или пароль']);
-                exit();
-            }
-            $token = generateToken($user['id']);
-            $expiresAt = date('Y-m-d H:i:s', strtotime('+7 days'));
-            $stmt = $pdo->prepare("INSERT INTO tokens (user_id, token, expires_at) VALUES (?, ?, ?)");
-            $stmt->execute([$user['id'], $token, $expiresAt]);
-            unset($user['password']);
-            echo json_encode(['token' => $token, 'user' => $user]);
-        }
-        exit();
-    }
+    // ─── Регистрация ────────────────────────────────────────────────────────
 
     if ($uri === 'register') {
-        if ($method === 'POST') {
-            $firstName = trim($data['first_name'] ?? '');
-            $lastName = trim($data['last_name'] ?? '');
-            $phone = trim($data['phone'] ?? '');
-            $password = trim($data['password'] ?? '');
-            if (!$firstName || !$lastName || !$phone || !$password) {
-                http_response_code(400);
-                echo json_encode(['error' => 'Все поля обязательны для заполнения']);
-                exit();
-            }
-            $phoneDigits = preg_replace('/\D/', '', $phone);
-            if (strlen($phoneDigits) < 10) {
-                http_response_code(400);
-                echo json_encode(['error' => 'Укажите корректный номер телефона']);
-                exit();
-            }
-            $autoLogin = 'u' . substr($phoneDigits, -8);
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE login = ?");
-            $stmt->execute([$autoLogin]);
-            if ($stmt->fetchColumn() > 0) {
-                $autoLogin = 'u' . $phoneDigits;
-            }
-            $fullName = $lastName . ' ' . $firstName;
-            $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
-            try {
-                $stmt = $pdo->prepare("INSERT INTO users (first_name, last_name, name, login, phone, password, role) VALUES (?, ?, ?, ?, ?, ?, 'user')");
-                $stmt->execute([$firstName, $lastName, $fullName, $autoLogin, $phone, $hashedPassword]);
-                $userId = $pdo->lastInsertId();
-                $token = generateToken($userId);
-                $expiresAt = date('Y-m-d H:i:s', strtotime('+7 days'));
-                $stmt = $pdo->prepare("INSERT INTO tokens (user_id, token, expires_at) VALUES (?, ?, ?)");
-                $stmt->execute([$userId, $token, $expiresAt]);
-                $userData = [
-                    'id' => $userId,
-                    'first_name' => $firstName,
-                    'last_name' => $lastName,
-                    'name' => $fullName,
-                    'login' => $autoLogin,
-                    'phone' => $phone,
-                    'role' => 'user',
-                    'password' => $password
-                ];
-                echo json_encode(['token' => $token, 'user' => $userData]);
-            } catch (PDOException $e) {
-                http_response_code(400);
-                echo json_encode(['error' => 'Пользователь с таким номером телефона или логином уже зарегистрирован']);
-            }
+        if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
+
+        $firstName = trim($data['first_name'] ?? '');
+        $lastName  = trim($data['last_name'] ?? '');
+        $phone     = trim($data['phone'] ?? '');
+        $password  = trim($data['password'] ?? '');
+
+        // Валидация
+        $errors = [];
+        if (!$firstName) $errors[] = 'Имя обязательно';
+        if (!$lastName) $errors[] = 'Фамилия обязательна';
+        if (!$phone) $errors[] = 'Номер телефона обязателен';
+        if (strlen($password) < 6) $errors[] = 'Пароль должен быть минимум 6 символов';
+
+        $phoneDigits = preg_replace('/\D/', '', $phone);
+        if (strlen($phoneDigits) < 10) $errors[] = 'Укажите корректный номер телефона';
+
+        if ($errors) jsonError(implode('. ', $errors), 400);
+
+        // Генерация логина
+        $autoLogin = 'u' . substr($phoneDigits, -8);
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE login = ?");
+        $stmt->execute([$autoLogin]);
+        if ($stmt->fetchColumn() > 0) {
+            $autoLogin = 'u' . $phoneDigits . rand(10, 99);
         }
-        exit();
+
+        // Проверка на дубликат телефона
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE phone = ?");
+        $stmt->execute([$phone]);
+        if ($stmt->fetchColumn() > 0) {
+            jsonError('Пользователь с таким номером телефона уже зарегистрирован', 400);
+        }
+
+        $fullName = $lastName . ' ' . $firstName;
+        $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
+
+        $stmt = $pdo->prepare("INSERT INTO users (first_name, last_name, name, login, phone, password, role) VALUES (?, ?, ?, ?, ?, ?, 'user')");
+        $stmt->execute([$firstName, $lastName, $fullName, $autoLogin, $phone, $hashedPassword]);
+        $userId = (int)$pdo->lastInsertId();
+
+        // Создаём токен
+        $token = bin2hex(random_bytes(32));
+        $expiresAt = date('Y-m-d H:i:s', strtotime('+30 days'));
+        $stmt = $pdo->prepare("INSERT INTO tokens (user_id, token, expires_at) VALUES (?, ?, ?)");
+        $stmt->execute([$userId, $token, $expiresAt]);
+
+        // Ответ с данными пользователя (пароль возвращаем в открытом виде для показа пользователю)
+        $userData = [
+            'id'         => $userId,
+            'first_name' => $firstName,
+            'last_name'  => $lastName,
+            'name'       => $fullName,
+            'login'      => $autoLogin,
+            'phone'      => $phone,
+            'role'       => 'user',
+            'password'   => $password,
+        ];
+
+        jsonResponse(['token' => $token, 'user' => $userData]);
     }
 
-    if ($uri === 'user') {
-        $user = getAuthUser($pdo);
-        if (!$user) {
-            http_response_code(401);
-            echo json_encode(['error' => 'Не авторизован']);
-            exit();
+    // ─── Авторизация (логин) ───────────────────────────────────────────────
+
+    if ($uri === 'login') {
+        if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
+
+        $loginInput = trim($data['login'] ?? $data['phone'] ?? $data['email'] ?? '');
+        $password   = trim($data['password'] ?? '');
+
+        if (!$loginInput || !$password) {
+            jsonError('Заполните логин/телефон и пароль', 400);
         }
+
+        // Ищем пользователя по логину, телефону (точное совпадение) или по цифрам телефона
+        $phoneDigits = preg_replace('/\D/', '', $loginInput);
+
+        $stmt = $pdo->prepare("
+            SELECT * FROM users
+            WHERE login = :input
+               OR phone = :input
+               OR (CHAR_LENGTH(:digits) >= 10 AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, '+', ''), ' ', ''), '(', ''), ')', ''), '-', '') LIKE CONCAT('%', :digits2))
+            LIMIT 1
+        ");
+        $stmt->execute([
+            'input'   => $loginInput,
+            'digits'  => $phoneDigits,
+            'digits2' => $phoneDigits,
+        ]);
+        $user = $stmt->fetch();
+
+        if (!$user || !password_verify($password, $user['password'])) {
+            jsonError('Неверный логин/телефон или пароль', 401);
+        }
+
+        // Создаём новый токен
+        $token = bin2hex(random_bytes(32));
+        $expiresAt = date('Y-m-d H:i:s', strtotime('+30 days'));
+        $stmt = $pdo->prepare("INSERT INTO tokens (user_id, token, expires_at) VALUES (?, ?, ?)");
+        $stmt->execute([$user['id'], $token, $expiresAt]);
+
         unset($user['password']);
-        echo json_encode($user);
-        exit();
+        jsonResponse(['token' => $token, 'user' => $user]);
     }
+
+    // ─── Текущий пользователь ──────────────────────────────────────────────
+
+    if ($uri === 'user') {
+        $user = requireAuth($pdo);
+        unset($user['password']);
+        jsonResponse($user);
+    }
+
+    // ─── Выход ──────────────────────────────────────────────────────────────
 
     if ($uri === 'logout') {
         $token = getBearerToken();
@@ -363,66 +423,68 @@ try {
             $stmt = $pdo->prepare("DELETE FROM tokens WHERE token = ?");
             $stmt->execute([$token]);
         }
-        echo json_encode(['success' => true]);
-        exit();
+        jsonResponse(['success' => true]);
     }
 
-    // ==== Маршруты для команд ====
+    // ─── Команды ────────────────────────────────────────────────────────────
+
     if ($uri === 'admin/teams') {
+        $user = requireAdmin($pdo);
+
         if ($method === 'GET') {
             $stmt = $pdo->query("SELECT * FROM teams ORDER BY name ASC");
-            echo json_encode($stmt->fetchAll());
-        } else if ($method === 'POST') {
+            jsonResponse($stmt->fetchAll());
+        }
+
+        if ($method === 'POST') {
             $action = $data['action'] ?? 'create';
             $id = (int)($data['id'] ?? 0);
             $name = trim($data['name'] ?? '');
             $desc = trim($data['description'] ?? '');
-            if (empty($name)) {
-                http_response_code(400);
-                echo json_encode(['error' => 'Название команды обязательно']);
-                exit();
-            }
+
+            if (empty($name)) jsonError('Название команды обязательно');
+
             if ($action === 'create') {
                 $stmt = $pdo->prepare("INSERT INTO teams (name, description) VALUES (?, ?)");
                 $stmt->execute([$name, $desc]);
-                echo json_encode(['success' => true]);
-            } else if ($action === 'update' && $id > 0) {
+            } elseif ($action === 'update' && $id > 0) {
                 $stmt = $pdo->prepare("UPDATE teams SET name=?, description=? WHERE id=?");
                 $stmt->execute([$name, $desc, $id]);
-                echo json_encode(['success' => true]);
             }
+            jsonResponse(['success' => true]);
         }
-        exit();
+
+        jsonError('Метод не поддерживается', 405);
     }
 
     if ($uri === 'admin/teams/delete') {
-        if ($method === 'POST') {
-            $id = (int)($data['id'] ?? 0);
-            $stmt = $pdo->prepare("DELETE FROM teams WHERE id = ?");
-            $stmt->execute([$id]);
-            echo json_encode(['success' => true]);
-        }
-        exit();
+        $user = requireAdmin($pdo);
+        if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
+        $id = (int)($data['id'] ?? 0);
+        $stmt = $pdo->prepare("DELETE FROM teams WHERE id = ?");
+        $stmt->execute([$id]);
+        jsonResponse(['success' => true]);
     }
 
     if ($uri === 'admin/teams/members') {
-        if ($method === 'GET') {
-            $teamId = (int)($_GET['team_id'] ?? 0);
-            $stmt = $pdo->prepare("
-                SELECT u.id, u.first_name, u.last_name, u.name, u.login, 
-                       COALESCE(tm.role, 'member') as role
-                FROM team_members tm
-                JOIN users u ON tm.user_id = u.id
-                WHERE tm.team_id = ?
-                ORDER BY u.last_name ASC
-            ");
-            $stmt->execute([$teamId]);
-            echo json_encode($stmt->fetchAll());
-        }
-        exit();
+        $user = requireAdmin($pdo);
+        if ($method !== 'GET') jsonError('Метод не поддерживается', 405);
+        $teamId = (int)($_GET['team_id'] ?? 0);
+        $stmt = $pdo->prepare("
+            SELECT u.id, u.first_name, u.last_name, u.name, u.login,
+                   COALESCE(tm.role, 'member') as role
+            FROM team_members tm
+            JOIN users u ON tm.user_id = u.id
+            WHERE tm.team_id = ?
+            ORDER BY u.last_name ASC
+        ");
+        $stmt->execute([$teamId]);
+        jsonResponse($stmt->fetchAll());
     }
 
     if ($uri === 'admin/teams/chat') {
+        $user = requireAdmin($pdo);
+
         if ($method === 'GET') {
             $teamId = (int)($_GET['team_id'] ?? 0);
             $stmt = $pdo->prepare("
@@ -433,69 +495,65 @@ try {
                 ORDER BY m.created_at ASC
             ");
             $stmt->execute([$teamId]);
-            echo json_encode($stmt->fetchAll());
-        } else if ($method === 'POST') {
+            jsonResponse($stmt->fetchAll());
+        }
+
+        if ($method === 'POST') {
             $teamId = (int)($data['team_id'] ?? 0);
             $message = trim($data['message'] ?? '');
-            $user = getAuthUser($pdo);
-            if (!$message) {
-                http_response_code(400);
-                echo json_encode(['error' => 'Сообщение не может быть пустым']);
-                exit();
-            }
+            if (!$message) jsonError('Сообщение не может быть пустым');
             $stmt = $pdo->prepare("INSERT INTO team_chat_messages (team_id, user_id, message) VALUES (?, ?, ?)");
             $stmt->execute([$teamId, $user['id'], $message]);
-            echo json_encode(['success' => true]);
+            jsonResponse(['success' => true]);
         }
-        exit();
+
+        jsonError('Метод не поддерживается', 405);
     }
 
     if ($uri === 'admin/teams/calendar') {
+        $user = requireAdmin($pdo);
+
         if ($method === 'GET') {
             $teamId = (int)($_GET['team_id'] ?? 0);
             $stmt = $pdo->prepare("SELECT * FROM team_calendar_events WHERE team_id = ? ORDER BY event_date ASC");
             $stmt->execute([$teamId]);
-            echo json_encode($stmt->fetchAll());
-        } else if ($method === 'POST') {
+            jsonResponse($stmt->fetchAll());
+        }
+
+        if ($method === 'POST') {
             $action = $data['action'] ?? 'create';
             $teamId = (int)($data['team_id'] ?? 0);
+
             if ($action === 'create') {
                 $title = trim($data['title'] ?? '');
                 $eventDate = trim($data['event_date'] ?? '');
                 $desc = trim($data['description'] ?? '');
-                if (!$title || !$eventDate) {
-                    http_response_code(400);
-                    echo json_encode(['error' => 'Заполните название и дату']);
-                    exit();
-                }
-                $user = getAuthUser($pdo);
+                if (!$title || !$eventDate) jsonError('Заполните название и дату');
                 $stmt = $pdo->prepare("INSERT INTO team_calendar_events (team_id, title, event_date, description, created_by) VALUES (?, ?, ?, ?, ?)");
                 $stmt->execute([$teamId, $title, $eventDate, $desc, $user['id']]);
-                echo json_encode(['success' => true]);
-            } else if ($action === 'delete') {
+            } elseif ($action === 'delete') {
                 $id = (int)($data['id'] ?? 0);
                 $stmt = $pdo->prepare("DELETE FROM team_calendar_events WHERE id = ?");
                 $stmt->execute([$id]);
-                echo json_encode(['success' => true]);
             }
+            jsonResponse(['success' => true]);
         }
-        exit();
+
+        jsonError('Метод не поддерживается', 405);
     }
 
-    // Маршруты Админ-Панели (остальные)
+    // ─── Маршруты Админ-панели ──────────────────────────────────────────────
+
     if (strpos($uri, 'admin/') === 0) {
-        $user = getAuthUser($pdo);
-        if (!$user || !in_array($user['role'], ['admin', 'moderator'])) {
-            http_response_code(403);
-            echo json_encode(['error' => 'Доступ запрещён']);
-            exit();
-        }
+        $user = requireAdmin($pdo);
 
         if ($uri === 'admin/users') {
             if ($method === 'GET') {
                 $stmt = $pdo->query("SELECT id, first_name, last_name, name, login as email, phone, role, team_name, team_id, created_at FROM users ORDER BY id DESC");
-                echo json_encode($stmt->fetchAll());
-            } else if ($method === 'POST') {
+                jsonResponse($stmt->fetchAll());
+            }
+
+            if ($method === 'POST') {
                 $id = (int)($data['id'] ?? 0);
                 $firstName = trim($data['first_name'] ?? '');
                 $lastName = trim($data['last_name'] ?? '');
@@ -505,9 +563,9 @@ try {
                 $teamName = trim($data['team_name'] ?? '');
                 $teamId = (int)($data['team_id'] ?? 0);
                 $password = trim($data['password'] ?? '');
+
                 if ($id > 0) {
                     $fullName = $lastName . ' ' . $firstName;
-                    // Определим team_name из названия команды
                     $teamNameResolved = $teamName;
                     if ($teamId > 0) {
                         $stmt = $pdo->prepare("SELECT name FROM teams WHERE id = ?");
@@ -522,30 +580,31 @@ try {
                         $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, name=?, phone=?, login=?, role=?, team_name=?, team_id=? WHERE id=?");
                         $stmt->execute([$firstName, $lastName, $fullName, $phone, $login, $role, $teamNameResolved, $teamId ?: null, $id]);
                     }
-                    echo json_encode(['success' => true]);
+                    jsonResponse(['success' => true]);
                 }
+                jsonError('ID пользователя не указан');
             }
-            exit();
+
+            jsonError('Метод не поддерживается', 405);
         }
 
         if ($uri === 'admin/user-details') {
             $id = (int)($_GET['id'] ?? 0);
             $stmt = $pdo->prepare("
-                SELECT b.id, b.status, b.created_at, r.room_number, bu.name as building_name, f.floor_number 
-                FROM bookings b 
-                JOIN rooms r ON b.room_id = r.id 
-                JOIN buildings bu ON r.building_id = bu.id 
-                JOIN floors f ON r.floor_id = f.id 
+                SELECT b.id, b.status, b.created_at, r.room_number, bu.name as building_name, f.floor_number
+                FROM bookings b
+                JOIN rooms r ON b.room_id = r.id
+                JOIN buildings bu ON r.building_id = bu.id
+                JOIN floors f ON r.floor_id = f.id
                 WHERE b.user_id = ? ORDER BY b.id DESC
             ");
             $stmt->execute([$id]);
             $history = $stmt->fetchAll();
             $current = count($history) > 0 ? $history[0] : null;
-            echo json_encode([
+            jsonResponse([
                 'current_booking' => $current,
-                'bookings_history' => $history
+                'bookings_history' => $history,
             ]);
-            exit();
         }
 
         if ($uri === 'admin/bookings') {
@@ -561,31 +620,35 @@ try {
                     JOIN floors f ON r.floor_id = f.id
                     ORDER BY b.id DESC
                 ");
-                echo json_encode($stmt->fetchAll());
-            } else if ($method === 'POST') {
+                jsonResponse($stmt->fetchAll());
+            }
+
+            if ($method === 'POST') {
                 $id = (int)($data['id'] ?? 0);
                 $roomId = (int)($data['room_id'] ?? 0);
                 $status = trim($data['status'] ?? 'pending');
                 if ($id > 0) {
                     $stmt = $pdo->prepare("UPDATE bookings SET room_id = ?, status = ? WHERE id = ?");
                     $stmt->execute([$roomId, $status, $id]);
-                    echo json_encode(['success' => true]);
                 }
+                jsonResponse(['success' => true]);
             }
-            exit();
+
+            jsonError('Метод не поддерживается', 405);
         }
 
         if ($uri === 'admin/buildings') {
             if ($method === 'GET') {
                 $stmt = $pdo->query("SELECT * FROM buildings ORDER BY id ASC");
-                echo json_encode($stmt->fetchAll());
-            } else if ($method === 'POST') {
+                jsonResponse($stmt->fetchAll());
+            }
+
+            if ($method === 'POST') {
                 $action = $data['action'] ?? '';
                 if ($action === 'delete') {
                     $id = (int)($data['id'] ?? 0);
                     $stmt = $pdo->prepare("DELETE FROM buildings WHERE id = ?");
                     $stmt->execute([$id]);
-                    echo json_encode(['success' => true]);
                 } else {
                     $name = trim($data['name'] ?? '');
                     $gender = $data['gender'] ?? 'MIXED';
@@ -597,10 +660,11 @@ try {
                         $stmt = $pdo->prepare("INSERT INTO buildings (name, gender) VALUES (?, ?)");
                         $stmt->execute([$name, $gender]);
                     }
-                    echo json_encode(['success' => true]);
                 }
+                jsonResponse(['success' => true]);
             }
-            exit();
+
+            jsonError('Метод не поддерживается', 405);
         }
 
         if ($uri === 'admin/floors') {
@@ -608,14 +672,15 @@ try {
                 $buildingId = (int)($_GET['building_id'] ?? 0);
                 $stmt = $pdo->prepare("SELECT * FROM floors WHERE building_id = ? ORDER BY floor_number ASC");
                 $stmt->execute([$buildingId]);
-                echo json_encode($stmt->fetchAll());
-            } else if ($method === 'POST') {
+                jsonResponse($stmt->fetchAll());
+            }
+
+            if ($method === 'POST') {
                 $action = $data['action'] ?? '';
                 if ($action === 'delete') {
                     $id = (int)($data['id'] ?? 0);
                     $stmt = $pdo->prepare("DELETE FROM floors WHERE id = ?");
                     $stmt->execute([$id]);
-                    echo json_encode(['success' => true]);
                 } else {
                     $id = (int)($data['id'] ?? 0);
                     $buildingId = (int)($data['building_id'] ?? 0);
@@ -631,10 +696,11 @@ try {
                         $stmt = $pdo->prepare("INSERT INTO floors (building_id, floor_number, width, start_room_number, room_order_type, gender) VALUES (?, ?, ?, ?, ?, ?)");
                         $stmt->execute([$buildingId, $floorNumber, $width, $startRoomNum, $orderType, $gender]);
                     }
-                    echo json_encode(['success' => true]);
                 }
+                jsonResponse(['success' => true]);
             }
-            exit();
+
+            jsonError('Метод не поддерживается', 405);
         }
 
         if ($uri === 'admin/rooms') {
@@ -642,14 +708,15 @@ try {
                 $floorId = (int)($_GET['floor_id'] ?? 0);
                 $stmt = $pdo->prepare("SELECT * FROM rooms WHERE floor_id = ? ORDER BY y_pos ASC, x_pos ASC");
                 $stmt->execute([$floorId]);
-                echo json_encode($stmt->fetchAll());
-            } else if ($method === 'POST') {
+                jsonResponse($stmt->fetchAll());
+            }
+
+            if ($method === 'POST') {
                 $action = $data['action'] ?? '';
                 if ($action === 'delete') {
                     $id = (int)($data['id'] ?? 0);
                     $stmt = $pdo->prepare("DELETE FROM rooms WHERE id = ?");
                     $stmt->execute([$id]);
-                    echo json_encode(['success' => true]);
                 } else {
                     $id = (int)($data['id'] ?? 0);
                     $floorId = (int)($data['floor_id'] ?? 0);
@@ -669,42 +736,43 @@ try {
                         $stmt = $pdo->prepare("INSERT INTO rooms (floor_id, building_id, room_number, name, capacity, is_technical, room_type, gender, x_pos, y_pos) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
                         $stmt->execute([$floorId, $buildingId, $roomNumber, $name, $capacity, $isTech, $type, $gender, $x, $y]);
                     }
-                    echo json_encode(['success' => true]);
                 }
+                jsonResponse(['success' => true]);
             }
-            exit();
+
+            jsonError('Метод не поддерживается', 405);
         }
 
         if ($uri === 'admin/all-rooms') {
             $stmt = $pdo->query("
-                SELECT r.*, bu.name as building_name, f.floor_number 
-                FROM rooms r 
-                JOIN buildings bu ON r.building_id = bu.id 
-                JOIN floors f ON r.floor_id = f.id 
+                SELECT r.*, bu.name as building_name, f.floor_number
+                FROM rooms r
+                JOIN buildings bu ON r.building_id = bu.id
+                JOIN floors f ON r.floor_id = f.id
                 ORDER BY bu.id ASC, f.floor_number ASC, r.room_number ASC
             ");
-            echo json_encode($stmt->fetchAll());
-            exit();
+            jsonResponse($stmt->fetchAll());
         }
 
         if ($uri === 'admin/room-bookings') {
             $roomId = (int)($_GET['room_id'] ?? 0);
             $stmt = $pdo->prepare("
-                SELECT b.*, u.first_name, u.last_name, u.name as user_name, u.phone as user_phone 
-                FROM bookings b 
-                JOIN users u ON b.user_id = u.id 
+                SELECT b.*, u.first_name, u.last_name, u.name as user_name, u.phone as user_phone
+                FROM bookings b
+                JOIN users u ON b.user_id = u.id
                 WHERE b.room_id = ? ORDER BY b.id DESC
             ");
             $stmt->execute([$roomId]);
-            echo json_encode($stmt->fetchAll());
-            exit();
+            jsonResponse($stmt->fetchAll());
         }
+
+        // Если ни один admin-маршрут не подошёл — 404
+        jsonError('Маршрут не найден', 404);
     }
 
-    http_response_code(404);
-    echo json_encode(['error' => 'Маршрут не найден']);
+    // ─── 404 ──────────────────────────────────────────────────────────────────
+    jsonError('Маршрут не найден', 404);
 
 } catch (Exception $e) {
-    http_response_code(500);
-    echo json_encode(['error' => 'Ошибка сервера: ' . $e->getMessage()]);
+    jsonResponse(['error' => 'Ошибка сервера: ' . $e->getMessage()], 500);
 }

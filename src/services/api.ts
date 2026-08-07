@@ -12,18 +12,20 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Настройки
+// ─── Настройки сайта ──────────────────────────────────────────────────────────
+
 export const getSettings = async () => {
   const response = await api.get('/settings');
   return response.data;
 };
 
-export const updateSettings = async (siteTitle: string) => {
-  const response = await api.post('/settings', { site_title: siteTitle });
+export const updateSettings = async (settings: Record<string, string>) => {
+  const response = await api.post('/settings', settings);
   return response.data;
 };
 
-// Пользователи (Админка)
+// ─── Пользователи (Админка) ───────────────────────────────────────────────────
+
 export const getAdminUsers = async () => {
   const response = await api.get('/admin/users');
   return response.data;
@@ -39,7 +41,8 @@ export const getUserDetails = async (id: number) => {
   return response.data;
 };
 
-// Бронирования (Админка)
+// ─── Бронирования (Админка) ───────────────────────────────────────────────────
+
 export const getAdminBookings = async () => {
   const response = await api.get('/admin/bookings');
   return response.data;
@@ -60,7 +63,8 @@ export const getRoomBookings = async (roomId: number) => {
   return response.data;
 };
 
-// Корпуса
+// ─── Корпуса ──────────────────────────────────────────────────────────────────
+
 export const getAdminBuildings = async () => {
   const response = await api.get('/admin/buildings');
   return response.data;
@@ -76,7 +80,8 @@ export const deleteAdminBuilding = async (id: number) => {
   return response.data;
 };
 
-// Этажи
+// ─── Этажи ────────────────────────────────────────────────────────────────────
+
 export const getAdminFloors = async (buildingId: number) => {
   const response = await api.get(`/admin/floors?building_id=${buildingId}`);
   return response.data;
@@ -92,7 +97,8 @@ export const deleteAdminFloor = async (id: number) => {
   return response.data;
 };
 
-// Комнаты
+// ─── Комнаты ──────────────────────────────────────────────────────────────────
+
 export const getAdminRooms = async (floorId: number) => {
   const response = await api.get(`/admin/rooms?floor_id=${floorId}`);
   return response.data;
@@ -108,7 +114,8 @@ export const deleteAdminRoom = async (id: number) => {
   return response.data;
 };
 
-// Команды
+// ─── Команды ──────────────────────────────────────────────────────────────────
+
 export const getAdminTeams = async () => {
   const response = await api.get('/admin/teams');
   return response.data;

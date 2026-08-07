@@ -21,7 +21,13 @@ CREATE TABLE `settings` (
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO `settings` (`key`, `value`) VALUES ('site_title', 'Алабуга - форум 2025');
+INSERT INTO `settings` (`key`, `value`) VALUES
+('site_title', 'Алабуга - форум 2025'),
+('hero_badge', 'Форум 2025'),
+('hero_title', 'Добро пожаловать в систему проживания <span style="color: #38bdf8">Алабуга</span>'),
+('hero_description', 'Интерактивный сервис бронирования жилых помещений, работы с командами и расселения участников форума в реальном времени.'),
+('hero_button_text', 'Войти / Зарегистрироваться'),
+('hero_button_text_auth', 'Перейти в личный кабинет');
 
 -- 2. Таблица команд
 CREATE TABLE `teams` (

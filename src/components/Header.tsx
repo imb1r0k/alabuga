@@ -1,21 +1,22 @@
 import React, { useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { 
-  Home, 
-  User, 
-  LogOut, 
-  Menu, 
-  X, 
-  Users, 
-  Building2, 
-  BookmarkCheck, 
-  ShieldCheck,
-  Zap
+import { useSettings } from '../contexts/SettingsContext';
+import {
+  Home,
+  User,
+  LogOut,
+  Menu,
+  X,
+  Users,
+  Building2,
+  BookmarkCheck,
+  ShieldCheck
 } from 'lucide-react';
 
 export const Header: React.FC = () => {
   const { user, isAuthenticated, logout, isAdmin, isModerator } = useAuth();
+  const { siteTitle } = useSettings();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -62,22 +63,24 @@ export const Header: React.FC = () => {
       }}>
         
         {/* Логотип */}
-        <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fff', textDecoration: 'none', fontWeight: 'bold', fontSize: '18px' }}>
-          <div style={{
-            width: '36px',
-            height: '36px',
-            borderRadius: '8px',
-            backgroundColor: '#0284c7',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#fff',
-            boxShadow: '0 4px 12px rgba(2, 132, 199, 0.3)'
-          }}>
-            <Zap size={20} />
-          </div>
-          <span style={{ letterSpacing: '0.5px' }}>Алабуга</span>
-        </Link>
+                <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fff', textDecoration: 'none', fontWeight: 'bold', fontSize: '18px' }}>
+                  <div style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '8px',
+                    backgroundColor: '#0284c7',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#fff',
+                    fontSize: '14px',
+                    fontWeight: 800,
+                    boxShadow: '0 4px 12px rgba(2, 132, 199, 0.3)'
+                  }}>
+                    A
+                  </div>
+                  <span style={{ letterSpacing: '0.5px' }}>{siteTitle}</span>
+                </Link>
 
         {/* Навигация ПК */}
         <nav className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: '4px', overflowX: 'auto' }}>

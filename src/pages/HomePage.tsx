@@ -2,9 +2,11 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Shield, Zap, CheckCircle, ArrowRight } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useSettings } from '../contexts/SettingsContext';
 
 export const HomePage: React.FC = () => {
   const { isAuthenticated } = useAuth();
+  const { hero } = useSettings();
 
   return (
     <div style={{ padding: '32px 16px', maxWidth: '1280px', margin: '0 auto' }}>
@@ -20,24 +22,27 @@ export const HomePage: React.FC = () => {
         overflow: 'hidden'
       }}>
         <div style={{ position: 'relative', zIndex: 10, maxWidth: '640px' }}>
-          <span style={{
-            display: 'inline-block',
-            backgroundColor: 'rgba(56, 189, 248, 0.2)',
-            color: '#7dd3fc',
-            border: '1px solid rgba(56, 189, 248, 0.3)',
-            fontSize: '12px',
-            fontWeight: 600,
-            padding: '4px 12px',
-            borderRadius: '20px',
-            marginBottom: '16px'
-          }}>
-            Форум 2025
-          </span>
-          <h1 style={{ fontSize: '32px', fontWeight: 800, marginBottom: '16px', lineHeight: 1.2 }}>
-            Добро пожаловать в систему проживания <span style={{ color: '#38bdf8' }}>Алабуга</span>
-          </h1>
+          {hero.hero_badge && (
+            <span style={{
+              display: 'inline-block',
+              backgroundColor: 'rgba(56, 189, 248, 0.2)',
+              color: '#7dd3fc',
+              border: '1px solid rgba(56, 189, 248, 0.3)',
+              fontSize: '12px',
+              fontWeight: 600,
+              padding: '4px 12px',
+              borderRadius: '20px',
+              marginBottom: '16px'
+            }}>
+              {hero.hero_badge}
+            </span>
+          )}
+          <h1
+            style={{ fontSize: '32px', fontWeight: 800, marginBottom: '16px', lineHeight: 1.2 }}
+            dangerouslySetInnerHTML={{ __html: hero.hero_title }}
+          />
           <p style={{ color: '#cbd5e1', fontSize: '16px', marginBottom: '32px', lineHeight: 1.6 }}>
-            Интерактивный сервис бронирования жилых помещений, работы с командами и расселения участников форума в реальном времени.
+            {hero.hero_description}
           </p>
 
           <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
@@ -47,7 +52,7 @@ export const HomePage: React.FC = () => {
                 className="btn btn-primary"
                 style={{ padding: '12px 24px', borderRadius: '12px', fontSize: '15px', textDecoration: 'none', gap: '8px' }}
               >
-                <span>Перейти в личный кабинет</span>
+                <span>{hero.hero_button_text_auth}</span>
                 <ArrowRight size={18} />
               </Link>
             ) : (
@@ -56,7 +61,7 @@ export const HomePage: React.FC = () => {
                 className="btn btn-primary"
                 style={{ padding: '12px 24px', borderRadius: '12px', fontSize: '15px', textDecoration: 'none', gap: '8px' }}
               >
-                <span>Войти / Зарегистрироваться</span>
+                <span>{hero.hero_button_text}</span>
                 <ArrowRight size={18} />
               </Link>
             )}
