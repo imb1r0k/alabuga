@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import toast from 'react-hot-toast';
 import { Skeleton } from '../../components/Skeleton';
 import { AdminLayout } from '../../components/AdminLayout';
 import {
@@ -34,8 +33,6 @@ import {
   Zap,
   X,
   Check,
-  Edit3,
-  Eye,
   Trash2,
   Users,
   AlertTriangle,
@@ -129,7 +126,6 @@ export const AdminBuildingsPage: React.FC = () => {
   const [buildingsLoading, setBuildingsLoading] = useState(false);
   const [savingBuilding, setSavingBuilding] = useState(false);
   const [savingLayout, setSavingLayout] = useState(false);
-  const [savingRoom, setSavingRoom] = useState(false);
   
   // Добавление корпуса
   const [newBuildingName, setNewBuildingName] = useState('');
@@ -634,23 +630,9 @@ export const AdminBuildingsPage: React.FC = () => {
         {buildingsLoading ? (
           <Skeleton width="100%" height={300} />
         ) : (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(5, 1fr)',
-            gap: '20px',
-            '@media (max-width: 768px)': {
-              gridTemplateColumns: '1fr',
-            }
-          }}>
+          <div className="admin-grid">
             {/* Левый сайдбар: Список корпусов */}
-            <div className="admin-card" style={{
-              padding: '18px',
-              height: 'fit-content',
-              gridColumn: 'span 1',
-              '@media (max-width: 768px)': {
-                gridColumn: 'span 5',
-              }
-            }}>
+            <div className="admin-card admin-sidebar" style={{ padding: '18px', height: 'fit-content' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', color: 'var(--text-primary)' }}>
                 <Building2 size={18} color="var(--accent-primary)" />
                 <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700 }}>Корпуса</h4>
@@ -724,11 +706,7 @@ export const AdminBuildingsPage: React.FC = () => {
             </div>
 
             {/* Основной блок: Редактор корпуса */}
-            <div className="admin-card" style={{
-              padding: '24px',
-              gridColumn: 'span 4',
-              '@media (max-width: 768px)': { gridColumn: 'span 5' }
-            }}>
+            <div className="admin-card admin-main" style={{ padding: '24px' }}>
               {selectedBuilding ? (
                 <div>
                   {/* Заголовок */}
@@ -956,7 +934,7 @@ export const AdminBuildingsPage: React.FC = () => {
                             <div className="input-group" style={{ marginBottom: 0 }}><label style={{ fontSize: '12px', fontWeight: 600 }}>Вместимость</label><input type="number" min={0} max={10} value={selectedRoom.capacity} onChange={(e) => setSelectedRoom({ ...selectedRoom, capacity: Number(e.target.value) })} /></div>
                             <div className="input-group" style={{ marginBottom: 0 }}><label style={{ fontSize: '12px', fontWeight: 600 }}>Пол</label><select value={selectedRoom.gender || 'DEFAULT'} onChange={(e) => setSelectedRoom({ ...selectedRoom, gender: e.target.value })}><option value="DEFAULT">От этажа/корпуса</option><option value="MIXED">Смешанный (С)</option><option value="M">Мужской (М)</option><option value="F">Женский (Ж)</option></select></div>
                             <div style={{ gridColumn: '1 / -1', marginTop: '10px', display: 'flex', gap: '10px' }}>
-                              <button type="submit" className="btn btn-primary" disabled={savingRoom}><SquareCheck size={16} /> Применить локально</button>
+                              <button type="submit" className="btn btn-primary" disabled={savingLayout}><SquareCheck size={16} /> Применить локально</button>
                               {isEditLayout && <button type="button" className="btn btn-danger" onClick={() => { setDeleteConfirmTarget({ type: 'room', x: Number(selectedRoom.x_pos), y: Number(selectedRoom.y_pos), name: selectedRoom.room_number || selectedRoom.name }); }}><Trash2 size={16} /> Удалить комнату</button>}
                             </div>
                           </form>
