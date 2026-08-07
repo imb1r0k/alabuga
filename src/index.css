@@ -30,12 +30,16 @@ body {
   scrollbar-width: none;
 }
 
+.writing-mode-vertical {
+  writing-mode: vertical-lr;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 8px 16px;
-  border-none;
+  border: none;
   border-radius: 6px;
   font-size: 14px;
   font-weight: 500;
