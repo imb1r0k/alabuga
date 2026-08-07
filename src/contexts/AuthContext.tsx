@@ -80,14 +80,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     localStorage.setItem('token', token);
     setUser(user);
     await fetchUser();
-    // Возвращаем данные для окна с данными для входа
-    return {
-      last_name: user.last_name || lastName,
-      first_name: user.first_name || firstName,
-      login: user.login || '—',
-      phone: user.phone || phone,
-      password: password // важно, чтобы показать пароль
-    };
+    return user; // содержит login и password для окна
   };
 
   const logout = async () => {
