@@ -22,48 +22,73 @@ try {
     $pdo = new PDO("mysql:host=$host;port=$port;dbname=$dbname;charset=utf8mb4", $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    http_response_code(500);
+    echo json_encode(['error' => 'Ошибка подключения к базе данных: ' . $e->getMessage()]);
+    exit();
+}
 
-    // Автоматическая гидратация/миграция отсутствующих колонок в таблице users
-    $autoMigrateCols = [
-        "ALTER TABLE `users` ADD COLUMN `first_name` VARCHAR(100) NULL AFTER `id`",
-        "ALTER TABLE `users` ADD COLUMN `last_name` VARCHAR(100) NULL AFTER `first_name`",
-        "ALTER TABLE `users` ADD COLUMN `phone` VARCHAR(50) NULL AFTER `email`",
-        "ALTER TABLE `users` ADD COLUMN `team_name` VARCHAR(100) NULL AFTER `role`"
-    ];
-    foreach ($autoMigrateCols as $sql) {
-        try {
-            $pdo->exec($sql);
-        } catch (Exception $e) {
-            // Колонка уже существует, пропуск
-        }
-    }
+function initFreshDatabase($pdo) {
+    $sql = "
+        SET FOREIGN_KEY_CHECKS = 0;
+        DROP TABLE IF EXISTS `bookings`;
+        DROP TABLE IF EXISTS `rooms`;
+        DROP TABLE IF EXISTS `floors`;
+        DROP TABLE IF EXISTS `buildings`;
+        DROP TABLE IF EXISTS `tokens`;
+        DROP TABLE IF EXISTS `users`;
+        DROP TABLE IF EXISTS `settings`;
+        SET FOREIGN_KEY_CHECKS = 1;
 
-    // Автоматическое создание недостающих таблиц если они отсутствуют
-    $pdo->exec("
-        CREATE TABLE IF NOT EXISTS `settings` (
+        CREATE TABLE `settings` (
           `key` VARCHAR(50) NOT NULL PRIMARY KEY,
           `value` TEXT NULL,
           `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-        CREATE TABLE IF NOT EXISTS `buildings` (
+        INSERT INTO `settings` (`key`, `value`) VALUES ('site_title', 'Алабуга - форум 2025');
+
+        CREATE TABLE `users` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `first_name` VARCHAR(100) NULL,
+          `last_name` VARCHAR(100) NULL,
+          `name` VARCHAR(255) NOT NULL,
+          `email` VARCHAR(255) NOT NULL UNIQUE,
+          `phone` VARCHAR(50) NULL,
+          `password` VARCHAR(255) NOT NULL,
+          `role` VARCHAR(50) NOT NULL DEFAULT 'user',
+          `team_name` VARCHAR(100) NULL,
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+        CREATE TABLE `tokens` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `user_id` INT NOT NULL,
+          `token` VARCHAR(255) NOT NULL UNIQUE,
+          `expires_at` DATETIME NOT NULL,
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+        CREATE TABLE `buildings` (
           `id` INT AUTO_INCREMENT PRIMARY KEY,
           `name` VARCHAR(255) NOT NULL,
           `gender` ENUM('M', 'F') NOT NULL DEFAULT 'M',
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-        CREATE TABLE IF NOT EXISTS `floors` (
+        CREATE TABLE `floors` (
           `id` INT AUTO_INCREMENT PRIMARY KEY,
           `building_id` INT NOT NULL,
           `floor_number` INT NOT NULL,
           `width` INT NOT NULL DEFAULT 8,
           `gender` ENUM('M', 'F', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
           `layout_data` LONGTEXT NULL,
-          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (`building_id`) REFERENCES `buildings`(`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-        CREATE TABLE IF NOT EXISTS `rooms` (
+        CREATE TABLE `rooms` (
           `id` INT AUTO_INCREMENT PRIMARY KEY,
           `floor_id` INT NOT NULL,
           `building_id` INT NOT NULL,
@@ -74,23 +99,36 @@ try {
           `gender` ENUM('M', 'F', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
           `x_pos` INT NOT NULL DEFAULT 0,
           `y_pos` INT NOT NULL DEFAULT 0,
-          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (`floor_id`) REFERENCES `floors`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`building_id`) REFERENCES `buildings`(`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-        CREATE TABLE IF NOT EXISTS `bookings` (
+        CREATE TABLE `bookings` (
           `id` INT AUTO_INCREMENT PRIMARY KEY,
           `user_id` INT NOT NULL,
           `room_id` INT NOT NULL,
           `status` ENUM('pending', 'rejected', 'approved', 'approved_bot') NOT NULL DEFAULT 'pending',
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ");
+          `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`room_id`) REFERENCES `rooms`(`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    ";
 
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode(['error' => 'Ошибка подключения или настройки базы данных: ' . $e->getMessage()]);
-    exit();
+    $pdo->exec($sql);
+
+    // Добавляем аккаунт администратора по умолчанию
+    $adminPassword = password_hash('admin123', PASSWORD_DEFAULT);
+    $stmt = $pdo->prepare("INSERT INTO `users` (`first_name`, `last_name`, `name`, `email`, `phone`, `password`, `role`, `team_name`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->execute(['Админ', 'Главный', 'Администратор', 'admin@alabuga.ru', '+79990000000', $adminPassword, 'admin', 'Оргкомитет']);
+}
+
+// Автоматически создаем таблицы, если их нет
+try {
+    $pdo->query("SELECT 1 FROM `users` LIMIT 1");
+} catch (Exception $e) {
+    initFreshDatabase($pdo);
 }
 
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
@@ -137,19 +175,10 @@ function getUserByToken($pdo, $token) {
              WHERE t.token = ? AND t.expires_at > NOW()'
         );
         $stmt->execute([$token]);
-        $user = $stmt->fetch();
-        if ($user) return $user;
+        return $stmt->fetch() ?: null;
     } catch (Exception $e) {
-        // Фоллбек на базовые поля в случае форс-мажора
-        $stmt = $pdo->prepare(
-            'SELECT u.id, u.name, u.email, u.role FROM users u 
-             INNER JOIN tokens t ON u.id = t.user_id 
-             WHERE t.token = ? AND t.expires_at > NOW()'
-        );
-        $stmt->execute([$token]);
-        return $stmt->fetch();
+        return null;
     }
-    return null;
 }
 
 function checkAdmin($pdo, $token) {
@@ -166,6 +195,18 @@ function checkAdmin($pdo, $token) {
 // Главная логика маршрутизации
 try {
     switch ($uri) {
+        case 'init-db':
+            initFreshDatabase($pdo);
+            echo json_encode([
+                'success' => true,
+                'message' => 'База данных успешно пересоздана с нуля!',
+                'default_admin' => [
+                    'email' => 'admin@alabuga.ru',
+                    'password' => 'admin123'
+                ]
+            ]);
+            break;
+
         case 'settings':
             if ($method === 'GET') {
                 $stmt = $pdo->query('SELECT `key`, `value` FROM settings');

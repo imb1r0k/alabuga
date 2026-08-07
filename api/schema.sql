@@ -1,17 +1,26 @@
--- Таблица настроек сайта
-CREATE TABLE IF NOT EXISTS `settings` (
+SET FOREIGN_KEY_CHECKS = 0;
+
+DROP TABLE IF EXISTS `bookings`;
+DROP TABLE IF EXISTS `rooms`;
+DROP TABLE IF EXISTS `floors`;
+DROP TABLE IF EXISTS `buildings`;
+DROP TABLE IF EXISTS `tokens`;
+DROP TABLE IF EXISTS `users`;
+DROP TABLE IF EXISTS `settings`;
+
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- 1. Настройки сайта
+CREATE TABLE `settings` (
   `key` VARCHAR(50) NOT NULL PRIMARY KEY,
   `value` TEXT NULL,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Начальные данные для названия сайта
-INSERT INTO `settings` (`key`, `value`) 
-VALUES ('site_title', 'Алабуга - форум 2025')
-ON DUPLICATE KEY UPDATE `value` = VALUES(`value`);
+INSERT INTO `settings` (`key`, `value`) VALUES ('site_title', 'Алабуга - форум 2025');
 
--- Таблица пользователей
-CREATE TABLE IF NOT EXISTS `users` (
+-- 2. Пользователи
+CREATE TABLE `users` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `first_name` VARCHAR(100) NULL,
   `last_name` VARCHAR(100) NULL,
@@ -24,8 +33,12 @@ CREATE TABLE IF NOT EXISTS `users` (
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Таблица токенов
-CREATE TABLE IF NOT EXISTS `tokens` (
+-- Создаем дефолтного администратора (пароль: admin123)
+INSERT INTO `users` (`first_name`, `last_name`, `name`, `email`, `phone`, `password`, `role`, `team_name`)
+VALUES ('Админ', 'Главный', 'Администратор', 'admin@alabuga.ru', '+79990000000', '$2y$10$e88yC0w.1/a7GjQW.S3x2uA6x30cO4c6B7H6K2M8P1L1I1N1O1Q1S', 'admin', 'Оргкомитет');
+
+-- 3. Токены авторизации
+CREATE TABLE `tokens` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `user_id` INT NOT NULL,
   `token` VARCHAR(255) NOT NULL UNIQUE,
@@ -34,16 +47,16 @@ CREATE TABLE IF NOT EXISTS `tokens` (
   FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Таблица корпусов
-CREATE TABLE IF NOT EXISTS `buildings` (
+-- 4. Корпуса
+CREATE TABLE `buildings` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `name` VARCHAR(255) NOT NULL,
   `gender` ENUM('M', 'F') NOT NULL DEFAULT 'M',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Таблица этажей
-CREATE TABLE IF NOT EXISTS `floors` (
+-- 5. Этажи
+CREATE TABLE `floors` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `building_id` INT NOT NULL,
   `floor_number` INT NOT NULL,
@@ -54,8 +67,8 @@ CREATE TABLE IF NOT EXISTS `floors` (
   FOREIGN KEY (`building_id`) REFERENCES `buildings`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Таблица комнат
-CREATE TABLE IF NOT EXISTS `rooms` (
+-- 6. Комнаты
+CREATE TABLE `rooms` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `floor_id` INT NOT NULL,
   `building_id` INT NOT NULL,
@@ -71,8 +84,8 @@ CREATE TABLE IF NOT EXISTS `rooms` (
   FOREIGN KEY (`building_id`) REFERENCES `buildings`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Таблица бронирований
-CREATE TABLE IF NOT EXISTS `bookings` (
+-- 7. Бронирования
+CREATE TABLE `bookings` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `user_id` INT NOT NULL,
   `room_id` INT NOT NULL,
