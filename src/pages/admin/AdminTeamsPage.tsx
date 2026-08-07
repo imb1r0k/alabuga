@@ -12,7 +12,7 @@ import {
   addAdminTeamEvent,
   deleteAdminTeamEvent,
 } from '../../services/api';
-import { Users, MessageSquare, Calendar, Trash2, Plus, Save, X } from 'lucide-react';
+import { Users, MessageSquare, Calendar, Trash2, Plus, Save } from 'lucide-react';
 
 export const AdminTeamsPage: React.FC = () => {
   const [teams, setTeams] = useState<any[]>([]);
@@ -24,7 +24,6 @@ export const AdminTeamsPage: React.FC = () => {
   const [editingTeam, setEditingTeam] = useState<any>(null);
   const [teamName, setTeamName] = useState('');
   const [teamDesc, setTeamDesc] = useState('');
-  const [saveMsg, setSaveMsg] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   // Данные выбранной команды
@@ -173,12 +172,6 @@ export const AdminTeamsPage: React.FC = () => {
         </button>
       </div>
 
-      {saveMsg && (
-        <div style={{ padding: '8px', borderRadius: '4px', marginBottom: '12px', backgroundColor: saveMsg.includes('Ошибка') ? '#f8d7da' : '#d4edda' }}>
-          {saveMsg}
-        </div>
-      )}
-
       {showCreateForm && (
         <form onSubmit={handleCreateTeam} style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '8px', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
@@ -284,7 +277,7 @@ export const AdminTeamsPage: React.FC = () => {
                 </form>
               )}
 
-              {/* Пользователи команды */}
+              {/* Участники команды */}
               <div style={{ backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', padding: '16px', marginBottom: '16px' }}>
                 <h4 style={{ margin: '0 0 12px', fontSize: '14px', color: '#334155', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Users size={16} /> Участники ({teamMembers.length})
@@ -407,7 +400,7 @@ export const AdminTeamsPage: React.FC = () => {
         }}>
           <div style={{ backgroundColor: '#fff', padding: '24px', borderRadius: '8px', maxWidth: '400px', width: '100%' }}>
             <h3 style={{ margin: '0 0 12px', fontSize: '18px' }}>Подтверждение удаления</h3>
-            <p style={{ fontSize: '14px', color: '#475569' }}>Вы уверены, что хотите удалить эту команду? Все связанные данные (участники, чат, календарь) будут удалены.</p>
+            <p style={{ fontSize: '14px', color: '#475569' }}>Вы уверены, что хотите удалить эту команду? Все связанные данные будут удалены.</p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
               <button className="btn btn-secondary" onClick={() => setDeleteConfirmId(null)}>Отмена</button>
               <button className="btn btn-danger" onClick={() => confirmDelete(deleteConfirmId)}>Удалить</button>
