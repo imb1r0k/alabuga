@@ -1,4 +1,4 @@
-import { Link, NavLink, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { Skeleton } from './Skeleton';
@@ -21,14 +21,6 @@ export const Header = () => {
       console.error('Logout error:', error);
     }
   };
-
-  // Кнопки для режима админки
-  const adminNavItems = [
-    { to: '/admin-panel', label: 'Главная', end: true },
-    { to: '/admin-panel/users', label: 'Пользователи', end: false },
-    { to: '/admin-panel/bookings', label: 'Бронирования', end: false },
-    { to: '/admin-panel/buildings', label: 'Корпуса и Этажи', end: false },
-  ];
 
   // Общие стили для кнопок навигации
   const navBtnStyles = {
@@ -83,25 +75,6 @@ export const Header = () => {
         >
           {mode === 'admin' && (
             <>
-              {/* Навигация по админке */}
-              <div style={{ display: 'flex', gap: '4px', padding: '4px', backgroundColor: '#f1f5f9', borderRadius: '8px' }}>
-                {adminNavItems.map((item) => (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    end={item.end}
-                    style={({ isActive }) => ({
-                      ...navBtnStyles,
-                      backgroundColor: isActive ? '#ffffff' : 'transparent',
-                      color: isActive ? '#0f172a' : '#475569',
-                      boxShadow: isActive ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                    })}
-                  >
-                    {item.label}
-                  </NavLink>
-                ))}
-              </div>
-              
               <Link
                 to="/"
                 className="btn btn-secondary"

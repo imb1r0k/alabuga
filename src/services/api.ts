@@ -126,3 +126,49 @@ export const getAllRooms = async () => {
   const response = await api.get('/admin/all-rooms');
   return response.data;
 };
+
+// Команды
+export const getAdminTeams = async () => {
+  const response = await api.get('/admin/teams');
+  return response.data;
+};
+
+export const saveAdminTeam = async (team: any) => {
+  const response = await api.post('/admin/teams', team);
+  return response.data;
+};
+
+export const deleteAdminTeam = async (id: number) => {
+  const response = await api.post('/admin/teams', { id, action: 'delete' });
+  return response.data;
+};
+
+export const getTeamUsers = async (teamId: number) => {
+  const response = await api.get(`/admin/team-users?team_id=${teamId}`);
+  return response.data;
+};
+
+export const getTeamMessages = async (teamId: number) => {
+  const response = await api.get(`/admin/team-messages?team_id=${teamId}`);
+  return response.data;
+};
+
+export const sendTeamMessage = async (teamId: number, message: string) => {
+  const response = await api.post('/admin/team-messages', { team_id: teamId, message });
+  return response.data;
+};
+
+export const getTeamEvents = async (teamId: number) => {
+  const response = await api.get(`/admin/team-events?team_id=${teamId}`);
+  return response.data;
+};
+
+export const saveTeamEvent = async (event: any) => {
+  const response = await api.post('/admin/team-events', event);
+  return response.data;
+};
+
+export const deleteTeamEvent = async (id: number) => {
+  const response = await api.post('/admin/team-events', { id, action: 'delete' });
+  return response.data;
+};
