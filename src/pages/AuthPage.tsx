@@ -108,19 +108,19 @@ export const AuthPage = () => {
         </form>
 
         <div style={{ marginTop: '16px', textAlign: 'center' }}>
-          <button
-            onClick={() => setIsLogin(!isLogin)}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#007bff',
-              cursor: 'pointer',
-              fontSize: '14px'
-            }}
-            disabled={loading}
-          >
-            {isLogin ? 'Нет аккаунта? Зарегистрироваться' : 'Уже есть аккаунт? Войти'}
-          </button>
+            <button
+                onClick={() => setIsLogin(!isLogin)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#007bff',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+                disabled={loading}
+            >
+                {isLogin ? 'Нет аккаунта? Зарегистрироваться' : 'Уже есть аккаунт? Войти'}
+            </button>
         </div>
       </div>
     </div>
