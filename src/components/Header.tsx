@@ -60,13 +60,13 @@ export const Header: React.FC = () => {
       boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
     }}>
       <div style={{
-              maxWidth: '1280px',
-              margin: '0 auto',
-              padding: '0 16px',
-              height: '64px',
-              display: 'flex',
-              alignItems: 'center',
-            }}>
+                    maxWidth: '1280px',
+                    margin: '0 auto',
+                    padding: '0 8px',
+                    height: '64px',
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}>
               
               {/* Логотип: картинка (svg/png) или текст из БД */}
               <Link to="/" style={{ display: 'flex', alignItems: 'center', color: '#fff', textDecoration: 'none', fontWeight: 'bold', fontSize: '18px', marginRight: 'auto', minWidth: 0 }}>
