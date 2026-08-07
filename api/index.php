@@ -61,7 +61,7 @@ function getUserByToken($pdo, $token) {
     if (empty($token)) return null;
     
     $stmt = $pdo->prepare(
-        'SELECT u.id, u.name, u.email FROM users u 
+        'SELECT u.id, u.name, u.email, u.role FROM users u 
          INNER JOIN tokens t ON u.id = t.user_id 
          WHERE t.token = ? AND t.expires_at > NOW()'
     );
@@ -98,9 +98,9 @@ switch ($uri) {
             }
             
             $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
-            $stmt = $pdo->prepare('INSERT INTO users (name, email, password) VALUES (?, ?, ?)');
+            $stmt = $pdo->prepare('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)');
             
-            if ($stmt->execute([$name, $email, $hashedPassword])) {
+            if ($stmt->execute([$name, $email, $hashedPassword, 'user'])) {
                 $userId = $pdo->lastInsertId();
                 $newToken = generateToken($userId);
                 
@@ -114,7 +114,8 @@ switch ($uri) {
                     'user' => [
                         'id' => $userId,
                         'name' => $name,
-                        'email' => $email
+                        'email' => $email,
+                        'role' => 'user'
                     ]
                 ]);
             } else {
@@ -160,7 +161,8 @@ switch ($uri) {
                 'user' => [
                     'id' => $user['id'],
                     'name' => $user['name'],
-                    'email' => $user['email']
+                    'email' => $user['email'],
+                    'role' => $user['role']
                 ]
             ]);
         }

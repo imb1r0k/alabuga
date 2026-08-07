@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 export const Header = () => {
-  const { user, logout, isAuthenticated } = useAuth();
+  const { user, logout, isAuthenticated, isAdmin, isModerator } = useAuth();
 
   const handleLogout = async () => {
     try {
@@ -33,7 +33,7 @@ export const Header = () => {
           color: '#dc3545',
           textDecoration: 'none'
         }}>
-          Crimson Phoenix
+          Алабуга - форум 2025
         </Link>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -48,6 +48,20 @@ export const Header = () => {
               >
                 Выйти
               </button>
+              <Link
+                to="/dashboard"
+                className="btn btn-primary"
+              >
+                Личный кабинет
+              </Link>
+              {isAdmin || isModerator ? (
+                <Link
+                  to="/admin-panel"
+                  className="btn btn-secondary"
+                >
+                  Админ панель
+                </Link>
+              ) : null}
             </>
           ) : (
             <Link

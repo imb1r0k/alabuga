@@ -31,3 +31,12 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+export const getForumYear = async () => {
+  try {
+    const response = await api.get('/forum-year');
+    return response.data;
+  } catch (error) {
+    return null;
+  }
+};

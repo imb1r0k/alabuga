@@ -4,6 +4,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { HomePage } from './pages/HomePage';
 import { AuthPage } from './pages/AuthPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { AdminPanel } from './pages/AdminPanel';
 import { Header } from './components/Header';
 
 function App() {
@@ -21,6 +22,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <DashboardPage />
+                  </ProtectedRoute>
+                } 
+              />
+              <Route 
+                path="/admin-panel" 
+                element={
+                  <ProtectedRoute>
+                    <AdminPanel />
                   </ProtectedRoute>
                 } 
               />

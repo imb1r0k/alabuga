@@ -5,6 +5,7 @@ interface User {
   id: number;
   email: string;
   name: string;
+  role: 'user' | 'admin' | 'moderator';
 }
 
 interface AuthContextType {
@@ -14,6 +15,8 @@ interface AuthContextType {
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   isAuthenticated: boolean;
+  isAdmin: boolean;
+  isModerator: boolean;
 }
 
 interface AuthProviderProps {
@@ -92,7 +95,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         login,
         register,
         logout,
-        isAuthenticated: !!user
+        isAuthenticated: !!user,
+        isAdmin: user?.role === 'admin',
+        isModerator: user?.role === 'moderator',
       }}
     >
       {children}
