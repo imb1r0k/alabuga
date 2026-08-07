@@ -83,6 +83,7 @@ function initFreshDatabase($pdo) {
           `building_id` INT NOT NULL,
           `floor_number` INT NOT NULL,
           `width` INT NOT NULL DEFAULT 8,
+          `start_room_number` INT NULL DEFAULT NULL,
           `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
           `layout_data` LONGTEXT NULL,
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -168,6 +169,7 @@ function ensureTablesExist($pdo) {
           `building_id` INT NOT NULL,
           `floor_number` INT NOT NULL,
           `width` INT NOT NULL DEFAULT 8,
+          `start_room_number` INT NULL DEFAULT NULL,
           `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
           `layout_data` LONGTEXT NULL,
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -204,6 +206,12 @@ function ensureTablesExist($pdo) {
         } catch (Exception $e) {
             // Игнорируем
         }
+    }
+
+    try {
+        $pdo->exec("ALTER TABLE `floors` ADD COLUMN `start_room_number` INT NULL DEFAULT NULL;");
+    } catch (Exception $e) {
+        // Колонка уже создана
     }
 }
 
@@ -614,13 +622,14 @@ try {
                 $floorNumber = $input['floor_number'] ?? 1;
                 $width = $input['width'] ?? 8;
                 $gender = $input['gender'] ?? 'DEFAULT';
+                $startRoomNum = isset($input['start_room_number']) ? (int)$input['start_room_number'] : null;
 
                 if (isset($input['id'])) {
-                    $stmt = $pdo->prepare('UPDATE floors SET width = ?, gender = ? WHERE id = ?');
-                    $stmt->execute([$width, $gender, $input['id']]);
+                    $stmt = $pdo->prepare('UPDATE floors SET width = ?, gender = ?, start_room_number = ? WHERE id = ?');
+                    $stmt->execute([$width, $gender, $startRoomNum, $input['id']]);
                 } else {
-                    $stmt = $pdo->prepare('INSERT INTO floors (building_id, floor_number, width, gender) VALUES (?, ?, ?, ?)');
-                    $stmt->execute([$buildingId, $floorNumber, $width, $gender]);
+                    $stmt = $pdo->prepare('INSERT INTO floors (building_id, floor_number, width, gender, start_room_number) VALUES (?, ?, ?, ?, ?)');
+                    $stmt->execute([$buildingId, $floorNumber, $width, $gender, $startRoomNum]);
                 }
                 echo json_encode(['success' => true]);
             }

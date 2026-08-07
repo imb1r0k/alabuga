@@ -14,7 +14,19 @@ import {
 
 export const AdminLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, loading: authLoading } = useAuth();
-  const [collapsed, setCollapsed] = useState(true);
+  
+  // Сохранение состояния свернутости в localStorage
+  const [collapsed, setCollapsed] = useState(() => {
+    return localStorage.getItem('admin_sidebar_collapsed') === 'true';
+  });
+
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem('admin_sidebar_collapsed', String(next));
+      return next;
+    });
+  };
 
   if (!isAuthenticated && !authLoading) {
     return (
@@ -77,7 +89,7 @@ export const AdminLayout: React.FC<{ children?: React.ReactNode }> = ({ children
               </div>
             )}
             <button
-              onClick={() => setCollapsed(!collapsed)}
+              onClick={toggleCollapsed}
               title={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
               style={{
                 background: 'transparent',
@@ -134,7 +146,7 @@ export const AdminLayout: React.FC<{ children?: React.ReactNode }> = ({ children
         </div>
       </aside>
 
-      {/* Основное содержимое без внутренних внешних рамок и лишних отступов */}
+      {/* Основное содержимое */}
       <main style={{ flex: 1, overflowX: 'auto', padding: '0', display: 'flex', flexDirection: 'column' }}>
         <div style={{ flex: 1, padding: '20px' }}>
           {children || <Outlet />}

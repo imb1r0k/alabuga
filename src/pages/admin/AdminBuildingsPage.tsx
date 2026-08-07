@@ -14,7 +14,6 @@ import {
   getAdminBookings,
   getRoomBookings,
   updateAdminBooking,
-  api,
 } from '../../services/api';
 import { 
   Bed, 
@@ -36,9 +35,10 @@ import {
   Edit3,
   Eye,
   Trash2,
-  UserCheck,
   Users,
-  AlertTriangle
+  AlertTriangle,
+  Save,
+  RotateCcw
 } from 'lucide-react';
 
 type TileType = 'room' | 'elevator' | 'stairs' | 'tech' | 'gen-start' | 'gen-turn' | 'gen-end';
@@ -69,14 +69,14 @@ const GEN_TEMPLATES: TileTemplate[] = [
 // Вспомогательный круглый значок пола
 const GenderBadge: React.FC<{ gender?: string; size?: number }> = ({ gender = 'MIXED', size = 20 }) => {
   let label = 'С';
-  let bg = '#8b5cf6'; // Violet Mixed
+  let bg = '#8b5cf6';
 
   if (gender === 'M') {
     label = 'М';
-    bg = '#0284c7'; // Blue Male
+    bg = '#0284c7';
   } else if (gender === 'F') {
     label = 'Ж';
-    bg = '#e11d48'; // Red Female
+    bg = '#e11d48';
   }
 
   return (
@@ -107,23 +107,34 @@ export const AdminBuildingsPage: React.FC = () => {
   const [selectedBuilding, setSelectedBuilding] = useState<any>(null);
   const [floors, setFloors] = useState<any[]>([]);
   const [selectedFloor, setSelectedFloor] = useState<any>(null);
+  
+  // Серверное состояние комнат и локальное (черновик) состояние
   const [rooms, setRooms] = useState<any[]>([]);
+  const [localRooms, setLocalRooms] = useState<any[]>([]);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
   const [selectedRoom, setSelectedRoom] = useState<any>(null);
   const [allBookings, setAllBookings] = useState<any[]>([]);
   const [roomBookings, setRoomBookings] = useState<any[]>([]);
 
-  // Режим редактирования макета (по умолчанию выключен)
+  // Режим редактирования макета (по умолчанию FALSE)
   const [isEditLayout, setIsEditLayout] = useState(false);
 
   const [buildingsLoading, setBuildingsLoading] = useState(false);
   const [savingBuilding, setSavingBuilding] = useState(false);
+  const [savingLayout, setSavingLayout] = useState(false);
   const [savingRoom, setSavingRoom] = useState(false);
   
   // Добавление корпуса
   const [newBuildingName, setNewBuildingName] = useState('');
   const [newBuildingGender, setNewBuildingGender] = useState<'M' | 'F' | 'MIXED'>('MIXED');
 
-  // Модальное окно подтверждения удаления
+  // Окно создания этажа с диалогом пропуска этажей
+  const [showAddFloorModal, setShowAddFloorModal] = useState(false);
+  const [newFloorNumberInput, setNewFloorNumberInput] = useState<number>(1);
+  const [newFloorStartRoomNum, setNewFloorStartRoomNum] = useState<number | ''>('');
+
+  // Подтверждение удаления
   const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<{ type: 'building' | 'floor' | 'room'; id: number; name: string } | null>(null);
 
   // Режим генерации
@@ -133,8 +144,8 @@ export const AdminBuildingsPage: React.FC = () => {
   const [draggedTile, setDraggedTile] = useState<{ type: TileType; dir: Direction } | null>(null);
 
   // Параметры генератора
-  const [genFrom, setGenFrom] = useState(101);
-  const [genTo, setGenTo] = useState(120);
+  const [genFrom, setGenFrom] = useState(1);
+  const [genTo, setGenTo] = useState(20);
   const [genSeats, setGenSeats] = useState(2);
   const [genStatusMsg, setGenStatusMsg] = useState('');
 
@@ -171,131 +182,57 @@ export const AdminBuildingsPage: React.FC = () => {
     setSelectedBuilding(b);
     setSelectedRoom(null);
     setIsEditLayout(false);
+    setHasUnsavedChanges(false);
     try {
       const fData = await getAdminFloors(b.id);
       setFloors(fData);
       if (fData.length > 0) {
-        handleSelectFloor(fData[0]);
+        handleSelectFloor(fData[0], fData);
       } else {
         setSelectedFloor(null);
         setRooms([]);
+        setLocalRooms([]);
       }
     } catch (err) {
       console.error(err);
     }
   };
 
-  const handleSelectFloor = async (f: any) => {
+  const handleSelectFloor = async (f: any, currentFloorsList = floors) => {
     setSelectedFloor(f);
     setSelectedRoom(null);
+    setHasUnsavedChanges(false);
     try {
       const rData = await getAdminRooms(f.id);
       setRooms(rData);
+      setLocalRooms(rData);
+
+      // Рассчитываем авто-диапазон генерации для этого этажа
+      const startNum = calculateFloorStartRoomNumber(f, currentFloorsList);
+      setGenFrom(startNum);
+      setGenTo(startNum + (Number(f.width) || 8) * 2 - 1);
     } catch (err) {
       console.error(err);
     }
   };
 
-  const handleAddBuilding = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newBuildingName.trim()) return;
-    setSavingBuilding(true);
-    try {
-      await saveAdminBuilding({ name: newBuildingName, gender: newBuildingGender });
-      setNewBuildingName('');
-      loadBuildings();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSavingBuilding(false);
+  // Вычисление начального номера комнат на этаже
+  const calculateFloorStartRoomNumber = (targetFloor: any, floorsList = floors) => {
+    if (targetFloor.start_room_number && Number(targetFloor.start_room_number) > 0) {
+      return Number(targetFloor.start_room_number);
     }
-  };
 
-  const handleAddFloor = async () => {
-    if (!selectedBuilding) return;
-    const nextNum = floors.length + 1;
-    try {
-      await saveAdminFloor({
-        building_id: selectedBuilding.id,
-        floor_number: nextNum,
-        width: 8,
-        gender: 'DEFAULT',
-      });
-      handleSelectBuilding(selectedBuilding);
-    } catch (err) {
-      console.error(err);
+    // Считаем сумму ячеек на всех предыдущих этажах (по floor_number)
+    const lowerFloors = floorsList.filter((f) => Number(f.floor_number) < Number(targetFloor.floor_number));
+    let start = 1;
+    for (const lf of lowerFloors) {
+      const cellsCount = (Number(lf.width) || 8) * 2;
+      start += cellsCount;
     }
+    return start;
   };
 
-  const handleUpdateFloorWidth = async (newWidth: number) => {
-    if (!selectedFloor || newWidth < 3 || newWidth > 20) return;
-    try {
-      await saveAdminFloor({ ...selectedFloor, width: newWidth });
-      setSelectedFloor({ ...selectedFloor, width: newWidth });
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleUpdateFloorGender = async (gender: string) => {
-    if (!selectedFloor) return;
-    try {
-      await saveAdminFloor({ ...selectedFloor, gender });
-      setSelectedFloor({ ...selectedFloor, gender });
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  // Удаление с подтверждением
-  const confirmDelete = async () => {
-    if (!deleteConfirmTarget) return;
-    const { type, id } = deleteConfirmTarget;
-    setDeleteConfirmTarget(null);
-
-    try {
-      if (type === 'building') {
-        await deleteAdminBuilding(id);
-        loadBuildings();
-      } else if (type === 'floor') {
-        await deleteAdminFloor(id);
-        handleSelectBuilding(selectedBuilding);
-      } else if (type === 'room') {
-        await deleteAdminRoom(id);
-        handleSelectFloor(selectedFloor);
-        setSelectedRoom(null);
-      }
-    } catch (err) {
-      console.error('Ошибка при удалении:', err);
-    }
-  };
-
-  // Вычисление эффективного пола (с учетом унаследованного от корпуса/этажа)
-  const getEffectiveGender = (targetGender?: string, parentGender?: string) => {
-    if (targetGender && targetGender !== 'DEFAULT') return targetGender;
-    if (parentGender && parentGender !== 'DEFAULT') return parentGender;
-    return selectedBuilding?.gender || 'MIXED';
-  };
-
-  // Подсчет мест
-  const getRoomOccupancy = (roomId: number) => {
-    const booked = allBookings.filter((b) => Number(b.room_id) === Number(roomId) && b.status !== 'rejected').length;
-    return booked;
-  };
-
-  const getFloorOccupancy = (floorId: number) => {
-    const floorRooms = rooms.filter((r) => Number(r.floor_id) === Number(floorId) && r.room_type === 'room');
-    const totalCapacity = floorRooms.reduce((sum, r) => sum + (Number(r.capacity) || 0), 0);
-    const bookedSeats = floorRooms.reduce((sum, r) => sum + getRoomOccupancy(r.id), 0);
-    return { booked: bookedSeats, total: totalCapacity };
-  };
-
-  const getBuildingOccupancy = () => {
-    const buildingBookings = allBookings.filter((b) => Number(b.building_id) === Number(selectedBuilding?.id) && b.status !== 'rejected');
-    return buildingBookings.length;
-  };
-
-  // Порядковый номер по часовой стрелке
+  // Порядковый номер ячейки по часовой стрелке (1..2W)
   const getClockwiseCells = (width: number) => {
     const cells: { x: number; y: number; index: number }[] = [];
     let idx = 1;
@@ -314,19 +251,130 @@ export const AdminBuildingsPage: React.FC = () => {
     return item ? item.index : 1;
   };
 
-  const calculateAutoRoomNumber = (x: number, y: number, width: number, floorNum: number) => {
-    const idx = getCellClockwiseIndex(x, y, width);
-    const suffix = idx < 10 ? `0${idx}` : `${idx}`;
-    return `${floorNum}${suffix}`;
+  // Получить глобальный сквозной номер для конкретной ячейки
+  const getCalculatedRoomNumber = (x: number, y: number) => {
+    if (!selectedFloor) return 1;
+    const width = Number(selectedFloor.width) || 8;
+    const cellIdx = getCellClockwiseIndex(x, y, width);
+    const floorStart = calculateFloorStartRoomNumber(selectedFloor);
+    return floorStart + cellIdx - 1;
   };
 
-  // Размещение ячейки (только при isEditLayout)
-  const placeTileAt = async (x: number, y: number, type: TileType, dir: Direction = 'right') => {
+  const handleAddBuilding = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBuildingName.trim()) return;
+    setSavingBuilding(true);
+    try {
+      await saveAdminBuilding({ name: newBuildingName, gender: newBuildingGender });
+      setNewBuildingName('');
+      loadBuildings();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingBuilding(false);
+    }
+  };
+
+  // Открытие диалога добавления этажа
+  const openAddFloorModal = () => {
+    const maxFloorNum = floors.reduce((max, f) => Math.max(max, Number(f.floor_number)), 0);
+    const nextNum = maxFloorNum + 1;
+    setNewFloorNumberInput(nextNum);
+
+    // Предполагаемый начальный номер комнат
+    const nextStartNum = floors.reduce((sum, f) => sum + (Number(f.width) || 8) * 2, 1);
+    setNewFloorStartRoomNum(nextStartNum);
+    setShowAddFloorModal(true);
+  };
+
+  const handleCreateFloorSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedBuilding) return;
+    try {
+      await saveAdminFloor({
+        building_id: selectedBuilding.id,
+        floor_number: newFloorNumberInput,
+        width: 8,
+        gender: 'DEFAULT',
+        start_room_number: newFloorStartRoomNum ? Number(newFloorStartRoomNum) : null
+      });
+      setShowAddFloorModal(false);
+      handleSelectBuilding(selectedBuilding);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleUpdateFloorWidth = (newWidth: number) => {
+    if (!selectedFloor || newWidth < 3 || newWidth > 20) return;
+    setSelectedFloor({ ...selectedFloor, width: newWidth });
+    setHasUnsavedChanges(true);
+  };
+
+  const handleUpdateFloorGender = (gender: string) => {
+    if (!selectedFloor) return;
+    setSelectedFloor({ ...selectedFloor, gender });
+    setHasUnsavedChanges(true);
+  };
+
+  const handleUpdateFloorStartRoomNum = (val: number | null) => {
+    if (!selectedFloor) return;
+    setSelectedFloor({ ...selectedFloor, start_room_number: val });
+    setHasUnsavedChanges(true);
+  };
+
+  // Удаление с подтверждением
+  const confirmDelete = async () => {
+    if (!deleteConfirmTarget) return;
+    const { type, id } = deleteConfirmTarget;
+    setDeleteConfirmTarget(null);
+
+    try {
+      if (type === 'building') {
+        await deleteAdminBuilding(id);
+        loadBuildings();
+      } else if (type === 'floor') {
+        await deleteAdminFloor(id);
+        handleSelectBuilding(selectedBuilding);
+      } else if (type === 'room') {
+        setLocalRooms((prev) => prev.filter((r) => r.id !== id));
+        setHasUnsavedChanges(true);
+        setSelectedRoom(null);
+      }
+    } catch (err) {
+      console.error('Ошибка при удалении:', err);
+    }
+  };
+
+  const getEffectiveGender = (targetGender?: string, parentGender?: string) => {
+    if (targetGender && targetGender !== 'DEFAULT') return targetGender;
+    if (parentGender && parentGender !== 'DEFAULT') return parentGender;
+    return selectedBuilding?.gender || 'MIXED';
+  };
+
+  const getRoomOccupancy = (roomId: number) => {
+    const booked = allBookings.filter((b) => Number(b.room_id) === Number(roomId) && b.status !== 'rejected').length;
+    return booked;
+  };
+
+  const getFloorOccupancy = (floorId: number) => {
+    const floorRooms = localRooms.filter((r) => Number(r.floor_id) === Number(floorId) && r.room_type === 'room');
+    const totalCapacity = floorRooms.reduce((sum, r) => sum + (Number(r.capacity) || 0), 0);
+    const bookedSeats = floorRooms.reduce((sum, r) => sum + (r.id ? getRoomOccupancy(r.id) : 0), 0);
+    return { booked: bookedSeats, total: totalCapacity };
+  };
+
+  const getBuildingOccupancy = () => {
+    const buildingBookings = allBookings.filter((b) => Number(b.building_id) === Number(selectedBuilding?.id) && b.status !== 'rejected');
+    return buildingBookings.length;
+  };
+
+  // ЛОКАЛЬНОЕ размещение ячейки в памяти (без запроса на сервер)
+  const placeTileLocally = (x: number, y: number, type: TileType, dir: Direction = 'right') => {
     if (!isEditLayout || y === 1 || !selectedFloor || !selectedBuilding) return;
 
-    const width = Number(selectedFloor.width) || 8;
-    const existing = rooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === y);
-    const autoNum = calculateAutoRoomNumber(x, y, width, Number(selectedFloor.floor_number));
+    const existing = localRooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === y);
+    const autoNum = `${getCalculatedRoomNumber(x, y)}`;
 
     let name = 'Комната';
     let capacity = 2;
@@ -362,38 +410,34 @@ export const AdminBuildingsPage: React.FC = () => {
       y_pos: y,
     };
 
-    setRooms((prevRooms) => {
+    setLocalRooms((prevRooms) => {
       const filtered = prevRooms.filter((r) => !(Number(r.x_pos) === x && Number(r.y_pos) === y));
       return [...filtered, roomData];
     });
-
-    try {
-      await saveAdminRoom(roomData);
-      const updatedRooms = await getAdminRooms(selectedFloor.id);
-      setRooms(updatedRooms);
-    } catch (err) {
-      console.error('Ошибка сохранения ячейки:', err);
-    }
+    setHasUnsavedChanges(true);
   };
 
   const handleCellClick = async (x: number, y: number) => {
     if (y === 1) return;
-    const existing = rooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === y);
+    const existing = localRooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === y);
 
     if (existing) {
       setSelectedRoom({ ...existing });
-      try {
-        const bList = await getRoomBookings(existing.id);
-        setRoomBookings(bList);
-      } catch (err) {
-        console.error(err);
+      if (existing.id) {
+        try {
+          const bList = await getRoomBookings(existing.id);
+          setRoomBookings(bList);
+        } catch (err) {
+          console.error(err);
+        }
+      } else {
+        setRoomBookings([]);
       }
     } else if (isEditLayout) {
-      placeTileAt(x, y, selectedTool, selectedDir);
+      placeTileLocally(x, y, selectedTool, selectedDir);
     }
   };
 
-  // Drag & Drop
   const handleDragStart = (e: React.DragEvent, type: TileType) => {
     if (!isEditLayout) return;
     const item = { type, dir: selectedDir };
@@ -404,7 +448,7 @@ export const AdminBuildingsPage: React.FC = () => {
     } catch (_) {}
   };
 
-  const handleDrop = async (e: React.DragEvent, x: number, y: number) => {
+  const handleDrop = (e: React.DragEvent, x: number, y: number) => {
     e.preventDefault();
     e.stopPropagation();
     if (!isEditLayout || y === 1 || !selectedFloor) return;
@@ -419,47 +463,29 @@ export const AdminBuildingsPage: React.FC = () => {
       }
     } catch (_) {}
 
-    await placeTileAt(x, y, typeToPlace, dirToPlace);
+    placeTileLocally(x, y, typeToPlace, dirToPlace);
     setDraggedTile(null);
   };
 
-  // Изменение статуса брони прямо из модального окна комнаты
-  const handleUpdateBookingStatus = async (booking: any, newStatus: string) => {
-    try {
-      await updateAdminBooking({ ...booking, status: newStatus });
-      const bList = await getRoomBookings(selectedRoom.id);
-      setRoomBookings(bList);
-      loadAllBookings();
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  // Поворот траектории
-  const handleSetDirectionForCell = async (e: React.MouseEvent, room: any, newDir: Direction) => {
+  // Поворот локально
+  const handleSetDirectionForCell = (e: React.MouseEvent, room: any, newDir: Direction) => {
     e.stopPropagation();
     let name = room.name;
     if (room.room_type === 'gen-start') name = `[Старт -> ${newDir}]`;
     if (room.room_type === 'gen-turn') name = `[Поворот -> ${newDir}]`;
 
-    const updatedRoom = { ...room, name };
-    setRooms((prev) => prev.map((r) => (r.id === room.id ? updatedRoom : r)));
-
-    try {
-      await saveAdminRoom(updatedRoom);
-      const updatedRooms = await getAdminRooms(selectedFloor.id);
-      setRooms(updatedRooms);
-    } catch (err) {
-      console.error(err);
-    }
+    setLocalRooms((prev) =>
+      prev.map((r) => (Number(r.x_pos) === Number(room.x_pos) && Number(r.y_pos) === Number(room.y_pos) ? { ...r, name } : r))
+    );
+    setHasUnsavedChanges(true);
   };
 
-  // Генерация комнат
-  const handleRunGeneration = async () => {
+  // ЛОКАЛЬНЫЙ АЛГОРИТМ ГЕНЕРАЦИИ В ПАМЯТИ
+  const handleRunGeneration = () => {
     if (!selectedFloor || !selectedBuilding) return;
-    setGenStatusMsg('Запуск генерации...');
+    setGenStatusMsg('Генерация макета...');
 
-    const startRoom = rooms.find((r) => r.room_type === 'gen-start');
+    const startRoom = localRooms.find((r) => r.room_type === 'gen-start');
     if (!startRoom) {
       setGenStatusMsg('Ошибка: Поместите маркер "Начало генерации" ▶ на сетку');
       return;
@@ -484,15 +510,16 @@ export const AdminBuildingsPage: React.FC = () => {
 
     let placedCount = 0;
     let stepsLimit = 200;
+    const newRoomsList = [...localRooms];
 
     while (currentNum <= genTo && stepsLimit > 0) {
       stepsLimit--;
 
-      const existing = rooms.find((r) => Number(r.x_pos) === rX && Number(r.y_pos) === rY);
       const roomNumStr = `${currentNum}`;
+      const existingIdx = newRoomsList.findIndex((r) => Number(r.x_pos) === rX && Number(r.y_pos) === rY);
 
-      await saveAdminRoom({
-        id: existing?.id,
+      const generatedRoom = {
+        id: existingIdx >= 0 ? newRoomsList[existingIdx].id : undefined,
         floor_id: Number(selectedFloor.id),
         building_id: Number(selectedBuilding.id),
         room_number: roomNumStr,
@@ -503,7 +530,13 @@ export const AdminBuildingsPage: React.FC = () => {
         gender: 'DEFAULT',
         x_pos: rX,
         y_pos: rY,
-      });
+      };
+
+      if (existingIdx >= 0) {
+        newRoomsList[existingIdx] = generatedRoom;
+      } else {
+        newRoomsList.push(generatedRoom);
+      }
 
       placedCount++;
       currentNum++;
@@ -514,22 +547,18 @@ export const AdminBuildingsPage: React.FC = () => {
 
       if (nextX < 0 || nextX >= width || nextY < 0 || nextY > 2) break;
 
-      const nextTile = rooms.find((r) => Number(r.x_pos) === nextX && Number(r.y_pos) === nextY);
+      const nextTile = newRoomsList.find((r) => Number(r.x_pos) === nextX && Number(r.y_pos) === nextY);
 
       if (nextTile?.room_type === 'gen-end') {
-        await saveAdminRoom({
-          id: nextTile.id,
-          floor_id: Number(selectedFloor.id),
-          building_id: Number(selectedBuilding.id),
+        const endIdx = newRoomsList.findIndex((r) => Number(r.x_pos) === nextX && Number(r.y_pos) === nextY);
+        newRoomsList[endIdx] = {
+          ...nextTile,
           room_number: `${currentNum}`,
           name: `Комната ${currentNum}`,
           capacity: genSeats,
           is_technical: 0,
           room_type: 'room',
-          gender: 'DEFAULT',
-          x_pos: nextX,
-          y_pos: nextY,
-        });
+        };
         placedCount++;
         break;
       }
@@ -546,23 +575,74 @@ export const AdminBuildingsPage: React.FC = () => {
       rY = nextY;
     }
 
-    setGenStatusMsg(`✅ Сгенерировано ${placedCount} комнат (${genFrom}–${genFrom + placedCount - 1})`);
-    handleSelectFloor(selectedFloor);
+    setLocalRooms(newRoomsList);
+    setHasUnsavedChanges(true);
+    setGenStatusMsg(`✅ Сгенерировано ${placedCount} комнат (${genFrom}–${genFrom + placedCount - 1}). Нажмите «Сохранить макет»`);
   };
 
-  const handleSaveRoomDetails = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedRoom) return;
-    setSavingRoom(true);
+  // СОХРАНЕНИЕ ВСЕГО МАКЕТА ЭТАЖА НА СЕРВЕР
+  const handleSaveFullLayout = async () => {
+    if (!selectedFloor) return;
+    setSavingLayout(true);
     try {
-      await saveAdminRoom(selectedRoom);
-      handleSelectFloor(selectedFloor);
-      setSelectedRoom(null);
+      // 1. Сохраняем свойства этажа (ширину, пол, start_room_number)
+      await saveAdminFloor(selectedFloor);
+
+      // 2. Определяем удаленные комнаты и сохраняем актуальные
+      const currentRemote = rooms;
+      for (const remoteR of currentRemote) {
+        const existsInLocal = localRooms.some((l) => Number(l.x_pos) === Number(remoteR.x_pos) && Number(l.y_pos) === Number(remoteR.y_pos));
+        if (!existsInLocal) {
+          await deleteAdminRoom(remoteR.id);
+        }
+      }
+
+      for (const room of localRooms) {
+        await saveAdminRoom(room);
+      }
+
+      // Перезагружаем свежий список комнат
+      const updatedRooms = await getAdminRooms(selectedFloor.id);
+      setRooms(updatedRooms);
+      setLocalRooms(updatedRooms);
+      setHasUnsavedChanges(false);
+      alert('Макет этажа успешно сохранен в базе данных!');
+    } catch (err: any) {
+      alert('Ошибка при сохранении макета: ' + err.message);
+    } finally {
+      setSavingLayout(false);
+    }
+  };
+
+  // Сброс несохраненных изменений
+  const handleResetLayout = () => {
+    setLocalRooms([...rooms]);
+    setHasUnsavedChanges(false);
+  };
+
+  const handleUpdateBookingStatus = async (booking: any, newStatus: string) => {
+    try {
+      await updateAdminBooking({ ...booking, status: newStatus });
+      if (selectedRoom?.id) {
+        const bList = await getRoomBookings(selectedRoom.id);
+        setRoomBookings(bList);
+      }
+      loadAllBookings();
     } catch (err) {
       console.error(err);
-    } finally {
-      setSavingRoom(false);
     }
+  };
+
+  const handleSaveRoomDetailsLocally = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedRoom) return;
+    setLocalRooms((prev) =>
+      prev.map((r) =>
+        Number(r.x_pos) === Number(selectedRoom.x_pos) && Number(r.y_pos) === Number(selectedRoom.y_pos) ? { ...selectedRoom } : r
+      )
+    );
+    setHasUnsavedChanges(true);
+    setSelectedRoom(null);
   };
 
   const floorStats = selectedFloor ? getFloorOccupancy(selectedFloor.id) : { booked: 0, total: 0 };
@@ -677,6 +757,38 @@ export const AdminBuildingsPage: React.FC = () => {
                     </div>
 
                     <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                      {/* Кнопка сохранения изменений макета */}
+                      {hasUnsavedChanges && (
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button
+                            onClick={handleSaveFullLayout}
+                            disabled={savingLayout}
+                            className="btn btn-primary"
+                            style={{
+                              fontSize: '13px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              backgroundColor: '#16a34a',
+                              fontWeight: 'bold',
+                              boxShadow: '0 0 0 3px rgba(22, 163, 74, 0.3)'
+                            }}
+                          >
+                            <Save size={16} /> {savingLayout ? 'Сохранение...' : '💾 Сохранить макет'}
+                          </button>
+
+                          <button
+                            onClick={handleResetLayout}
+                            disabled={savingLayout}
+                            className="btn btn-secondary"
+                            style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                            title="Сбросить изменения к сохраненным"
+                          >
+                            <RotateCcw size={16} />
+                          </button>
+                        </div>
+                      )}
+
                       {/* Кнопка включения режима редактирования */}
                       <button
                         onClick={() => {
@@ -715,7 +827,7 @@ export const AdminBuildingsPage: React.FC = () => {
                         </button>
                       )}
 
-                      <button onClick={handleAddFloor} className="btn btn-secondary" style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <button onClick={openAddFloorModal} className="btn btn-secondary" style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <Plus size={16} /> Добавить этаж
                       </button>
                     </div>
@@ -789,7 +901,7 @@ export const AdminBuildingsPage: React.FC = () => {
                         flexWrap: 'wrap',
                         gap: '12px'
                       }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '13px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '13px', flexWrap: 'wrap' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <GenderBadge gender={getEffectiveGender(selectedFloor.gender, selectedBuilding.gender)} size={22} />
                             <strong>Этаж {selectedFloor.floor_number}</strong>
@@ -802,7 +914,7 @@ export const AdminBuildingsPage: React.FC = () => {
                           {isEditLayout && (
                             <>
                               <div>
-                                <label style={{ marginRight: '6px', fontWeight: 500, color: '#475569' }}>Ширина сетки:</label>
+                                <label style={{ marginRight: '6px', fontWeight: 500, color: '#475569' }}>Длина сетки:</label>
                                 <input
                                   type="number"
                                   min={3}
@@ -814,13 +926,24 @@ export const AdminBuildingsPage: React.FC = () => {
                               </div>
 
                               <div>
+                                <label style={{ marginRight: '6px', fontWeight: 500, color: '#475569' }}>Начальный № комнат:</label>
+                                <input
+                                  type="number"
+                                  placeholder="Авто"
+                                  value={selectedFloor.start_room_number || ''}
+                                  onChange={(e) => handleUpdateFloorStartRoomNum(e.target.value ? Number(e.target.value) : null)}
+                                  style={{ width: '80px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                />
+                              </div>
+
+                              <div>
                                 <label style={{ marginRight: '6px', fontWeight: 500, color: '#475569' }}>Пол этажа:</label>
                                 <select
                                   value={selectedFloor.gender || 'DEFAULT'}
                                   onChange={(e) => handleUpdateFloorGender(e.target.value)}
                                   style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
                                 >
-                                  <option value="DEFAULT">По умолчанию от корпуса ({selectedBuilding.gender === 'M' ? 'Муж' : selectedBuilding.gender === 'F' ? 'Жен' : 'Смеш'})</option>
+                                  <option value="DEFAULT">От корпуса ({selectedBuilding.gender === 'M' ? 'Муж' : selectedBuilding.gender === 'F' ? 'Жен' : 'Смеш'})</option>
                                   <option value="MIXED">Смешанный (С)</option>
                                   <option value="M">Мужской (М)</option>
                                   <option value="F">Женский (Ж)</option>
@@ -832,7 +955,7 @@ export const AdminBuildingsPage: React.FC = () => {
 
                         {!isEditLayout && (
                           <span style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic' }}>
-                            👁 Режим просмотра. Для редактирования нажмите кнопку «✏️ Редактировать макет»
+                            👁 Режим просмотра. Нажмите «✏️ Редактировать макет» для расстановки.
                           </span>
                         )}
                       </div>
@@ -888,11 +1011,11 @@ export const AdminBuildingsPage: React.FC = () => {
                           </h4>
                           <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
                             <div>
-                              <label style={{ fontSize: '12px', fontWeight: 600, marginRight: '6px' }}>Начальная кв.:</label>
+                              <label style={{ fontSize: '12px', fontWeight: 600, marginRight: '6px' }}>Начальная квартира:</label>
                               <input type="number" value={genFrom} onChange={(e) => setGenFrom(Number(e.target.value))} style={{ width: '80px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #8b5cf6' }} />
                             </div>
                             <div>
-                              <label style={{ fontSize: '12px', fontWeight: 600, marginRight: '6px' }}>Конечная кв.:</label>
+                              <label style={{ fontSize: '12px', fontWeight: 600, marginRight: '6px' }}>Конечная квартира:</label>
                               <input type="number" value={genTo} onChange={(e) => setGenTo(Number(e.target.value))} style={{ width: '80px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #8b5cf6' }} />
                             </div>
                             <div>
@@ -911,18 +1034,18 @@ export const AdminBuildingsPage: React.FC = () => {
                       <div style={{ overflowX: 'auto', padding: '10px 0' }}>
                         <div style={{
                           display: 'grid',
-                          gridTemplateColumns: `repeat(${Number(selectedFloor.width) || 8}, 90px)`,
+                          gridTemplateColumns: `repeat(${Number(selectedFloor.width) || 8}, 95px)`,
                           gap: '8px',
                           justifyContent: 'start',
                         }}>
                           {/* ВЕРХНИЙ РЯД (y = 0) */}
                           {Array.from({ length: Number(selectedFloor.width) || 8 }).map((_, x) => {
-                            const room = rooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === 0);
-                            const cwIdx = getCellClockwiseIndex(x, 0, Number(selectedFloor.width) || 8);
+                            const room = localRooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === 0);
+                            const calcRoomNum = getCalculatedRoomNumber(x, 0);
                             const tmpl = [...STANDARD_TEMPLATES, ...GEN_TEMPLATES].find((t) => t.type === room?.room_type);
                             const IconComp = tmpl?.icon || Bed;
                             const effectiveRoomGender = getEffectiveGender(room?.gender, selectedFloor.gender);
-                            const bookedCount = room && room.room_type === 'room' ? getRoomOccupancy(room.id) : 0;
+                            const bookedCount = room && room.room_type === 'room' && room.id ? getRoomOccupancy(room.id) : 0;
 
                             return (
                               <div
@@ -948,10 +1071,6 @@ export const AdminBuildingsPage: React.FC = () => {
                                   transition: 'all 0.15s ease',
                                 }}
                               >
-                                <span style={{ position: 'absolute', top: '3px', left: '4px', fontSize: '9px', opacity: 0.6 }}>
-                                  #{cwIdx}
-                                </span>
-
                                 {room && (
                                   <div style={{ position: 'absolute', top: '3px', right: '4px', display: 'flex', alignItems: 'center', gap: '3px' }}>
                                     <GenderBadge gender={effectiveRoomGender} size={15} />
@@ -959,7 +1078,8 @@ export const AdminBuildingsPage: React.FC = () => {
                                       <button
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          setDeleteConfirmTarget({ type: 'room', id: room.id, name: room.room_number || room.name });
+                                          setLocalRooms((prev) => prev.filter((r) => !(Number(r.x_pos) === x && Number(r.y_pos) === 0)));
+                                          setHasUnsavedChanges(true);
                                         }}
                                         title="Удалить помещение"
                                         style={{ border: 'none', background: 'rgba(239, 68, 68, 0.85)', color: '#fff', borderRadius: '50%', width: '15px', height: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
@@ -991,7 +1111,10 @@ export const AdminBuildingsPage: React.FC = () => {
                                     )}
                                   </>
                                 ) : (
-                                  <span style={{ color: '#94a3b8', fontSize: '11px' }}>{isEditLayout ? '+ Пусто' : 'Свободно'}</span>
+                                  <div style={{ color: '#94a3b8', fontSize: '11px', textAlign: 'center' }}>
+                                    <span style={{ fontSize: '10px', display: 'block', fontWeight: 'bold', color: '#cbd5e1' }}>№ {calcRoomNum}</span>
+                                    {isEditLayout ? '+ Пусто' : 'Свободно'}
+                                  </div>
                                 )}
                               </div>
                             );
@@ -1017,12 +1140,12 @@ export const AdminBuildingsPage: React.FC = () => {
 
                           {/* НИЖНИЙ РЯД (y = 2) */}
                           {Array.from({ length: Number(selectedFloor.width) || 8 }).map((_, x) => {
-                            const room = rooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === 2);
-                            const cwIdx = getCellClockwiseIndex(x, 2, Number(selectedFloor.width) || 8);
+                            const room = localRooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === 2);
+                            const calcRoomNum = getCalculatedRoomNumber(x, 2);
                             const tmpl = [...STANDARD_TEMPLATES, ...GEN_TEMPLATES].find((t) => t.type === room?.room_type);
                             const IconComp = tmpl?.icon || Bed;
                             const effectiveRoomGender = getEffectiveGender(room?.gender, selectedFloor.gender);
-                            const bookedCount = room && room.room_type === 'room' ? getRoomOccupancy(room.id) : 0;
+                            const bookedCount = room && room.room_type === 'room' && room.id ? getRoomOccupancy(room.id) : 0;
 
                             return (
                               <div
@@ -1048,10 +1171,6 @@ export const AdminBuildingsPage: React.FC = () => {
                                   transition: 'all 0.15s ease',
                                 }}
                               >
-                                <span style={{ position: 'absolute', top: '3px', left: '4px', fontSize: '9px', opacity: 0.6 }}>
-                                  #{cwIdx}
-                                </span>
-
                                 {room && (
                                   <div style={{ position: 'absolute', top: '3px', right: '4px', display: 'flex', alignItems: 'center', gap: '3px' }}>
                                     <GenderBadge gender={effectiveRoomGender} size={15} />
@@ -1059,7 +1178,8 @@ export const AdminBuildingsPage: React.FC = () => {
                                       <button
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          setDeleteConfirmTarget({ type: 'room', id: room.id, name: room.room_number || room.name });
+                                          setLocalRooms((prev) => prev.filter((r) => !(Number(r.x_pos) === x && Number(r.y_pos) === 2)));
+                                          setHasUnsavedChanges(true);
                                         }}
                                         title="Удалить помещение"
                                         style={{ border: 'none', background: 'rgba(239, 68, 68, 0.85)', color: '#fff', borderRadius: '50%', width: '15px', height: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
@@ -1091,7 +1211,10 @@ export const AdminBuildingsPage: React.FC = () => {
                                     )}
                                   </>
                                 ) : (
-                                  <span style={{ color: '#94a3b8', fontSize: '11px' }}>{isEditLayout ? '+ Пусто' : 'Свободно'}</span>
+                                  <div style={{ color: '#94a3b8', fontSize: '11px', textAlign: 'center' }}>
+                                    <span style={{ fontSize: '10px', display: 'block', fontWeight: 'bold', color: '#cbd5e1' }}>№ {calcRoomNum}</span>
+                                    {isEditLayout ? '+ Пусто' : 'Свободно'}
+                                  </div>
                                 )}
                               </div>
                             );
@@ -1176,7 +1299,7 @@ export const AdminBuildingsPage: React.FC = () => {
                           </div>
 
                           {/* Форма редактирования параметров комнаты */}
-                          <form onSubmit={handleSaveRoomDetails} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                          <form onSubmit={handleSaveRoomDetailsLocally} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                             <div className="input-group" style={{ marginBottom: 0 }}>
                               <label style={{ fontSize: '12px', fontWeight: 600 }}>Номер комнаты</label>
                               <input
@@ -1222,17 +1345,23 @@ export const AdminBuildingsPage: React.FC = () => {
 
                             <div style={{ gridColumn: '1 / -1', marginTop: '10px', display: 'flex', gap: '10px' }}>
                               <button type="submit" className="btn btn-primary" disabled={savingRoom} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <SquareCheck size={16} /> {savingRoom ? 'Сохранение...' : 'Сохранить изменения'}
+                                <SquareCheck size={16} /> Применить локально
                               </button>
 
-                              <button
-                                type="button"
-                                className="btn btn-danger"
-                                onClick={() => setDeleteConfirmTarget({ type: 'room', id: selectedRoom.id, name: selectedRoom.room_number || selectedRoom.name })}
-                                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                              >
-                                <Trash2 size={16} /> Удалить комнату
-                              </button>
+                              {isEditLayout && (
+                                <button
+                                  type="button"
+                                  className="btn btn-danger"
+                                  onClick={() => {
+                                    setLocalRooms((prev) => prev.filter((r) => !(Number(r.x_pos) === Number(selectedRoom.x_pos) && Number(r.y_pos) === Number(selectedRoom.y_pos))));
+                                    setHasUnsavedChanges(true);
+                                    setSelectedRoom(null);
+                                  }}
+                                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                                >
+                                  <Trash2 size={16} /> Удалить комнату
+                                </button>
+                              )}
                             </div>
                           </form>
                         </div>
@@ -1247,6 +1376,59 @@ export const AdminBuildingsPage: React.FC = () => {
               )}
             </div>
 
+          </div>
+        )}
+
+        {/* МОДАЛЬНОЕ ОКНО СОЗДАНИЯ ЭТАЖА */}
+        {showAddFloorModal && (
+          <div style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000
+          }}>
+            <div style={{ backgroundColor: '#fff', padding: '24px', borderRadius: '8px', maxWidth: '420px', width: '90%', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+              <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', color: '#0f172a' }}>Добавление этажа</h3>
+              <form onSubmit={handleCreateFloorSubmit}>
+                <div className="input-group">
+                  <label style={{ fontSize: '13px', fontWeight: 600 }}>Номер создаваемого этажа</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={newFloorNumberInput}
+                    onChange={(e) => {
+                      const num = Number(e.target.value);
+                      setNewFloorNumberInput(num);
+                    }}
+                    required
+                  />
+                </div>
+
+                <div className="input-group">
+                  <label style={{ fontSize: '13px', fontWeight: 600 }}>
+                    С какого номера начинается нумерация комнат на этом этаже?
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={newFloorStartRoomNum}
+                    onChange={(e) => setNewFloorStartRoomNum(e.target.value ? Number(e.target.value) : '')}
+                    placeholder="Рассчитывать автоматически"
+                  />
+                  <small style={{ color: '#64748b', fontSize: '11px', display: 'block', marginTop: '4px' }}>
+                    Оставьте пустым, чтобы нумерация продолжилась с предыдущего этажа.
+                  </small>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
+                  <button type="button" className="btn btn-secondary" onClick={() => setShowAddFloorModal(false)}>Отмена</button>
+                  <button type="submit" className="btn btn-primary">Создать этаж</button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
 
