@@ -1,30 +1,677 @@
-// ... (внутри handleDefaultRoutes, случай 'admin/users')
-case 'admin/users':
-    checkAdmin($pdo, $token);
-    if ($method === 'GET') {
-        $stmt = $pdo->query('SELECT id, first_name, last_name, name, username, phone, role, team_name, created_at FROM users ORDER BY id DESC');
-        echo json_encode($stmt->fetchAll());
-    } elseif ($method === 'POST') {
-        $id = $input['id'] ?? null;
-        if (!$id) { http_response_code(400); echo json_encode(['error' => 'ID пользователя не указан']); break; }
-        $firstName = $input['first_name'] ?? '';
-        $lastName = $input['last_name'] ?? '';
-        $phone = $input['phone'] ?? '';
-        $username = $input['username'] ?? ''; // было $email
-        $role = $input['role'] ?? 'user';
-        $teamName = $input['team_name'] ?? '';
+<?php
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+header('Access-Control-Allow-Credentials: true');
+header('Access-Control-Max-Age: 86400');
 
-        $sql = 'UPDATE users SET first_name = ?, last_name = ?, phone = ?, username = ?, role = ?, team_name = ?';
-        $params = [$firstName, $lastName, $phone, $username, $role, $teamName];
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit();
+}
 
-        if (!empty($input['password'])) {
-            $sql .= ', password = ?';
-            $params[] = password_hash($input['password'], PASSWORD_DEFAULT);
-        }
-        $sql .= ' WHERE id = ?';
-        $params[] = $id;
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
-        echo json_encode(['success' => true]);
+header('Content-Type: application/json; charset=utf-8');
+
+$host = 'localhost';
+$dbname = 'imb1r0kya2';
+$username = 'imb1r0kya2';
+$password = 'sAMogyg6sAMogyg';
+$port = 3306;
+
+try {
+    $pdo = new PDO("mysql:host=$host;port=$port;dbname=$dbname;charset=utf8mb4", $username, $password);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    http_response_code(500);
+    echo json_encode(['error' => 'Ошибка подключения к базе данных: ' . $e->getMessage()]);
+    exit();
+}
+
+function initFreshDatabase($pdo) {
+    $sql = "
+        SET FOREIGN_KEY_CHECKS = 0;
+        DROP TABLE IF EXISTS `bookings`;
+        DROP TABLE IF EXISTS `rooms`;
+        DROP TABLE IF EXISTS `floors`;
+        DROP TABLE IF EXISTS `buildings`;
+        DROP TABLE IF EXISTS `tokens`;
+        DROP TABLE IF EXISTS `users`;
+        DROP TABLE IF EXISTS `settings`;
+        SET FOREIGN_KEY_CHECKS = 1;
+
+        CREATE TABLE `settings` (
+          `key` VARCHAR(50) NOT NULL PRIMARY KEY,
+          `value` TEXT NULL,
+          `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+        INSERT INTO `settings` (`key`, `value`) VALUES ('site_title', 'Алабуга - форум 2025');
+
+        CREATE TABLE `users` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `first_name` VARCHAR(100) NULL,
+          `last_name` VARCHAR(100) NULL,
+          `name` VARCHAR(255) NOT NULL,
+          `email` VARCHAR(255) NULL UNIQUE,
+          `phone` VARCHAR(50) NULL,
+          `username` VARCHAR(100) NOT NULL UNIQUE,
+          `password` VARCHAR(255) NOT NULL,
+          `role` VARCHAR(50) NOT NULL DEFAULT 'user',
+          `team_name` VARCHAR(100) NULL,
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+        CREATE TABLE `tokens` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `user_id` INT NOT NULL,
+          `token` VARCHAR(255) NOT NULL UNIQUE,
+          `expires_at` DATETIME NOT NULL,
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+        CREATE TABLE `buildings` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `name` VARCHAR(255) NOT NULL,
+          `gender` ENUM('M', 'F', 'MIXED') NOT NULL DEFAULT 'MIXED',
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+        CREATE TABLE `floors` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `building_id` INT NOT NULL,
+          `floor_number` INT NOT NULL,
+          `width` INT NOT NULL DEFAULT 8,
+          `start_room_number` INT NULL DEFAULT NULL,
+          `room_order_type` VARCHAR(20) NOT NULL DEFAULT 'clockwise',
+          `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
+          `layout_data` LONGTEXT NULL,
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (`building_id`) REFERENCES `buildings`(`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+        CREATE TABLE `rooms` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `floor_id` INT NOT NULL,
+          `building_id` INT NOT NULL,
+          `room_number` VARCHAR(50) NOT NULL,
+          `name` VARCHAR(255) NULL,
+          `capacity` INT NOT NULL DEFAULT 2,
+          `is_technical` TINYINT(1) NOT NULL DEFAULT 0,
+          `room_type` VARCHAR(50) NOT NULL DEFAULT 'room',
+          `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
+          `x_pos` INT NOT NULL DEFAULT 0,
+          `y_pos` INT NOT NULL DEFAULT 0,
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (`floor_id`) REFERENCES `floors`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`building_id`) REFERENCES `buildings`(`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+        CREATE TABLE `bookings` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `user_id` INT NOT NULL,
+          `room_id` INT NOT NULL,
+          `status` ENUM('pending', 'rejected', 'approved', 'approved_bot') NOT NULL DEFAULT 'pending',
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+          FOREIGN KEY (`room_id`) REFERENCES `rooms`(`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    ";
+
+    $pdo->exec($sql);
+
+    $adminPassword = password_hash('admin123', PASSWORD_DEFAULT);
+    $stmt = $pdo->prepare("INSERT INTO `users` (`first_name`, `last_name`, `name`, `email`, `phone`, `username`, `password`, `role`, `team_name`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->execute(['Админ', 'Главный', 'Администратор', 'admin@alabuga.ru', '+79990000000', 'admin', $adminPassword, 'admin', 'Оргкомитет']);
+}
+
+function ensureTablesExist($pdo) {
+    $queries = [
+        "CREATE TABLE IF NOT EXISTS `settings` (
+          `key` VARCHAR(50) NOT NULL PRIMARY KEY,
+          `value` TEXT NULL,
+          `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+
+        "INSERT IGNORE INTO `settings` (`key`, `value`) VALUES ('site_title', 'Алабуга - форум 2025');",
+
+        "CREATE TABLE IF NOT EXISTS `users` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `first_name` VARCHAR(100) NULL,
+          `last_name` VARCHAR(100) NULL,
+          `name` VARCHAR(255) NOT NULL,
+          `email` VARCHAR(255) NULL UNIQUE,
+          `phone` VARCHAR(50) NULL,
+          `username` VARCHAR(100) NOT NULL UNIQUE,
+          `password` VARCHAR(255) NOT NULL,
+          `role` VARCHAR(50) NOT NULL DEFAULT 'user',
+          `team_name` VARCHAR(100) NULL,
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+
+        "CREATE TABLE IF NOT EXISTS `tokens` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `user_id` INT NOT NULL,
+          `token` VARCHAR(255) NOT NULL UNIQUE,
+          `expires_at` DATETIME NOT NULL,
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+
+        "CREATE TABLE IF NOT EXISTS `buildings` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `name` VARCHAR(255) NOT NULL,
+          `gender` ENUM('M', 'F', 'MIXED') NOT NULL DEFAULT 'MIXED',
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+
+        "CREATE TABLE IF NOT EXISTS `floors` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `building_id` INT NOT NULL,
+          `floor_number` INT NOT NULL,
+          `width` INT NOT NULL DEFAULT 8,
+          `start_room_number` INT NULL DEFAULT NULL,
+          `room_order_type` VARCHAR(20) NOT NULL DEFAULT 'clockwise',
+          `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
+          `layout_data` LONGTEXT NULL,
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+
+        "CREATE TABLE IF NOT EXISTS `rooms` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          `floor_id` INT NOT NULL,
+          `building_id` INT NOT NULL,
+          `room_number` VARCHAR(50) NOT NULL,
+          `name` VARCHAR(255) NULL,
+          `capacity` INT NOT NULL DEFAULT 2,
+          `is_technical` TINYINT(1) NOT NULL DEFAULT 0,
+          `room_type` VARCHAR(50) NOT NULL DEFAULT 'room',
+          `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
+          `x_pos` INT NOT NULL DEFAULT 0,
+          `y_pos` INT NOT NULL DEFAULT 0,
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+
+        "CREATE TABLE IF NOT EXISTS `bookings` (
+          `id` INT AUTO_INCREMENT PRIMARY KEY,
+          ` INT NOT NULL,
+          `room_id` INT NOT NULL,
+          `status` ENUM('pending', 'rejected', 'approved', 'approved_bot') NOT NULL DEFAULT 'pending',
+          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+    ];
+
+    foreach ($queries as $q) {
+        try {
+            $pdo->exec($q);
+        } catch (Exception $e) {}
     }
-    break;
+
+    try { $pdo->exec("ALTER TABLE `floors` ADD COLUMN `start_room_number` INT NULL DEFAULT NULL;"); } catch (Exception $e) {}
+    try { $pdo->exec("ALTER TABLE `floors` ADD COLUMN `room_order_type` VARCHAR(20) NOT NULL DEFAULT 'clockwise';"); } catch (Exception $e) {}
+    try { $pdo->exec("ALTER TABLE `users` ADD COLUMN `username` VARCHAR(100) NULL AFTER `phone`;"); } catch (Exception $e) {}
+}
+
+ensureTablesExist($pdo);
+
+$uri = '';
+if (!empty($_GET['route'])) {
+    $uri = $_GET['route'];
+} elseif (!empty($_SERVER['PATH_INFO'])) {
+    $uri = $_SERVER['PATH_INFO'];
+} else {
+    $requestUri = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
+    $requestUri = preg_replace('/^.*?index\.php/i', '', $requestUri);
+    $requestUri = preg_replace('/^\/api/i', '', $requestUri);
+    $uri = $requestUri;
+}
+$uri = trim($uri, '/');
+$method = $_SERVER['REQUEST_METHOD'];
+
+$input = json_decode(file_get_contents('php://input'), true) ?? [];
+
+function getBearerToken() {
+    $authHeader = '';
+    if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+        $authHeader = $_SERVER['HTTP_AUTHORIZATION'];
+    } elseif (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+        $authHeader = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+    } else {
+        $headers = function_exists('getallheaders') ? getallheaders() : [];
+        foreach ($headers as $key => $value) {
+            if (strtolower($key) === 'authorization') {
+                $authHeader = $value;
+                break;
+            }
+        }
+    }
+    if (preg_match('/Bearer\s(\S+)/i', $authHeader, $matches)) {
+        return $matches[1];
+    }
+    return '';
+}
+
+$token = getBearerToken();
+
+function generateToken($userId) {
+    return bin2hex(random_bytes(32)) . '_' . $userId . '_' . time();
+}
+
+function getUserByToken($pdo, $token) {
+    if (empty($token)) return null;
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT u.id, u.first_name, u.last_name, u.name, u.email, u.phone, u.username, u.role, u.team_name FROM users u 
+             INNER JOIN tokens t ON u.id = t.user_id 
+             WHERE t.token = ? AND t.expires_at > NOW()'
+        );
+        $stmt->execute([$token]);
+        return $stmt->fetch() ?: null;
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+function checkAdmin($pdo, $token) {
+    $user = getUserByToken($pdo, $token);
+    $role = strtolower(trim($user['role'] ?? ''));
+    if (!$user || ($role !== 'admin' && $role !== 'moderator')) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Недостаточно прав доступа']);
+        exit();
+    }
+    return $user;
+}
+
+try {
+    switch ($uri) {
+        case 'register':
+            if ($method === 'POST') {
+                $firstName = $input['first_name'] ?? '';
+                $lastName = $input['last_name'] ?? '';
+                $phone = $input['phone'] ?? '';
+                $password = $input['password'] ?? '';
+                
+                if (empty($firstName) || empty($lastName) || empty($phone) || empty($password)) {
+                    http_response_code(400);
+                    echo json_encode(['error' => 'Фамилия, имя, номер телефона и пароль обязательны']);
+                    break;
+                }
+                
+                // Генерация логина: alabuga_ + ФамилияЛатин + первые 3 цифры телефона
+                $translit = preg_replace('/[^a-zA-Z]/', '', $firstName . $lastName);
+                $translit = strtolower(trim($translit));
+                if (empty($translit)) $translit = 'user';
+                $phoneSuffix = preg_replace('/[^0-9]/', '', $phone);
+                $phoneSuffix = substr($phoneSuffix, -4);
+                $username = 'alabuga_' . $translit . '_' . $phoneSuffix;
+                
+                $stmt = $pdo->prepare('SELECT id FROM users WHERE phone = ?');
+                $stmt->execute([$phone]);
+                if ($stmt->fetch()) {
+                    http_response_code(400);
+                    echo json_encode(['error' => 'Пользователь с таким номером телефона уже существует']);
+                    break;
+                }
+                
+                // Проверка уникальности логина (при коллизии добавляем цифру)
+                $baseUsername = $username;
+                $counter = 1;
+                while (true) {
+                    $checkStmt = $pdo->prepare('SELECT id FROM users WHERE username = ?');
+                    $checkStmt->execute([$username]);
+                    if (!$checkStmt->fetch()) break;
+                    $username = $baseUsername . $counter;
+                    $counter++;
+                }
+                
+                $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
+                $stmt = $pdo->prepare('INSERT INTO users (first_name, last_name, name, phone, username, password, role) VALUES (?, ?, ?, ?, ?, ?, ?)');
+                $userName = $firstName . ' ' . $lastName;
+                
+                if ($stmt->execute([$firstName, $lastName, $userName, $phone, $username, $hashedPassword, 'user'])) {
+                    $userId = $pdo->lastInsertId();
+                    $newToken = generateToken($userId);
+                    
+                    $stmt = $pdo->prepare('INSERT INTO tokens (user_id, token, expires_at) VALUES (?, ?, ?)');
+                    $expiresAt = date('Y-m-d H:i:s', strtotime('+7 days'));
+                    $stmt->execute([$userId, $newToken, $expiresAt]);
+                    
+                    echo json_encode([
+                        'success' => true,
+                        'token' => $newToken,
+                        'user' => [
+                            'id' => $userId,
+                            'first_name' => $firstName,
+                            'last_name' => $lastName,
+                            'name' => $userName,
+                            'phone' => $phone,
+                            'username' => $username,
+                            'password' => $password,
+                            'role' => 'user'
+                        ]
+                    ]);
+                }
+            }
+            break;
+            
+        case 'login':
+            if ($method === 'POST') {
+                $login = $input['login'] ?? '';
+                $password = $input['password'] ?? '';
+                
+                // Поиск по телефону или по логину
+                $stmt = $pdo->prepare('SELECT * FROM users WHERE phone = ? OR username = ?');
+                $stmt->execute([$login, $login]);
+                $user = $stmt->fetch();
+                
+                if (!$user || !password_verify($password, $user['password'])) {
+                    http_response_code(401);
+                    echo json_encode(['error' => 'Неверный логин/телефон или пароль']);
+                    break;
+                }
+                
+                $newToken = generateToken($user['id']);
+                $stmt = $pdo->prepare('DELETE FROM tokens WHERE user_id = ?');
+                $stmt->execute([$user['id']]);
+                
+                $stmt = $pdo->prepare('INSERT INTO tokens ( token, expires_at) VALUES (?, ?, ?)');
+                $expiresAt = date('Y-m-d H:i:s', strtotime('+7 days'));
+                $stmt->execute([$user['id'], $newToken, $expiresAt]);
+                
+                echo json_encode([
+                    'success' => true,
+                    'token' => $newToken,
+                    'user' => $user
+                ]);
+            }
+            break;
+            
+        case 'user':
+            if ($method === 'GET') {
+                $user = getUserByToken($pdo, $token);
+                if ($user) {
+                    echo json_encode($user);
+                } else {
+                    http_response_code(401);
+                    echo json_encode(['error' => 'Не авторизован']);
+                }
+            }
+            break;
+            
+        case 'logout':
+            if ($method === 'POST') {
+                if (!empty($token)) {
+                    $stmt = $pdo->prepare('DELETE FROM tokens WHERE token = ?');
+                    $stmt->execute([$token]);
+                }
+                echo json_encode(['success' => true]);
+            }
+            break;
+
+        // ... (остальные маршруты без изменений)
+        default:
+            // Передаем управление к существующим маршрутам без username
+            // Здесь будут маршруты settings, admin/users, admin/bookings, admin/buildings и т.д.
+            handleDefaultRoutes($pdo, $uri, $method, $input, $token, $_GET);
+            break;
+    }
+} catch (Exception $e) {
+    http_response_code(500);
+    echo json_encode(['error' => 'Ошибка сервера: ' . $e->getMessage()]);
+}
+
+function handleDefaultRoutes($pdo, $uri, $method, $input, $token, $get) {
+    // Все те же роуты, что и были (settings, admin/users, admin/bookings, admin/buildings, admin/floors, admin/rooms, admin/all-rooms, init-db)
+    // Они остаются полностью без изменений, просто помещаем их сюда для совместимости
+    try {
+        switch ($uri) {
+            case 'init-db':
+                initFreshDatabase($pdo);
+                echo json_encode([
+                    'success' => true,
+                    'message' => 'База данных успешно пересоздана с нуля!',
+                    'default_admin' => ['email' => 'admin@alabuga.ru', 'password' => 'admin123']
+                ]);
+                break;
+
+            case 'settings':
+                if ($method === 'GET') {
+                    $stmt = $pdo->query('SELECT `key`, `value` FROM settings');
+                    $settings = [];
+                    while ($row = $stmt->fetch()) {
+                        $settings[$row['key']] = $row['value'];
+                    }
+                    if (!isset($settings['site_title'])) {
+                        $settings['site_title'] = 'Алабуга - форум 2025';
+                    }
+                    echo json_encode($settings);
+                } elseif ($method === 'POST') {
+                    checkAdmin($pdo, $token);
+                    $siteTitle = trim($input['site_title'] ?? '');
+                    if (!empty($siteTitle)) {
+                        $stmt = $pdo->prepare('INSERT INTO settings (`key`, `value`) VALUES ("site_title", ?) ON DUPLICATE KEY UPDATE `value` = ?');
+                        $stmt->execute([$siteTitle, $siteTitle]);
+                    }
+                    echo json_encode(['success' => true]);
+                }
+                break;
+
+            case 'admin/users':
+                checkAdmin($pdo, $token);
+                if ($method === 'GET') {
+                    $stmt = $pdo->query('SELECT id, first_name, last_name, name, email, phone, username, role, team_name, created_at FROM users ORDER BY id DESC');
+                    echo json_encode($stmt->fetchAll());
+                } elseif ($method === 'POST') {
+                    $id = $input['id'] ?? null;
+                    if (!$id) { http_response_code(400); echo json_encode(['error' => 'ID пользователя не указан']); break; }
+                    $firstName = $input['first_name'] ?? '';
+                    $lastName = $input['last_name'] ?? '';
+                    $phone = $input['phone'] ?? '';
+                    $email = $input['email'] ?? '';
+                    $role = $input['role'] ?? 'user';
+                    $teamName = $input['team_name'] ?? '';
+                    $username = $input['username'] ?? '';
+
+                    $sql = 'UPDATE users SET first_name = ?, last_name = ?, phone = ?, email = ?, role = ?, team_name = ?, username = ?';
+                    $params = [$firstName, $lastName, $phone, $email, $role, $teamName, $username];
+
+                    if (!empty($input['password'])) {
+                        $sql .= ', password = ?';
+                        $params[] = password_hash($input['password'], PASSWORD_DEFAULT);
+                    }
+                    $sql .= ' WHERE id = ?';
+                    $params[] = $id;
+                    $stmt = $pdo->prepare($sql);
+                    $stmt->execute($params);
+                    echo json_encode(['success' => true]);
+                }
+                break;
+
+            case 'admin/user-details':
+                checkAdmin($pdo, $token);
+                if ($method === 'GET') {
+                    $userId = $get['id'] ?? null;
+                    if (!$userId) { http_response_code(400); echo json_encode(['error' => 'ID пользователя не указан']); break; }
+                    $stmt = $pdo->prepare('
+                        SELECT b.id, b.status, b.created_at, r.room_number, r.name as room_name,
+                               fl.floor_number, bu.name as building_name
+                        FROM bookings b
+                        LEFT JOIN rooms r ON b.room_id = r.id
+                        LEFT JOIN floors fl ON r.floor_id = fl.id
+                        LEFT JOIN buildings bu ON r.building_id = bu.id
+                        WHERE b.user_id = ? ORDER BY b.created_at DESC
+                    ');
+                    $stmt->execute([$userId]);
+                    $bookings = $stmt->fetchAll();
+                    echo json_encode([
+                        'current_booking' => !empty($bookings) ? $bookings[0] : null,
+                        'bookings_history' => $bookings
+                    ]);
+                }
+                break;
+
+            case 'admin/bookings':
+                checkAdmin($pdo, $token);
+                if ($method === 'GET') {
+                    $stmt = $pdo->query('
+                        SELECT b.id, b.status, b.created_at, b.user_id, b.room_id,
+                               u.first_name, u.last_name, u.name as user_name, u.email as user_email, u.phone as user_phone,
+                               r.room_number, r.name as room_name, r.gender as room_gender,
+                               fl.id as floor_id, fl.floor_number, fl.gender as floor_gender,
+                               bu.id as building_id, bu.name as building_name, bu.gender as building_gender
+                        FROM bookings b
+                        JOIN users u ON b.user_id = u.id
+                        JOIN rooms r ON b.room_id = r.id
+                        JOIN floors fl ON r.floor_id = fl.id
+                        JOIN buildings bu ON r.building_id = bu.id
+                        ORDER BY b.id DESC
+                    ');
+                    $bookings = $stmt->fetchAll();
+                    foreach ($bookings as &$b) {
+                        $gender = $b['room_gender'];
+                        if ($gender === 'DEFAULT') $gender = $b['floor_gender'];
+                        if ($gender === 'DEFAULT') $gender = $b['building_gender'];
+                        $b['gender'] = $gender;
+                    }
+                    echo json_encode($bookings);
+                } elseif ($method === 'POST') {
+                    $id = $input['id'] ?? null; $status = $input['status'] ?? 'pending'; $roomId = $input['room_id'] ?? null;
+                    if (!$id || !$roomId) { http_response_code(400); echo json_encode(['error' => 'Не заполнены обязательные поля']); break; }
+                    $stmt = $pdo->prepare('UPDATE bookings SET status = ?, room_id = ? WHERE id = ?');
+                    $stmt->execute([$status, $roomId, $id]);
+                    if (isset($input['user_id'])) {
+                        $uStmt = $pdo->prepare('UPDATE users SET first_name = ?, last_name = ?, phone = ? WHERE id = ?');
+                        $uStmt->execute([$input['first_name'] ?? '', $input['last_name'] ?? '', $input['phone'] ?? '', $input['user_id']]);
+                    }
+                    echo json_encode(['success' => true]);
+                }
+                break;
+
+            case 'admin/room-bookings':
+                checkAdmin($pdo, $token);
+                if ($method === 'GET') {
+                    $roomId = $get['room_id'] ?? null;
+                    if (!$roomId) { echo json_encode([]); break; }
+                    $stmt = $pdo->prepare('
+                        SELECT b.id, b.status, b.created_at, b.user_id,
+                               u.first_name, u.last_name, u.name as user_name, u.email as user_email, u.phone as user_phone
+                        FROM bookings b JOIN users u ON b.user_id = u.id
+                        WHERE b.room_id = ? AND b.status != "rejected" ORDER BY b.id DESC
+                    ');
+                    $stmt->execute([$roomId]);
+                    echo json_encode($stmt->fetchAll());
+                }
+                break;
+
+            case 'admin/buildings':
+                checkAdmin($pdo, $token);
+                if ($method === 'GET') {
+                    echo json_encode($pdo->query('SELECT * FROM buildings ORDER BY id ASC')->fetchAll());
+                } elseif ($method === 'POST') {
+                    $action = $input['action'] ?? 'save';
+                    if ($action === 'delete') {
+                        $id = $input['id'] ?? null;
+                        if ($id) { $pdo->prepare('DELETE FROM buildings WHERE id = ?')->execute([$id]); }
+                        echo json_encode(['success' => true]); break;
+                    }
+                    $name = $input['name'] ?? 'Новый корпус';
+                    $gender = $input['gender'] ?? 'MIXED';
+                    if (isset($input['id'])) {
+                        $pdo->prepare('UPDATE buildings SET name = ?, gender = ? WHERE id = ?')->execute([$name, $gender, $input['id']]);
+                        echo json_encode(['success' => true]);
+                    } else {
+                        $pdo->prepare('INSERT INTO buildings (name, gender) VALUES (?, ?)')->execute([$name, $gender]);
+                        $bId = $pdo->lastInsertId();
+                        $pdo->prepare('INSERT INTO floors (building_id, floor_number, width, gender, room_order_type) VALUES (?, 1, 8, "DEFAULT", "clockwise")')->execute([$bId]);
+                        echo json_encode(['success' => true, 'id' => $bId]);
+                    }
+                }
+                break;
+
+            case 'admin/floors':
+                checkAdmin($pdo, $token);
+                if ($method === 'GET') {
+                    $buildingId = $get['building_id'] ?? null;
+                    if (!$buildingId) { echo json_encode([]); break; }
+                    $stmt = $pdo->prepare('SELECT * FROM floors WHERE building_id = ? ORDER BY floor_number ASC');
+                    $stmt->execute([$buildingId]);
+                    echo json_encode($stmt->fetchAll());
+                } elseif ($method === 'POST') {
+                    $action = $input['action'] ?? 'save';
+                    if ($action === 'delete') {
+                        $id = $input['id'] ?? null;
+                        if ($id) { $pdo->prepare('DELETE FROM floors WHERE id = ?')->execute([$id]); }
+                        echo json_encode(['success' => true]); break;
+                    }
+                    $buildingId = $input['building_id'] ?? null;
+                    $floorNumber = $input['floor_number'] ?? 1;
+                    $width = $input['width'] ?? 8;
+                    $gender = $input['gender'] ?? 'DEFAULT';
+                    $startRoomNum = isset($input['start_room_number']) ? (int)$input['start_room_number'] : null;
+                    $roomOrderType = $input['room_order_type'] ?? 'clockwise';
+                    if (isset($input['id'])) {
+                        $pdo->prepare('UPDATE floors SET width = ?, gender = ?, start_room_number = ?, room_order_type = ? WHERE id = ?')->execute([$width, $gender, $startRoomNum, $roomOrderType, $input['id']]);
+                    } else {
+                        $pdo->prepare('INSERT INTO floors (building_id, floor_number, width, gender, start_room_number, room_order_type) VALUES (?, ?, ?, ?, ?, ?)')->execute([$buildingId, $floorNumber, $width, $gender, $startRoomNum, $roomOrderType]);
+                    }
+                    echo json_encode(['success' => true]);
+                }
+                break;
+
+            case 'admin/rooms':
+                checkAdmin($pdo, $token);
+                if ($method === 'GET') {
+                    $floorId = $get['floor_id'] ?? null;
+                    if (!$floorId) { echo json_encode([]); break; }
+                    $stmt = $pdo->prepare('SELECT * FROM rooms WHERE floor_id = ?');
+                    $stmt->execute([$floorId]);
+                    echo json_encode($stmt->fetchAll());
+                } elseif ($method === 'POST') {
+                    $id = $input['id'] ?? null; $action = $input['action'] ?? 'save'; $roomType = $input['room_type'] ?? 'room';
+                    if (($action === 'delete' || $roomType === 'empty') && $id) {
+                        $pdo->prepare('DELETE FROM rooms WHERE id = ?')->execute([$id]);
+                        echo json_encode(['success' => true]); break;
+                    }
+                    $floorId = $input['floor_id'] ?? null; $buildingId = $input['building_id'] ?? null;
+                    $roomNumber = $input['room_number'] ?? ''; $name = $input['name'] ?? '';
+                    $capacity = $input['capacity'] ?? 2; $isTechnical = isset($input['is_technical']) ? (int)$input['is_technical'] : 0;
+                    $gender = $input['gender'] ?? 'DEFAULT'; $xPos = $input['x_pos'] ?? 0; $yPos = $input['y_pos'] ?? 0;
+                    if ($id) {
+                        $pdo->prepare('UPDATE rooms SET room_number = ?, name = ?, capacity = ?, is_technical = ?, room_type = ?, gender = ?, x_pos = ?, y_pos = ? WHERE id = ?')->execute([$roomNumber, $name, $capacity, $isTechnical, $roomType, $gender, $xPos, $yPos, $id]);
+                    } else {
+                        $pdo->prepare('INSERT INTO rooms (floor_id, building_id, room_number, name, capacity, is_technical, room_type, gender, x_pos, y_pos) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')->execute([$floorId, $buildingId, $roomNumber, $name, $capacity, $isTechnical, $roomType, $gender, $xPos, $yPos]);
+                    }
+                    echo json_encode(['success' => true]);
+                }
+                break;
+
+            case 'admin/all-rooms':
+                checkAdmin($pdo, $token);
+                if ($method === 'GET') {
+                    $stmt = $pdo->query('
+                        SELECT r.id, r.room_number, r.name, r.room_type, r.capacity, r.gender as room_gender,
+                               fl.id as floor_id, fl.floor_number, fl.gender as floor_gender,
+                               bu.id as building_id, bu.name as building_name, bu.gender as building_gender
+                        FROM rooms r
+                        JOIN floors fl ON r.floor_id = fl.id
+                        JOIN buildings bu ON r.building_id = bu.id
+                        ORDER BY bu.name, fl.floor_number, r.room_number
+                    ');
+                    echo json_encode($stmt->fetchAll());
+                }
+                break;
+
+            default:
+                http_response_code(404);
+                echo json_encode(['error' => 'Метод не найден: ' . $uri]);
+                break;
+        }
+    } catch (Exception $e) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Ошибка сервера: ' . $e->getMessage()]);
+    }
+}
+?>

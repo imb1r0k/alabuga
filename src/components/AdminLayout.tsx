@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Skeleton } from './Skeleton';
 import { 
@@ -7,19 +7,31 @@ import {
   Users, 
   BookmarkCheck, 
   Building2, 
-  ShieldCheck,
-  Menu,
-  X
+  ChevronLeft, 
+  ChevronRight,
+  ShieldCheck
 } from 'lucide-react';
 
 export const AdminLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, loading: authLoading } = useAuth();
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  
+  // Сохранение состояния свернутости в localStorage
+  const [collapsed, setCollapsed] = useState(() => {
+    return localStorage.getItem('admin_sidebar_collapsed') === 'true';
+  });
+
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem('admin_sidebar_collapsed', String(next));
+      return next;
+    });
+  };
 
   if (!isAuthenticated && !authLoading) {
     return (
       <div style={{ minHeight: 'calc(100vh - 64px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-        <div className="admin-card" style={{ maxWidth: '400px', width: '100%' }}>
+        <div className="card" style={{ maxWidth: '400px', width: '100%' }}>
           <h2 style={{ textAlign: 'center', marginBottom: '24px', color: '#333' }}>Требуется авторизация</h2>
           <p style={{ color: '#666', textAlign: 'center' }}>Для доступа к админ-панели необходимо войти в систему.</p>
         </div>
@@ -45,31 +57,10 @@ export const AdminLayout: React.FC<{ children?: React.ReactNode }> = ({ children
 
   return (
     <div style={{ display: 'flex', minHeight: 'calc(100vh - 64px)', backgroundColor: '#f4f6f9' }}>
-      {/* Мобильное меню-бургер */}
-      <div style={{
-        display: 'none',
-        '@media (max-width: 768px)': {
-          display: 'block',
-          position: 'absolute',
-          top: 80,
-          right: 16,
-          zIndex: 200
-        }
-      }}>
-        <button
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="btn btn-secondary"
-          aria-label="Меню"
-        >
-          {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
-        </button>
-      </div>
-
-      {/* Боковое меню (скрывается на мобильных) */}
+      {/* Боковая навигация слева */}
       <aside
-        className={`admin-sidebar ${mobileMenuOpen ? 'admin-sidebar-mobile' : ''}`}
         style={{
-          width: '230px',
+          width: collapsed ? '68px' : '230px',
           backgroundColor: '#1e293b',
           color: '#fff',
           transition: 'width 0.2s ease-in-out',
@@ -77,22 +68,46 @@ export const AdminLayout: React.FC<{ children?: React.ReactNode }> = ({ children
           flexDirection: 'column',
           justifyContent: 'space-between',
           zIndex: 100,
-          borderRight: '1px solid #0f172a'
+          borderRight: '1px solid #0f172a',
+          flexShrink: 0
         }}
       >
         <div>
+          {/* Шапка бокового меню */}
           <div style={{
             height: '60px',
             display: 'flex',
             alignItems: 'center',
-            padding: '0 16px',
+            justifyContent: collapsed ? 'center' : 'space-between',
+            padding: collapsed ? '0' : '0 16px',
             borderBottom: '1px solid #334155'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold', fontSize: '15px' }}>
-              <ShieldCheck size={20} color="#38bdf8" />
-              <span>Админка</span>
-            </div>
+            {!collapsed && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold', fontSize: '15px' }}>
+                <ShieldCheck size={20} color="#38bdf8" />
+                <span>Админка</span>
+              </div>
+            )}
+            <button
+              onClick={toggleCollapsed}
+              title={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#94a3b8',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '6px',
+                borderRadius: '6px'
+              }}
+            >
+              {collapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
+            </button>
           </div>
+
+          {/* Список разделов */}
           <nav style={{ padding: '12px 8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {navItems.map((item) => {
               const IconComponent = item.icon;
@@ -105,7 +120,8 @@ export const AdminLayout: React.FC<{ children?: React.ReactNode }> = ({ children
                     display: 'flex',
                     alignItems: 'center',
                     gap: '12px',
-                    padding: '10px 14px',
+                    padding: collapsed ? '12px 0' : '10px 14px',
+                    justifyContent: collapsed ? 'center' : 'flex-start',
                     borderRadius: '8px',
                     color: isActive ? '#ffffff' : '#94a3b8',
                     backgroundColor: isActive ? '#0284c7' : 'transparent',
@@ -114,23 +130,26 @@ export const AdminLayout: React.FC<{ children?: React.ReactNode }> = ({ children
                     fontWeight: isActive ? 600 : 400,
                     transition: 'all 0.15s ease'
                   })}
+                  title={collapsed ? item.label : undefined}
                 >
                   <IconComponent size={20} style={{ flexShrink: 0 }} />
-                  <span>{item.label}</span>
+                  {!collapsed && <span>{item.label}</span>}
                 </NavLink>
               );
             })}
           </nav>
         </div>
+
+        {/* Подвал меню */}
         <div style={{ padding: '12px', borderTop: '1px solid #334155', textAlign: 'center', fontSize: '11px', color: '#64748b' }}>
-          Алабуга Admin 2025
+          {!collapsed && <span>Алабуга Admin 2025</span>}
         </div>
       </aside>
 
-      {/* Контентная область */}
+      {/* Основное содержимое */}
       <main style={{ flex: 1, overflowX: 'auto', padding: '0', display: 'flex', flexDirection: 'column' }}>
         <div style={{ flex: 1, padding: '20px' }}>
-          {children}
+          {children || <Outlet />}
         </div>
       </main>
     </div>
