@@ -8,6 +8,7 @@ import {
   saveAdminFloor,
   getAdminRooms,
   saveAdminRoom,
+  api,
 } from '../../services/api';
 import { 
   Bed, 
@@ -18,13 +19,20 @@ import {
   Sparkles, 
   Trash2, 
   Check, 
-  Compass,
+  SquareCheck,
   Play,
   RotateCw,
-  SquareCheck
+  ArrowRight,
+  ArrowLeft,
+  ArrowUp,
+  ArrowDown,
+  Square,
+  Zap,
+  X
 } from 'lucide-react';
 
-type TileType = 'room' | 'elevator' | 'stairs' | 'tech';
+type TileType = 'room' | 'elevator' | 'stairs' | 'tech' | 'gen-start' | 'gen-turn' | 'gen-end';
+type Direction = 'right' | 'down' | 'left' | 'up';
 
 interface TileTemplate {
   type: TileType;
@@ -33,13 +41,20 @@ interface TileTemplate {
   bg: string;
   borderColor: string;
   textColor: string;
+  dir?: Direction;
 }
 
-const TILE_TEMPLATES: TileTemplate[] = [
+const STANDARD_TEMPLATES: TileTemplate[] = [
   { type: 'room', title: 'Комната', icon: Bed, bg: '#d1e7dd', borderColor: '#a3cfbb', textColor: '#0f5132' },
   { type: 'elevator', title: 'Лифт', icon: ArrowUpDown, bg: '#cff4fc', borderColor: '#9eeaf9', textColor: '#055160' },
   { type: 'stairs', title: 'Лестница', icon: Footprints, bg: '#fff3cd', borderColor: '#ffe69c', textColor: '#664d03' },
   { type: 'tech', title: 'Техническая', icon: Wrench, bg: '#e2e3e5', borderColor: '#c4c8cb', textColor: '#41464b' },
+];
+
+const GEN_TEMPLATES: TileTemplate[] = [
+  { type: 'gen-start', title: 'Начало генерации', icon: Play, bg: '#d1e7dd', borderColor: '#198754', textColor: '#0f5132', dir: 'right' },
+  { type: 'gen-turn', title: 'Поворот генерации', icon: RotateCw, bg: '#cff4fc', borderColor: '#0dcaf0', textColor: '#055160', dir: 'right' },
+  { type: 'gen-end', title: 'Конец генерации', icon: Square, bg: '#f8d7da', borderColor: '#dc3545', textColor: '#842029' },
 ];
 
 export const AdminBuildingsPage: React.FC = () => {
@@ -58,13 +73,16 @@ export const AdminBuildingsPage: React.FC = () => {
   const [newBuildingName, setNewBuildingName] = useState('');
   const [newBuildingGender, setNewBuildingGender] = useState<'M' | 'F' | 'MIXED'>('MIXED');
 
-  // Активный инструмент заготовки
+  // Режим генерации
+  const [genMode, setGenMode] = useState(false);
   const [selectedTool, setSelectedTool] = useState<TileType>('room');
+  const [selectedDir, setSelectedDir] = useState<Direction>('right');
 
-  // Генератор комнат
-  const [showGenModal, setShowGenModal] = useState(false);
-  const [genStartNumber, setGenStartNumber] = useState(101);
-  const [genDirection, setGenDirection] = useState<'cw' | 'ccw'>('cw'); // по часовой / против
+  // Параметры алгоритма генератора
+  const [genFrom, setGenFrom] = useState(101);
+  const [genTo, setGenTo] = useState(120);
+  const [genSeats, setGenSeats] = useState(2);
+  const [genStatusMsg, setGenStatusMsg] = useState('');
 
   useEffect(() => {
     loadBuildings();
@@ -128,7 +146,6 @@ export const AdminBuildingsPage: React.FC = () => {
     }
   };
 
-  // По умолчанию создается пустой этаж
   const handleAddFloor = async () => {
     if (!selectedBuilding) return;
     const nextNum = floors.length + 1;
@@ -165,100 +182,71 @@ export const AdminBuildingsPage: React.FC = () => {
     }
   };
 
-  // Вспомогательная функция обхода сетки по часовой стрелке
+  // Порядковый номер по часовой стрелке
   const getClockwiseCells = (width: number) => {
     const cells: { x: number; y: number; index: number }[] = [];
     let idx = 1;
 
-    // Верхняя линия (слева направо, y = 0)
+    // Верхняя линия (y = 0)
     for (let x = 0; x < width; x++) {
       cells.push({ x, y: 0, index: idx++ });
     }
-    // Нижняя линия (справа налево, y = 2)
+    // Нижняя линия (y = 2)
     for (let x = width - 1; x >= 0; x--) {
       cells.push({ x, y: 2, index: idx++ });
     }
     return cells;
   };
 
-  // Получить порядковый номер позиции плитки по часовой стрелке
   const getCellClockwiseIndex = (x: number, y: number, width: number) => {
     const cells = getClockwiseCells(width);
     const item = cells.find((c) => c.x === x && c.y === y);
     return item ? item.index : 1;
   };
 
-  // Автонумерация комнаты
   const calculateAutoRoomNumber = (x: number, y: number, width: number, floorNum: number) => {
     const idx = getCellClockwiseIndex(x, y, width);
     const suffix = idx < 10 ? `0${idx}` : `${idx}`;
     return `${floorNum}${suffix}`;
   };
 
-  // Клик по ячейке сетки макета
-  const handleCellClick = async (x: number, y: number) => {
-    if (y === 1 || !selectedFloor) return; // Коридор
+  // Размещение ячейки (по клику или D&D)
+  const placeTileAt = async (x: number, y: number, type: TileType, dir: Direction = 'right') => {
+    if (y === 1 || !selectedFloor || !selectedBuilding) return;
 
     const width = selectedFloor.width || 8;
     const existing = rooms.find((r) => r.x_pos === x && r.y_pos === y);
-
-    if (existing) {
-      setSelectedRoom({ ...existing });
-    } else {
-      // Ставим выбранную заготовку
-      const autoNum = calculateAutoRoomNumber(x, y, width, selectedFloor.floor_number);
-      const isTech = selectedTool === 'tech' ? 1 : 0;
-
-      const newRoom = {
-        floor_id: selectedFloor.id,
-        building_id: selectedBuilding.id,
-        room_number: autoNum,
-        name: selectedTool === 'room' ? `Комната ${autoNum}` :
-              selectedTool === 'elevator' ? 'Лифт' :
-              selectedTool === 'stairs' ? 'Лестница' : 'Техпомещение',
-        capacity: selectedTool === 'room' ? 2 : 0,
-        is_technical: isTech,
-        room_type: selectedTool,
-        gender: 'DEFAULT',
-        x_pos: x,
-        y_pos: y,
-      };
-
-      try {
-        await saveAdminRoom(newRoom);
-        handleSelectFloor(selectedFloor);
-      } catch (err) {
-        console.error(err);
-      }
-    }
-  };
-
-  // Drag & Drop
-  const handleDragStart = (e: React.DragEvent, type: TileType) => {
-    e.dataTransfer.setData('text/plain', type);
-  };
-
-  const handleDrop = async (e: React.DragEvent, x: number, y: number) => {
-    e.preventDefault();
-    if (y === 1 || !selectedFloor) return;
-
-    const droppedType = (e.dataTransfer.getData('text/plain') as TileType) || selectedTool;
-    const width = selectedFloor.width || 8;
     const autoNum = calculateAutoRoomNumber(x, y, width, selectedFloor.floor_number);
 
-    const existing = rooms.find((r) => r.x_pos === x && r.y_pos === y);
+    let name = 'Комната';
+    let capacity = 2;
+    let isTechnical = 0;
+
+    if (type === 'elevator') {
+      name = 'Лифт'; capacity = 0;
+    } else if (type === 'stairs') {
+      name = 'Лестница'; capacity = 0;
+    } else if (type === 'tech') {
+      name = 'Техническое'; capacity = 0; isTechnical = 1;
+    } else if (type === 'gen-start') {
+      name = `[Старт -> ${dir}]`; capacity = 0; isTechnical = 1;
+    } else if (type === 'gen-turn') {
+      name = `[Поворот -> ${dir}]`; capacity = 0; isTechnical = 1;
+    } else if (type === 'gen-end') {
+      name = '[Конец]'; capacity = 0; isTechnical = 1;
+    } else {
+      name = `Комната ${autoNum}`;
+    }
 
     const roomData = {
       id: existing?.id,
       floor_id: selectedFloor.id,
       building_id: selectedBuilding.id,
       room_number: existing?.room_number || autoNum,
-      name: droppedType === 'room' ? `Комната ${autoNum}` :
-            droppedType === 'elevator' ? 'Лифт' :
-            droppedType === 'stairs' ? 'Лестница' : 'Техпомещение',
-      capacity: droppedType === 'room' ? 2 : 0,
-      is_technical: droppedType === 'tech' ? 1 : 0,
-      room_type: droppedType,
+      name,
+      capacity,
+      is_technical: isTechnical,
+      room_type: type,
       gender: existing?.gender || 'DEFAULT',
       x_pos: x,
       y_pos: y,
@@ -268,42 +256,178 @@ export const AdminBuildingsPage: React.FC = () => {
       await saveAdminRoom(roomData);
       handleSelectFloor(selectedFloor);
     } catch (err) {
+      console.error('Ошибка сохранения ячейки:', err);
+    }
+  };
+
+  const handleCellClick = (x: number, y: number) => {
+    if (y === 1) return;
+    const existing = rooms.find((r) => r.x_pos === x && r.y_pos === y);
+    if (existing && !genMode) {
+      setSelectedRoom({ ...existing });
+    } else {
+      placeTileAt(x, y, selectedTool, selectedDir);
+    }
+  };
+
+  // Drag & Drop
+  const handleDragStart = (e: React.DragEvent, type: TileType) => {
+    e.dataTransfer.setData('application/json', JSON.stringify({ type, dir: selectedDir }));
+  };
+
+  const handleDrop = (e: React.DragEvent, x: number, y: number) => {
+    e.preventDefault();
+    if (y === 1) return;
+    try {
+      const raw = e.dataTransfer.getData('application/json');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        placeTileAt(x, y, parsed.type || selectedTool, parsed.dir || selectedDir);
+      } else {
+        placeTileAt(x, y, selectedTool, selectedDir);
+      }
+    } catch (_) {
+      placeTileAt(x, y, selectedTool, selectedDir);
+    }
+  };
+
+  // Удаление помещения из ячейки
+  const handleDeleteRoom = async (e: React.MouseEvent, roomId: number) => {
+    e.stopPropagation();
+    try {
+      await api.post('/admin/rooms', { id: roomId, room_number: '', capacity: 0, room_type: 'empty' });
+      handleSelectFloor(selectedFloor);
+      setSelectedRoom(null);
+    } catch (err) {
       console.error(err);
     }
   };
 
-  // Автогенерация комнат по часовой стрелке
-  const handleRunAutoGeneration = async () => {
-    if (!selectedFloor || !selectedBuilding) return;
-
-    const width = selectedFloor.width || 8;
-    const cells = getClockwiseCells(width);
-
-    let startNum = genStartNumber || (selectedFloor.floor_number * 100 + 1);
+  // Смена направления стрелки у генератора
+  const handleSetDirectionForCell = async (e: React.MouseEvent, room: any, newDir: Direction) => {
+    e.stopPropagation();
+    let name = room.name;
+    if (room.room_type === 'gen-start') name = `[Старт -> ${newDir}]`;
+    if (room.room_type === 'gen-turn') name = `[Поворот -> ${newDir}]`;
 
     try {
-      for (const cell of cells) {
-        const roomNumber = `${startNum}`;
-        startNum++;
-
-        await saveAdminRoom({
-          floor_id: selectedFloor.id,
-          building_id: selectedBuilding.id,
-          room_number: roomNumber,
-          name: `Комната ${roomNumber}`,
-          capacity: 2,
-          is_technical: 0,
-          room_type: 'room',
-          gender: 'DEFAULT',
-          x_pos: cell.x,
-          y_pos: cell.y,
-        });
-      }
-      setShowGenModal(false);
+      await saveAdminRoom({
+        ...room,
+        name,
+      });
       handleSelectFloor(selectedFloor);
     } catch (err) {
       console.error(err);
     }
+  };
+
+  // АЛГОРИТМ ГЕНЕРАЦИИ КОМНАТ
+  const handleRunGeneration = async () => {
+    if (!selectedFloor || !selectedBuilding) return;
+    setGenStatusMsg('Запуск генерации...');
+
+    // Ищем стартовую плитку gen-start
+    const startRoom = rooms.find((r) => r.room_type === 'gen-start');
+    if (!startRoom) {
+      setGenStatusMsg('Ошибка: Поместите маркер "Начало генерации" ▶ на сетку');
+      return;
+    }
+
+    const width = selectedFloor.width || 8;
+    let currentNum = genFrom;
+    let rX = startRoom.x_pos;
+    let rY = startRoom.y_pos;
+
+    // Определяем начальное направление из имени или по умолчанию
+    let currentDir: Direction = 'right';
+    if (startRoom.name.includes('down')) currentDir = 'down';
+    if (startRoom.name.includes('left')) currentDir = 'left';
+    if (startRoom.name.includes('up')) currentDir = 'up';
+
+    const STEP: Record<Direction, [number, number]> = {
+      right: [1, 0],
+      left: [-1, 0],
+      down: [0, 2], // Переход между верхним и нижним рядом через коридор
+      up: [0, -2],
+    };
+
+    let placedCount = 0;
+    let stepsLimit = 200; // зашита от циклов
+
+    while (currentNum <= genTo && stepsLimit > 0) {
+      stepsLimit--;
+
+      // Создаем/обновляем комнату в текущих координатах (rX, rY)
+      const existing = rooms.find((r) => r.x_pos === rX && r.y_pos === rY);
+      const roomNumStr = `${currentNum}`;
+
+      await saveAdminRoom({
+        id: existing?.id,
+        floor_id: selectedFloor.id,
+        building_id: selectedBuilding.id,
+        room_number: roomNumStr,
+        name: `Комната ${roomNumStr}`,
+        capacity: genSeats,
+        is_technical: 0,
+        room_type: 'room',
+        gender: 'DEFAULT',
+        x_pos: rX,
+        y_pos: rY,
+      });
+
+      placedCount++;
+      currentNum++;
+
+      // Считаем следующий шаг
+      const [dCols, dRows] = STEP[currentDir];
+      let nextX = rX + dCols;
+      let nextY = rY + dRows;
+
+      // Проверяем границы сетки
+      if (nextX < 0 || nextX >= width || nextY < 0 || nextY > 2) {
+        break; // Достигли края
+      }
+
+      // Проверяем объект в следующей ячейке
+      const nextTile = rooms.find((r) => r.x_pos === nextX && r.y_pos === nextY);
+
+      if (nextTile?.room_type === 'gen-end') {
+        // Заполняем последнюю комнату на месте gen-end и выходим
+        await saveAdminRoom({
+          id: nextTile.id,
+          floor_id: selectedFloor.id,
+          building_id: selectedBuilding.id,
+          room_number: `${currentNum}`,
+          name: `Комната ${currentNum}`,
+          capacity: genSeats,
+          is_technical: 0,
+          room_type: 'room',
+          gender: 'DEFAULT',
+          x_pos: nextX,
+          y_pos: nextY,
+        });
+        placedCount++;
+        break;
+      }
+
+      if (nextTile?.room_type === 'gen-turn') {
+        // Поворот траектории
+        if (nextTile.name.includes('down')) currentDir = 'down';
+        else if (nextTile.name.includes('left')) currentDir = 'left';
+        else if (nextTile.name.includes('up')) currentDir = 'up';
+        else if (nextTile.name.includes('right')) currentDir = 'right';
+        else {
+          // Если не указан явно, поворачиваем вниз/вверх в зависимости от текущего ряда
+          currentDir = rY === 0 ? 'down' : 'up';
+        }
+      }
+
+      rX = nextX;
+      rY = nextY;
+    }
+
+    setGenStatusMsg(`✅ Успешно сгенерировано ${placedCount} комнат (${genFrom}–${genFrom + placedCount - 1})`);
+    handleSelectFloor(selectedFloor);
   };
 
   const handleSaveRoomDetails = async (e: React.FormEvent) => {
@@ -385,25 +509,42 @@ export const AdminBuildingsPage: React.FC = () => {
               </form>
             </div>
 
-            {/* Основной редактор этажей и конструктора */}
+            {/* Основной редактор этажей */}
             <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
               {selectedBuilding ? (
                 <div>
-                  {/* Заголовок корпуса и управление этажами */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  {/* Переключатель режима конструктора / генерации */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <h2 style={{ fontSize: '20px', color: '#0f172a', margin: 0 }}>{selectedBuilding.name}</h2>
                       <span style={{ fontSize: '12px', padding: '3px 8px', borderRadius: '12px', backgroundColor: '#e2e8f0', color: '#334155' }}>
-                        Тип корпуса: {selectedBuilding.gender === 'M' ? 'Мужской' : selectedBuilding.gender === 'F' ? 'Женский' : 'Смешанный (Смеш)'}
+                        Тип: {selectedBuilding.gender === 'M' ? 'Мужской' : selectedBuilding.gender === 'F' ? 'Женский' : 'Смешанный'}
                       </span>
                     </div>
 
-                    <button onClick={handleAddFloor} className="btn btn-secondary" style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Plus size={16} /> Добавить пустой этаж
-                    </button>
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      <button
+                        onClick={() => setGenMode(!genMode)}
+                        className={`btn ${genMode ? 'btn-primary' : 'btn-secondary'}`}
+                        style={{
+                          fontSize: '13px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          backgroundColor: genMode ? '#6d28d9' : '#f1f5f9',
+                          color: genMode ? '#fff' : '#475569',
+                        }}
+                      >
+                        <Zap size={16} /> {genMode ? 'Режим генерации ВКЛ' : '⚡ Включить генерацию'}
+                      </button>
+
+                      <button onClick={handleAddFloor} className="btn btn-secondary" style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Plus size={16} /> Добавить пустой этаж
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Кнопки переключения этажей */}
+                  {/* Кнопки этажей */}
                   <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
                     {floors.map((f) => (
                       <button
@@ -425,13 +566,13 @@ export const AdminBuildingsPage: React.FC = () => {
 
                   {selectedFloor ? (
                     <div>
-                      {/* Панель настроек и инструментов для выбранного этажа */}
+                      {/* Панель настроек этажа */}
                       <div style={{
                         backgroundColor: '#f8fafc',
-                        padding: '14px',
+                        padding: '12px 16px',
                         borderRadius: '8px',
                         border: '1px solid #e2e8f0',
-                        marginBottom: '20px',
+                        marginBottom: '16px',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
@@ -465,27 +606,16 @@ export const AdminBuildingsPage: React.FC = () => {
                             </select>
                           </div>
                         </div>
-
-                        <button
-                          onClick={() => {
-                            setGenStartNumber(selectedFloor.floor_number * 100 + 1);
-                            setShowGenModal(true);
-                          }}
-                          className="btn btn-primary"
-                          style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#8b5cf6' }}
-                        >
-                          <Sparkles size={16} /> Сгенерировать комнаты
-                        </button>
                       </div>
 
-                      {/* Плитки-заготовки для перетаскивания и точечного применения */}
+                      {/* Палитра выбора плиток */}
                       <div style={{ marginBottom: '16px' }}>
                         <div style={{ fontSize: '13px', fontWeight: 600, color: '#475569', marginBottom: '8px' }}>
-                          Плитки-заготовки (выберите кисть или перетащите мышью на сетку):
+                          {genMode ? 'Маркеры автогенерации (перетащите на сетку или кликните):' : 'Заготовки стандартных помещений (Drag & Drop или клик):'}
                         </div>
                         
                         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                          {TILE_TEMPLATES.map((tmpl) => {
+                          {(genMode ? GEN_TEMPLATES : STANDARD_TEMPLATES).map((tmpl) => {
                             const IconComp = tmpl.icon;
                             const isSelected = selectedTool === tmpl.type;
                             return (
@@ -520,58 +650,78 @@ export const AdminBuildingsPage: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Модальное окно мастера автогенерации */}
-                      {showGenModal && (
+                      {/* Панель настройки траектории генератора */}
+                      {genMode && (
                         <div style={{
-                          backgroundColor: '#f0f9ff',
-                          border: '2px dashed #0284c7',
+                          backgroundColor: '#f3e8ff',
+                          border: '2px dashed #8b5cf6',
                           padding: '16px',
                           borderRadius: '8px',
                           marginBottom: '20px'
                         }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                            <h4 style={{ margin: 0, color: '#0369a1', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <Compass size={20} /> Мастер автогенерации комнат
+                            <h4 style={{ margin: 0, color: '#6b21a8', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px' }}>
+                              <Zap size={18} /> Панель автогенерации по маркерам
                             </h4>
-                            <button onClick={() => setShowGenModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px' }}>✕</button>
                           </div>
 
-                          <p style={{ fontSize: '13px', color: '#0c4a6e', marginBottom: '12px' }}>
-                            Генерация расположит комнаты по порядку вокруг коридора (по часовой стрелке). Укажите начальный номер комнаты.
+                          <p style={{ fontSize: '12px', color: '#581c87', marginBottom: '12px' }}>
+                            Разместите на сетке плитки <strong>▶ Начало</strong>, <strong>↪ Поворот</strong> и <strong>⏹ Конец</strong>, укажите их направление стрелками и нажмите кнопку ниже:
                           </p>
 
                           <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
                             <div>
-                              <label style={{ fontSize: '13px', fontWeight: 600, marginRight: '8px' }}>Начальный номер:</label>
+                              <label style={{ fontSize: '12px', fontWeight: 600, marginRight: '6px' }}>Начальная квартира:</label>
                               <input
                                 type="number"
-                                value={genStartNumber}
-                                onChange={(e) => setGenStartNumber(Number(e.target.value))}
-                                style={{ width: '100px', padding: '6px', borderRadius: '4px', border: '1px solid #0284c7' }}
+                                value={genFrom}
+                                onChange={(e) => setGenFrom(Number(e.target.value))}
+                                style={{ width: '80px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #8b5cf6' }}
                               />
                             </div>
 
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <RotateCw size={18} color="#0284c7" />
-                              <span style={{ fontSize: '13px' }}>Траектория: по часовой стрелке</span>
+                            <div>
+                              <label style={{ fontSize: '12px', fontWeight: 600, marginRight: '6px' }}>Конечная квартира:</label>
+                              <input
+                                type="number"
+                                value={genTo}
+                                onChange={(e) => setGenTo(Number(e.target.value))}
+                                style={{ width: '80px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #8b5cf6' }}
+                              />
+                            </div>
+
+                            <div>
+                              <label style={{ fontSize: '12px', fontWeight: 600, marginRight: '6px' }}>Мест в комнате:</label>
+                              <input
+                                type="number"
+                                value={genSeats}
+                                onChange={(e) => setGenSeats(Number(e.target.value))}
+                                style={{ width: '60px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #8b5cf6' }}
+                              />
                             </div>
 
                             <button
-                              onClick={handleRunAutoGeneration}
+                              onClick={handleRunGeneration}
                               className="btn btn-primary"
-                              style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                              style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#7c3aed' }}
                             >
-                              <Play size={16} /> Запустить автозаполнение
+                              <Play size={16} /> Запустить генерацию
                             </button>
                           </div>
+
+                          {genStatusMsg && (
+                            <div style={{ marginTop: '10px', fontSize: '13px', fontWeight: 600, color: genStatusMsg.includes('Ошибка') ? '#dc2626' : '#15803d' }}>
+                              {genStatusMsg}
+                            </div>
+                          )}
                         </div>
                       )}
 
-                      {/* Сетка визуального конструктора макета этажа */}
+                      {/* СЕТКА СКОНСТРУИРОВАННОГО ЭТАЖА */}
                       <div style={{ overflowX: 'auto', padding: '10px 0' }}>
                         <div style={{
                           display: 'grid',
-                          gridTemplateColumns: `repeat(${selectedFloor.width || 8}, 85px)`,
+                          gridTemplateColumns: `repeat(${selectedFloor.width || 8}, 90px)`,
                           gap: '8px',
                           justifyContent: 'start',
                         }}>
@@ -579,7 +729,7 @@ export const AdminBuildingsPage: React.FC = () => {
                           {Array.from({ length: selectedFloor.width || 8 }).map((_, x) => {
                             const room = rooms.find((r) => r.x_pos === x && r.y_pos === 0);
                             const cwIdx = getCellClockwiseIndex(x, 0, selectedFloor.width || 8);
-                            const tmpl = TILE_TEMPLATES.find((t) => t.type === (room?.room_type || (room?.is_technical ? 'tech' : 'room')));
+                            const tmpl = [...STANDARD_TEMPLATES, ...GEN_TEMPLATES].find((t) => t.type === room?.room_type);
                             const IconComp = tmpl?.icon || Bed;
 
                             return (
@@ -589,11 +739,11 @@ export const AdminBuildingsPage: React.FC = () => {
                                 onDragOver={(e) => e.preventDefault()}
                                 onDrop={(e) => handleDrop(e, x, 0)}
                                 style={{
-                                  height: '80px',
-                                  border: room ? `2px solid ${tmpl?.borderColor}` : '2px dashed #cbd5e1',
+                                  height: '85px',
+                                  border: room ? `2px solid ${tmpl?.borderColor || '#0284c7'}` : '2px dashed #cbd5e1',
                                   borderRadius: '8px',
-                                  backgroundColor: room ? tmpl?.bg : '#ffffff',
-                                  color: tmpl?.textColor || '#64748b',
+                                  backgroundColor: room ? (tmpl?.bg || '#e0f2fe') : '#ffffff',
+                                  color: tmpl?.textColor || '#0369a1',
                                   display: 'flex',
                                   flexDirection: 'column',
                                   alignItems: 'center',
@@ -603,20 +753,58 @@ export const AdminBuildingsPage: React.FC = () => {
                                   padding: '4px',
                                   textAlign: 'center',
                                   position: 'relative',
-                                  transition: 'transform 0.1s ease',
+                                  transition: 'all 0.15s ease',
                                 }}
                               >
                                 <span style={{ position: 'absolute', top: '3px', left: '4px', fontSize: '9px', opacity: 0.6 }}>
                                   #{cwIdx}
                                 </span>
 
+                                {room && (
+                                  <button
+                                    onClick={(e) => handleDeleteRoom(e, room.id)}
+                                    title="Удалить помещение"
+                                    style={{
+                                      position: 'absolute',
+                                      top: '2px',
+                                      right: '3px',
+                                      border: 'none',
+                                      background: 'rgba(239, 68, 68, 0.8)',
+                                      color: '#fff',
+                                      borderRadius: '50%',
+                                      width: '16px',
+                                      height: '16px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      cursor: 'pointer',
+                                      padding: 0
+                                    }}
+                                  >
+                                    <X size={10} />
+                                  </button>
+                                )}
+
                                 {room ? (
                                   <>
-                                    <IconComp size={18} style={{ marginBottom: '2px' }} />
-                                    <strong>{room.room_number}</strong>
-                                    <span style={{ fontSize: '10px' }}>
-                                      {room.room_type === 'room' ? `${room.capacity} мест` : tmpl?.title}
-                                    </span>
+                                    <IconComp size={20} style={{ marginBottom: '2px' }} />
+                                    <strong>{room.room_number || room.name}</strong>
+
+                                    {/* Переключатели стрелок для генераторов */}
+                                    {(room.room_type === 'gen-start' || room.room_type === 'gen-turn') && (
+                                      <div style={{ display: 'flex', gap: '2px', marginTop: '2px' }}>
+                                        <button onClick={(e) => handleSetDirectionForCell(e, room, 'right')} style={{ padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}><ArrowRight size={12} /></button>
+                                        <button onClick={(e) => handleSetDirectionForCell(e, room, 'down')} style={{ padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}><ArrowDown size={12} /></button>
+                                        <button onClick={(e) => handleSetDirectionForCell(e, room, 'left')} style={{ padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}><ArrowLeft size={12} /></button>
+                                        <button onClick={(e) => handleSetDirectionForCell(e, room, 'up')} style={{ padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}><ArrowUp size={12} /></button>
+                                      </div>
+                                    )}
+
+                                    {room.room_type === 'room' && (
+                                      <span style={{ fontSize: '10px', opacity: 0.8 }}>
+                                        {room.capacity} мест
+                                      </span>
+                                    )}
                                   </>
                                 ) : (
                                   <span style={{ color: '#94a3b8', fontSize: '11px' }}>+ Пусто</span>
@@ -647,7 +835,7 @@ export const AdminBuildingsPage: React.FC = () => {
                           {Array.from({ length: selectedFloor.width || 8 }).map((_, x) => {
                             const room = rooms.find((r) => r.x_pos === x && r.y_pos === 2);
                             const cwIdx = getCellClockwiseIndex(x, 2, selectedFloor.width || 8);
-                            const tmpl = TILE_TEMPLATES.find((t) => t.type === (room?.room_type || (room?.is_technical ? 'tech' : 'room')));
+                            const tmpl = [...STANDARD_TEMPLATES, ...GEN_TEMPLATES].find((t) => t.type === room?.room_type);
                             const IconComp = tmpl?.icon || Bed;
 
                             return (
@@ -657,11 +845,11 @@ export const AdminBuildingsPage: React.FC = () => {
                                 onDragOver={(e) => e.preventDefault()}
                                 onDrop={(e) => handleDrop(e, x, 2)}
                                 style={{
-                                  height: '80px',
-                                  border: room ? `2px solid ${tmpl?.borderColor}` : '2px dashed #cbd5e1',
+                                  height: '85px',
+                                  border: room ? `2px solid ${tmpl?.borderColor || '#0284c7'}` : '2px dashed #cbd5e1',
                                   borderRadius: '8px',
-                                  backgroundColor: room ? tmpl?.bg : '#ffffff',
-                                  color: tmpl?.textColor || '#64748b',
+                                  backgroundColor: room ? (tmpl?.bg || '#e0f2fe') : '#ffffff',
+                                  color: tmpl?.textColor || '#0369a1',
                                   display: 'flex',
                                   flexDirection: 'column',
                                   alignItems: 'center',
@@ -671,20 +859,58 @@ export const AdminBuildingsPage: React.FC = () => {
                                   padding: '4px',
                                   textAlign: 'center',
                                   position: 'relative',
-                                  transition: 'transform 0.1s ease',
+                                  transition: 'all 0.15s ease',
                                 }}
                               >
                                 <span style={{ position: 'absolute', top: '3px', left: '4px', fontSize: '9px', opacity: 0.6 }}>
                                   #{cwIdx}
                                 </span>
 
+                                {room && (
+                                  <button
+                                    onClick={(e) => handleDeleteRoom(e, room.id)}
+                                    title="Удалить помещение"
+                                    style={{
+                                      position: 'absolute',
+                                      top: '2px',
+                                      right: '3px',
+                                      border: 'none',
+                                      background: 'rgba(239, 68, 68, 0.8)',
+                                      color: '#fff',
+                                      borderRadius: '50%',
+                                      width: '16px',
+                                      height: '16px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      cursor: 'pointer',
+                                      padding: 0
+                                    }}
+                                  >
+                                    <X size={10} />
+                                  </button>
+                                )}
+
                                 {room ? (
                                   <>
-                                    <IconComp size={18} style={{ marginBottom: '2px' }} />
-                                    <strong>{room.room_number}</strong>
-                                    <span style={{ fontSize: '10px' }}>
-                                      {room.room_type === 'room' ? `${room.capacity} мест` : tmpl?.title}
-                                    </span>
+                                    <IconComp size={20} style={{ marginBottom: '2px' }} />
+                                    <strong>{room.room_number || room.name}</strong>
+
+                                    {/* Переключатели стрелок для генераторов */}
+                                    {(room.room_type === 'gen-start' || room.room_type === 'gen-turn') && (
+                                      <div style={{ display: 'flex', gap: '2px', marginTop: '2px' }}>
+                                        <button onClick={(e) => handleSetDirectionForCell(e, room, 'right')} style={{ padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}><ArrowRight size={12} /></button>
+                                        <button onClick={(e) => handleSetDirectionForCell(e, room, 'down')} style={{ padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}><ArrowDown size={12} /></button>
+                                        <button onClick={(e) => handleSetDirectionForCell(e, room, 'left')} style={{ padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}><ArrowLeft size={12} /></button>
+                                        <button onClick={(e) => handleSetDirectionForCell(e, room, 'up')} style={{ padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}><ArrowUp size={12} /></button>
+                                      </div>
+                                    )}
+
+                                    {room.room_type === 'room' && (
+                                      <span style={{ fontSize: '10px', opacity: 0.8 }}>
+                                        {room.capacity} мест
+                                      </span>
+                                    )}
                                   </>
                                 ) : (
                                   <span style={{ color: '#94a3b8', fontSize: '11px' }}>+ Пусто</span>
@@ -695,30 +921,29 @@ export const AdminBuildingsPage: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Форма детального редактирования выбранного помещения */}
+                      {/* Детальное редактирование выбранной ячейки */}
                       {selectedRoom && (
                         <div style={{
-                          marginTop: '24px',
+                          marginTop: '20px',
                           backgroundColor: '#f8fafc',
                           padding: '16px',
                           borderRadius: '8px',
                           border: '1px solid #cbd5e1'
                         }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-                            <h4 style={{ margin: 0, fontSize: '15px', color: '#1e293b' }}>
-                              Параметры ячейки ({selectedRoom.x_pos + 1} колонка, {selectedRoom.y_pos === 0 ? 'Верхний ряд' : 'Нижний ряд'})
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                            <h4 style={{ margin: 0, fontSize: '14px', color: '#1e293b' }}>
+                              Редактирование ячейки [{selectedRoom.x_pos + 1}, {selectedRoom.y_pos === 0 ? 'Верх' : 'Низ'}]
                             </h4>
                             <button onClick={() => setSelectedRoom(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '16px' }}>✕</button>
                           </div>
 
                           <form onSubmit={handleSaveRoomDetails} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                             <div className="input-group" style={{ marginBottom: 0 }}>
-                              <label style={{ fontSize: '12px', fontWeight: 600 }}>Номер комнаты / помещения</label>
+                              <label style={{ fontSize: '12px', fontWeight: 600 }}>Номер комнаты</label>
                               <input
                                 type="text"
                                 value={selectedRoom.room_number}
                                 onChange={(e) => setSelectedRoom({ ...selectedRoom, room_number: e.target.value })}
-                                required
                               />
                             </div>
 
@@ -732,28 +957,7 @@ export const AdminBuildingsPage: React.FC = () => {
                             </div>
 
                             <div className="input-group" style={{ marginBottom: 0 }}>
-                              <label style={{ fontSize: '12px', fontWeight: 600 }}>Тип объекта</label>
-                              <select
-                                value={selectedRoom.room_type || 'room'}
-                                onChange={(e) => {
-                                  const rType = e.target.value;
-                                  setSelectedRoom({
-                                    ...selectedRoom,
-                                    room_type: rType,
-                                    is_technical: rType === 'tech' ? 1 : 0
-                                  });
-                                }}
-                                style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
-                              >
-                                <option value="room">Жилая комната</option>
-                                <option value="elevator">Лифт</option>
-                                <option value="stairs">Лестница</option>
-                                <option value="tech">Техническое помещение</option>
-                              </select>
-                            </div>
-
-                            <div className="input-group" style={{ marginBottom: 0 }}>
-                              <label style={{ fontSize: '12px', fontWeight: 600 }}>Вместимость (человек)</label>
+                              <label style={{ fontSize: '12px', fontWeight: 600 }}>Вместимость мест</label>
                               <input
                                 type="number"
                                 min={0}
@@ -763,14 +967,14 @@ export const AdminBuildingsPage: React.FC = () => {
                               />
                             </div>
 
-                            <div className="input-group" style={{ marginBottom: 0, gridColumn: '1 / -1' }}>
-                              <label style={{ fontSize: '12px', fontWeight: 600 }}>Пол комнаты</label>
+                            <div className="input-group" style={{ marginBottom: 0 }}>
+                              <label style={{ fontSize: '12px', fontWeight: 600 }}>Пол ячейки</label>
                               <select
                                 value={selectedRoom.gender || 'DEFAULT'}
                                 onChange={(e) => setSelectedRoom({ ...selectedRoom, gender: e.target.value })}
                                 style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
                               >
-                                <option value="DEFAULT">По умолчанию (от корпуса или этажа)</option>
+                                <option value="DEFAULT">По умолчанию</option>
                                 <option value="MIXED">Смешанный (Смеш)</option>
                                 <option value="M">Мужской</option>
                                 <option value="F">Женский</option>
@@ -779,7 +983,7 @@ export const AdminBuildingsPage: React.FC = () => {
 
                             <div style={{ gridColumn: '1 / -1', marginTop: '10px' }}>
                               <button type="submit" className="btn btn-primary" disabled={savingRoom} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <SquareCheck size={16} /> {savingRoom ? 'Сохранение...' : 'Сохранить изменения помещения'}
+                                <SquareCheck size={16} /> {savingRoom ? 'Сохранение...' : 'Сохранить изменения'}
                               </button>
                             </div>
                           </form>
@@ -787,11 +991,11 @@ export const AdminBuildingsPage: React.FC = () => {
                       )}
                     </div>
                   ) : (
-                    <p style={{ color: '#94a3b8', fontStyle: 'italic' }}>Нажмите "+ Добавить пустой этаж" для начала работы.</p>
+                    <p style={{ color: '#94a3b8', fontStyle: 'italic' }}>Нажмите "+ Добавить пустой этаж" для создания первого этажа.</p>
                   )}
                 </div>
               ) : (
-                <p style={{ color: '#94a3b8' }}>Выберите или создайте корпус слева.</p>
+                <p style={{ color: '#94a3b8' }}>Выберите или создайте корпус в меню слева.</p>
               )}
             </div>
 
