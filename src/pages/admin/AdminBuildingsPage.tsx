@@ -263,8 +263,8 @@ export const AdminBuildingsPage: React.FC = () => {
     return { booked: bookedSeats, total: totalCapacity };
   };
 
-  const getFloorStats = () => {
-    const floorRooms = localRooms.filter((r) => r.room_type === 'room');
+  const getSpecificFloorStats = (floorId: number) => {
+    const floorRooms = (selectedFloor?.id === floorId ? localRooms : allRooms.filter((r) => Number(r.floor_id) === Number(floorId))).filter((r) => r.room_type === 'room');
     const totalCapacity = floorRooms.reduce((sum, r) => sum + (Number(r.capacity) || 0), 0);
     const bookedSeats = floorRooms.reduce((sum, r) => sum + (r.id ? getRoomOccupancy(r.id) : 0), 0);
     return { booked: bookedSeats, total: totalCapacity };
@@ -669,8 +669,6 @@ export const AdminBuildingsPage: React.FC = () => {
     setSelectedRoom(null);
   };
 
-  const currentFloorStats = getFloorStats();
-
   return (
     <AdminLayout>
       <div style={{ padding: '0 10px' }}>
@@ -870,10 +868,12 @@ export const AdminBuildingsPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Список этажей */}
+                  {/* Список этажей с цифрами занятых/всего мест */}
                   <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
                     {floors.map((f) => {
                       const effectiveFloorGender = getEffectiveGender(f.gender, selectedBuilding.gender);
+                      const fStats = getSpecificFloorStats(f.id);
+
                       return (
                         <div
                           key={f.id}
@@ -900,7 +900,7 @@ export const AdminBuildingsPage: React.FC = () => {
                               padding: '4px 2px'
                             }}
                           >
-                            Этаж {f.floor_number}
+                            Этаж {f.floor_number} ({fStats.booked}/{fStats.total})
                           </button>
                           
                           <button
@@ -925,83 +925,70 @@ export const AdminBuildingsPage: React.FC = () => {
 
                   {selectedFloor ? (
                     <div>
-                      {/* Свойства и статистика мест ТЕКУЩЕГО ЭТАЖА */}
-                      <div style={{
-                        backgroundColor: '#f8fafc',
-                        padding: '12px 16px',
-                        borderRadius: '8px',
-                        border: '1px solid #e2e8f0',
-                        marginBottom: '16px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        flexWrap: 'wrap',
-                        gap: '12px'
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '13px', flexWrap: 'wrap' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <GenderBadge gender={getEffectiveGender(selectedFloor.gender, selectedBuilding.gender)} size={22} />
-                            <strong>Этаж {selectedFloor.floor_number}</strong>
+                      {/* Панель настроек этажа в режиме редактирования */}
+                      {isEditLayout && (
+                        <div style={{
+                          backgroundColor: '#f8fafc',
+                          padding: '12px 16px',
+                          borderRadius: '8px',
+                          border: '1px solid #e2e8f0',
+                          marginBottom: '16px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          flexWrap: 'wrap',
+                          gap: '16px',
+                          fontSize: '13px'
+                        }}>
+                          <div>
+                            <label style={{ marginRight: '6px', fontWeight: 500, color: '#475569' }}>Длина сетки:</label>
+                            <input
+                              type="number"
+                              min={3}
+                              max={20}
+                              value={selectedFloor.width || 8}
+                              onChange={(e) => handleUpdateFloorWidth(Number(e.target.value))}
+                              style={{ width: '60px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                            />
                           </div>
 
-                          <div style={{ padding: '3px 10px', backgroundColor: '#e0f2fe', color: '#0369a1', borderRadius: '6px', fontWeight: 600 }}>
-                            Количество занятых мест всего на этаже / количество доступных мест всего на этаже: {currentFloorStats.booked} / {currentFloorStats.total} мест
+                          <div>
+                            <label style={{ marginRight: '6px', fontWeight: 500, color: '#475569' }}>Начальный № комнат:</label>
+                            <input
+                              type="number"
+                              placeholder="Авто"
+                              value={selectedFloor.start_room_number || ''}
+                              onChange={(e) => handleUpdateFloorStartRoomNum(e.target.value ? Number(e.target.value) : null)}
+                              style={{ width: '80px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                            />
                           </div>
 
-                          {isEditLayout && (
-                            <>
-                              <div>
-                                <label style={{ marginRight: '6px', fontWeight: 500, color: '#475569' }}>Длина сетки:</label>
-                                <input
-                                  type="number"
-                                  min={3}
-                                  max={20}
-                                  value={selectedFloor.width || 8}
-                                  onChange={(e) => handleUpdateFloorWidth(Number(e.target.value))}
-                                  style={{ width: '60px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                                />
-                              </div>
+                          <div>
+                            <label style={{ marginRight: '6px', fontWeight: 500, color: '#475569' }}>Порядок комнат:</label>
+                            <select
+                              value={selectedFloor.room_order_type || 'clockwise'}
+                              onChange={(e) => handleUpdateFloorOrderType(e.target.value as any)}
+                              style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                            >
+                              <option value="clockwise">По часовой</option>
+                              <option value="column_wise">Сверху вниз (по столбцам)</option>
+                            </select>
+                          </div>
 
-                              <div>
-                                <label style={{ marginRight: '6px', fontWeight: 500, color: '#475569' }}>Начальный № комнат:</label>
-                                <input
-                                  type="number"
-                                  placeholder="Авто"
-                                  value={selectedFloor.start_room_number || ''}
-                                  onChange={(e) => handleUpdateFloorStartRoomNum(e.target.value ? Number(e.target.value) : null)}
-                                  style={{ width: '80px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                                />
-                              </div>
-
-                              <div>
-                                <label style={{ marginRight: '6px', fontWeight: 500, color: '#475569' }}>Порядок комнат:</label>
-                                <select
-                                  value={selectedFloor.room_order_type || 'clockwise'}
-                                  onChange={(e) => handleUpdateFloorOrderType(e.target.value as any)}
-                                  style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                                >
-                                  <option value="clockwise">По часовой</option>
-                                  <option value="column_wise">Сверху вниз (по столбцам)</option>
-                                </select>
-                              </div>
-
-                              <div>
-                                <label style={{ marginRight: '6px', fontWeight: 500, color: '#475569' }}>Пол этажа:</label>
-                                <select
-                                  value={selectedFloor.gender || 'DEFAULT'}
-                                  onChange={(e) => handleUpdateFloorGender(e.target.value)}
-                                  style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                                >
-                                  <option value="DEFAULT">От корпуса ({selectedBuilding.gender === 'M' ? 'Муж' : selectedBuilding.gender === 'F' ? 'Жен' : 'Смеш'})</option>
-                                  <option value="MIXED">Смешанный (С)</option>
-                                  <option value="M">Мужской (М)</option>
-                                  <option value="F">Женский (Ж)</option>
-                                </select>
-                              </div>
-                            </>
-                          )}
+                          <div>
+                            <label style={{ marginRight: '6px', fontWeight: 500, color: '#475569' }}>Пол этажа:</label>
+                            <select
+                              value={selectedFloor.gender || 'DEFAULT'}
+                              onChange={(e) => handleUpdateFloorGender(e.target.value)}
+                              style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                            >
+                              <option value="DEFAULT">От корпуса ({selectedBuilding.gender === 'M' ? 'Муж' : selectedBuilding.gender === 'F' ? 'Жен' : 'Смеш'})</option>
+                              <option value="MIXED">Смешанный (С)</option>
+                              <option value="M">Мужской (М)</option>
+                              <option value="F">Женский (Ж)</option>
+                            </select>
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       {/* Палитра плиток в режиме редактирования */}
                       {isEditLayout && (
@@ -1172,7 +1159,7 @@ export const AdminBuildingsPage: React.FC = () => {
                                       </span>
                                     )}
 
-                                    {/* СТРЕЛКИ НАПРАВЛЕНИЯ ДЛЯ ПЛИТОК НАЧАЛА И ПОВОРОТА ГЕНЕРАЦИИ (И НИКАКИХ СТРЕЛОК НА КОНЦЕ!) */}
+                                    {/* СТРЕЛКИ НАПРАВЛЕНИЯ ДЛЯ ПЛИТОК НАЧАЛА И ПОВОРОТА ГЕНЕРАЦИИ */}
                                     {isEditLayout && (room.room_type === 'gen-start' || room.room_type === 'gen-turn') && (
                                       <div style={{ display: 'flex', gap: '3px', marginTop: '4px', backgroundColor: 'rgba(255,255,255,0.85)', padding: '2px 4px', borderRadius: '4px', zIndex: 10 }}>
                                         {([
@@ -1294,7 +1281,7 @@ export const AdminBuildingsPage: React.FC = () => {
                                       </span>
                                     )}
 
-                                    {/* СТРЕЛКИ НАПРАВЛЕНИЯ ДЛЯ ПЛИТОК НАЧАЛА И ПОВОРОТА ГЕНЕРАЦИИ (И НИКАКИХ СТРЕЛОК НА КОНЦЕ!) */}
+                                    {/* СТРЕЛКИ НАПРАВЛЕНИЯ ДЛЯ ПЛИТОК НАЧАЛА И ПОВОРОТА ГЕНЕРАЦИИ */}
                                     {isEditLayout && (room.room_type === 'gen-start' || room.room_type === 'gen-turn') && (
                                       <div style={{ display: 'flex', gap: '3px', marginTop: '4px', backgroundColor: 'rgba(255,255,255,0.85)', padding: '2px 4px', borderRadius: '4px', zIndex: 10 }}>
                                         {([
