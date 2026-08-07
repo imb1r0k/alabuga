@@ -1,7 +1,7 @@
 import axios from 'axios';
 
-// 🔥 МЕНЯЕМ НА НОВЫЙ URL
-const API_URL = 'http://imb1r0kya2.temp.swtest.ru/api';
+// Используем относительный путь /api для проксирования через Vite
+const API_URL = '/api';
 
 export const api = axios.create({
   baseURL: API_URL,
