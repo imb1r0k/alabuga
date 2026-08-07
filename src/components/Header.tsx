@@ -41,19 +41,46 @@ export const Header: React.FC = () => {
   });
 
   return (
-    <header className="bg-slate-900 text-white sticky top-0 z-50 border-b border-slate-800 shadow-md">
-      <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+    <header style={{
+      backgroundColor: '#0f172a',
+      color: '#ffffff',
+      position: 'sticky',
+      top: 0,
+      zIndex: 50,
+      borderBottom: '1px solid #1e293b',
+      boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+    }}>
+      <div style={{
+        maxWidth: '1280px',
+        margin: '0 auto',
+        padding: '0 16px',
+        height: '64px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '16px'
+      }}>
         
         {/* Логотип */}
-        <Link to="/" className="flex items-center gap-2 text-white no-underline font-bold text-lg shrink-0">
-          <div className="w-9 h-9 rounded-lg bg-sky-500 flex items-center justify-center text-white shadow-lg shadow-sky-500/30">
-            <Zap size={20} className="fill-current" />
+        <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fff', textDecoration: 'none', fontWeight: 'bold', fontSize: '18px' }}>
+          <div style={{
+            width: '36px',
+            height: '36px',
+            borderRadius: '8px',
+            backgroundColor: '#0284c7',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            boxShadow: '0 4px 12px rgba(2, 132, 199, 0.3)'
+          }}>
+            <Zap size={20} />
           </div>
-          <span className="tracking-wide">Алабуга</span>
+          <span style={{ letterSpacing: '0.5px' }}>Алабуга</span>
         </Link>
 
-        {/* Навигация для ПК (в одну строку) */}
-        <nav className="hidden md:flex items-center gap-1 overflow-x-auto no-scrollbar">
+        {/* Навигация ПК */}
+        <nav className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: '4px', overflowX: 'auto' }}>
           <NavLink to="/" end style={navLinkStyle}>
             <Home size={16} />
             <span>Главная</span>
@@ -67,7 +94,7 @@ export const Header: React.FC = () => {
           )}
 
           {(isAdmin || isModerator) && (
-            <div className="flex items-center gap-1 pl-2 ml-2 border-l border-slate-800">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', paddingLeft: '8px', marginLeft: '8px', borderLeft: '1px solid #1e293b' }}>
               <NavLink to="/admin-panel" end style={navLinkStyle}>
                 <ShieldCheck size={16} />
                 <span>Панель</span>
@@ -96,19 +123,19 @@ export const Header: React.FC = () => {
           )}
         </nav>
 
-        {/* Блок пользователя на ПК */}
-        <div className="hidden md:flex items-center gap-3 shrink-0">
+        {/* Блок аккаунта ПК */}
+        <div className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {isAuthenticated ? (
-            <div className="flex items-center gap-3 bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/50">
-              <div className="w-7 h-7 rounded-full bg-sky-600 flex items-center justify-center text-xs font-bold text-white">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', backgroundColor: '#1e293b', padding: '6px 12px', borderRadius: '20px', border: '1px solid #334155' }}>
+              <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#0284c7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold' }}>
                 {user?.last_name?.[0] || user?.first_name?.[0] || 'U'}
               </div>
-              <span className="text-xs font-medium text-slate-200">
+              <span style={{ fontSize: '12px', fontWeight: 500, color: '#e2e8f0' }}>
                 {user?.last_name} {user?.first_name || user?.name}
               </span>
               <button
                 onClick={handleLogout}
-                className="text-slate-400 hover:text-red-400 transition-colors p-1 rounded-md"
+                style={{ border: 'none', background: 'none', color: '#94a3b8', cursor: 'pointer', padding: '2px', display: 'flex' }}
                 title="Выйти"
               >
                 <LogOut size={16} />
@@ -117,27 +144,28 @@ export const Header: React.FC = () => {
           ) : (
             <Link
               to="/auth"
-              className="bg-sky-500 hover:bg-sky-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors no-underline shadow-sm"
+              className="btn btn-primary"
+              style={{ padding: '8px 16px', borderRadius: '8px', fontSize: '14px', textDecoration: 'none' }}
             >
               Войти
             </Link>
           )}
         </div>
 
-        {/* Правая часть на мобильных устройствах */}
-        <div className="flex md:hidden items-center gap-2">
+        {/* Мобильная шапка */}
+        <div className="mobile-only" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {isAuthenticated ? (
             <Link
               to="/dashboard"
-              className="w-9 h-9 rounded-full bg-sky-600 flex items-center justify-center text-white font-bold text-xs no-underline"
-              title="Личный кабинет"
+              style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: '#0284c7', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold', fontSize: '12px', textDecoration: 'none' }}
             >
               {user?.last_name?.[0] || user?.first_name?.[0] || 'U'}
             </Link>
           ) : (
             <Link
               to="/auth"
-              className="bg-sky-500 text-white text-xs font-semibold px-3 py-1.5 rounded-md no-underline"
+              className="btn btn-primary"
+              style={{ padding: '6px 12px', borderRadius: '6px', fontSize: '12px', textDecoration: 'none' }}
             >
               Войти
             </Link>
@@ -145,21 +173,20 @@ export const Header: React.FC = () => {
 
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="p-2 text-slate-300 hover:text-white bg-slate-800 rounded-lg border border-slate-700"
-            aria-label="Меню"
+            style={{ padding: '8px', color: '#cbd5e1', backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', cursor: 'pointer', display: 'flex' }}
           >
             {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
         </div>
       </div>
 
-      {/* Мобильное выпадающее меню */}
+      {/* Мобильное меню */}
       {mobileMenuOpen && (
-        <div className="md:hidden bg-slate-900 border-b border-slate-800 px-4 py-3 space-y-2 animate-in slide-in-from-top duration-200">
+        <div style={{ backgroundColor: '#0f172a', borderBottom: '1px solid #1e293b', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {isAuthenticated && (
-            <div className="pb-2 mb-2 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400">
+            <div style={{ paddingBottom: '8px', marginBottom: '8px', borderBottom: '1px solid #1e293b', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#94a3b8' }}>
               <span>{user?.last_name} {user?.first_name || user?.name}</span>
-              <span className="bg-slate-800 px-2 py-0.5 rounded text-sky-400">{user?.role}</span>
+              <span style={{ backgroundColor: '#1e293b', padding: '2px 8px', borderRadius: '4px', color: '#38bdf8' }}>{user?.role}</span>
             </div>
           )}
 
@@ -167,11 +194,18 @@ export const Header: React.FC = () => {
             to="/"
             end
             onClick={() => setMobileMenuOpen(false)}
-            className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium no-underline transition-colors ${
-                isActive ? 'bg-sky-500/10 text-sky-400' : 'text-slate-300 hover:bg-slate-800'
-              }`
-            }
+            style={({ isActive }) => ({
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '10px 12px',
+              borderRadius: '8px',
+              color: isActive ? '#38bdf8' : '#cbd5e1',
+              backgroundColor: isActive ? 'rgba(56, 189, 248, 0.1)' : 'transparent',
+              textDecoration: 'none',
+              fontSize: '14px',
+              fontWeight: 500,
+            })}
           >
             <Home size={18} />
             <span>Главная страница</span>
@@ -181,11 +215,18 @@ export const Header: React.FC = () => {
             <NavLink
               to="/dashboard"
               onClick={() => setMobileMenuOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium no-underline transition-colors ${
-                  isActive ? 'bg-sky-500/10 text-sky-400' : 'text-slate-300 hover:bg-slate-800'
-                }`
-              }
+              style={({ isActive }) => ({
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                padding: '10px 12px',
+                borderRadius: '8px',
+                color: isActive ? '#38bdf8' : '#cbd5e1',
+                backgroundColor: isActive ? 'rgba(56, 189, 248, 0.1)' : 'transparent',
+                textDecoration: 'none',
+                fontSize: '14px',
+                fontWeight: 500,
+              })}
             >
               <User size={18} />
               <span>Личный кабинет</span>
@@ -193,8 +234,8 @@ export const Header: React.FC = () => {
           )}
 
           {(isAdmin || isModerator) && (
-            <div className="pt-2 border-t border-slate-800 space-y-1">
-              <div className="px-3 py-1 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+            <div style={{ paddingTop: '8px', borderTop: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ padding: '4px 12px', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 Администрирование
               </div>
 
@@ -202,11 +243,18 @@ export const Header: React.FC = () => {
                 to="/admin-panel"
                 end
                 onClick={() => setMobileMenuOpen(false)}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium no-underline transition-colors ${
-                    isActive ? 'bg-sky-500/10 text-sky-400' : 'text-slate-300 hover:bg-slate-800'
-                  }`
-                }
+                style={({ isActive }) => ({
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  color: isActive ? '#38bdf8' : '#cbd5e1',
+                  backgroundColor: isActive ? 'rgba(56, 189, 248, 0.1)' : 'transparent',
+                  textDecoration: 'none',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                })}
               >
                 <ShieldCheck size={18} />
                 <span>Общие настройки</span>
@@ -215,11 +263,18 @@ export const Header: React.FC = () => {
               <NavLink
                 to="/admin-panel/users"
                 onClick={() => setMobileMenuOpen(false)}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium no-underline transition-colors ${
-                    isActive ? 'bg-sky-500/10 text-sky-400' : 'text-slate-300 hover:bg-slate-800'
-                  }`
-                }
+                style={({ isActive }) => ({
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  color: isActive ? '#38bdf8' : '#cbd5e1',
+                  backgroundColor: isActive ? 'rgba(56, 189, 248, 0.1)' : 'transparent',
+                  textDecoration: 'none',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                })}
               >
                 <Users size={18} />
                 <span>Пользователи</span>
@@ -228,11 +283,18 @@ export const Header: React.FC = () => {
               <NavLink
                 to="/admin-panel/buildings"
                 onClick={() => setMobileMenuOpen(false)}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium no-underline transition-colors ${
-                    isActive ? 'bg-sky-500/10 text-sky-400' : 'text-slate-300 hover:bg-slate-800'
-                  }`
-                }
+                style={({ isActive }) => ({
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  color: isActive ? '#38bdf8' : '#cbd5e1',
+                  backgroundColor: isActive ? 'rgba(56, 189, 248, 0.1)' : 'transparent',
+                  textDecoration: 'none',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                })}
               >
                 <Building2 size={18} />
                 <span>Управление корпусами</span>
@@ -241,11 +303,18 @@ export const Header: React.FC = () => {
               <NavLink
                 to="/admin-panel/bookings"
                 onClick={() => setMobileMenuOpen(false)}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium no-underline transition-colors ${
-                    isActive ? 'bg-sky-500/10 text-sky-400' : 'text-slate-300 hover:bg-slate-800'
-                  }`
-                }
+                style={({ isActive }) => ({
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  color: isActive ? '#38bdf8' : '#cbd5e1',
+                  backgroundColor: isActive ? 'rgba(56, 189, 248, 0.1)' : 'transparent',
+                  textDecoration: 'none',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                })}
               >
                 <BookmarkCheck size={18} />
                 <span>Бронирования</span>
@@ -254,11 +323,18 @@ export const Header: React.FC = () => {
               <NavLink
                 to="/admin-panel/teams"
                 onClick={() => setMobileMenuOpen(false)}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium no-underline transition-colors ${
-                    isActive ? 'bg-sky-500/10 text-sky-400' : 'text-slate-300 hover:bg-slate-800'
-                  }`
-                }
+                style={({ isActive }) => ({
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  color: isActive ? '#38bdf8' : '#cbd5e1',
+                  backgroundColor: isActive ? 'rgba(56, 189, 248, 0.1)' : 'transparent',
+                  textDecoration: 'none',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                })}
               >
                 <Users size={18} />
                 <span>Управление командами</span>
@@ -267,10 +343,10 @@ export const Header: React.FC = () => {
           )}
 
           {isAuthenticated && (
-            <div className="pt-2 border-t border-slate-800">
+            <div style={{ paddingTop: '8px', borderTop: '1px solid #1e293b' }}>
               <button
                 onClick={handleLogout}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-red-400 hover:bg-red-500/10 transition-colors border-none bg-transparent cursor-pointer"
+                style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 12px', borderRadius: '8px', color: '#f87171', border: 'none', backgroundColor: 'transparent', cursor: 'pointer', fontSize: '14px', fontWeight: 500 }}
               >
                 <LogOut size={18} />
                 <span>Выйти из системы</span>

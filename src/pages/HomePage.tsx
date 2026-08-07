@@ -7,25 +7,45 @@ export const HomePage: React.FC = () => {
   const { isAuthenticated } = useAuth();
 
   return (
-    <div className="py-8 md:py-12 px-4 max-w-7xl mx-auto">
+    <div style={{ padding: '32px 16px', maxWidth: '1280px', margin: '0 auto' }}>
       {/* Hero секция */}
-      <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-sky-950 text-white rounded-2xl p-6 md:p-12 shadow-xl mb-10 text-center md:text-left relative overflow-hidden">
-        <div className="relative z-10 max-w-2xl">
-          <span className="inline-block bg-sky-500/20 text-sky-300 border border-sky-500/30 text-xs font-semibold px-3 py-1 rounded-full mb-4">
+      <div style={{
+        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0369a1 100%)',
+        color: '#ffffff',
+        borderRadius: '16px',
+        padding: '36px 28px',
+        boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
+        marginBottom: '40px',
+        position: 'relative',
+        overflow: 'hidden'
+      }}>
+        <div style={{ position: 'relative', zIndex: 10, maxWidth: '640px' }}>
+          <span style={{
+            display: 'inline-block',
+            backgroundColor: 'rgba(56, 189, 248, 0.2)',
+            color: '#7dd3fc',
+            border: '1px solid rgba(56, 189, 248, 0.3)',
+            fontSize: '12px',
+            fontWeight: 600,
+            padding: '4px 12px',
+            borderRadius: '20px',
+            marginBottom: '16px'
+          }}>
             Форум 2025
           </span>
-          <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight mb-4 leading-tight">
-            Добро пожаловать в систему проживания <span className="text-sky-400">Алабуга</span>
+          <h1 style={{ fontSize: '32px', fontWeight: 800, marginBottom: '16px', lineHeight: 1.2 }}>
+            Добро пожаловать в систему проживания <span style={{ color: '#38bdf8' }}>Алабуга</span>
           </h1>
-          <p className="text-slate-300 text-base md:text-lg mb-8 leading-relaxed">
+          <p style={{ color: '#cbd5e1', fontSize: '16px', marginBottom: '32px', lineHeight: 1.6 }}>
             Интерактивный сервис бронирования жилых помещений, работы с командами и расселения участников форума в реальном времени.
           </p>
 
-          <div className="flex flex-col sm:flex-row items-center gap-4 justify-center md:justify-start">
+          <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
             {isAuthenticated ? (
               <Link
                 to="/dashboard"
-                className="w-full sm:w-auto bg-sky-500 hover:bg-sky-600 text-white font-semibold px-6 py-3 rounded-xl transition-all shadow-lg shadow-sky-500/25 flex items-center justify-center gap-2 no-underline"
+                className="btn btn-primary"
+                style={{ padding: '12px 24px', borderRadius: '12px', fontSize: '15px', textDecoration: 'none', gap: '8px' }}
               >
                 <span>Перейти в личный кабинет</span>
                 <ArrowRight size={18} />
@@ -33,7 +53,8 @@ export const HomePage: React.FC = () => {
             ) : (
               <Link
                 to="/auth"
-                className="w-full sm:w-auto bg-sky-500 hover:bg-sky-600 text-white font-semibold px-6 py-3 rounded-xl transition-all shadow-lg shadow-sky-500/25 flex items-center justify-center gap-2 no-underline"
+                className="btn btn-primary"
+                style={{ padding: '12px 24px', borderRadius: '12px', fontSize: '15px', textDecoration: 'none', gap: '8px' }}
               >
                 <span>Войти / Зарегистрироваться</span>
                 <ArrowRight size={18} />
@@ -44,29 +65,29 @@ export const HomePage: React.FC = () => {
       </div>
 
       {/* Карточки преимуществ */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-        <div className="card p-6 flex flex-col items-center text-center hover:border-sky-200 transition-all">
-          <div className="w-12 h-12 bg-sky-100 text-sky-600 rounded-xl flex items-center justify-center mb-4">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '24px', marginBottom: '48px' }}>
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '24px' }}>
+          <div style={{ width: '48px', height: '48px', backgroundColor: '#e0f2fe', color: '#0284c7', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
             <Shield size={24} />
           </div>
-          <h3 className="text-lg font-bold text-slate-800 mb-2">Безопасность</h3>
-          <p className="text-sm text-slate-600">Надежная защита данных и распределение ролей участников форума.</p>
+          <h3 style={{ fontSize: '18px', fontWeight: 'bold', color: '#1e293b', marginBottom: '8px' }}>Безопасность</h3>
+          <p style={{ fontSize: '14px', color: '#475569' }}>Надежная защита данных и распределение ролей участников форума.</p>
         </div>
 
-        <div className="card p-6 flex flex-col items-center text-center hover:border-sky-200 transition-all">
-          <div className="w-12 h-12 bg-sky-100 text-sky-600 rounded-xl flex items-center justify-center mb-4">
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '24px' }}>
+          <div style={{ width: '48px', height: '48px', backgroundColor: '#e0f2fe', color: '#0284c7', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
             <Zap size={24} />
           </div>
-          <h3 className="text-lg font-bold text-slate-800 mb-2">Скорость и интерактивность</h3>
-          <p className="text-sm text-slate-600">Наглядные интерактивные схемы корпусов и моментальная обработка заявок.</p>
+          <h3 style={{ fontSize: '18px', fontWeight: 'bold', color: '#1e293b', marginBottom: '8px' }}>Скорость и интерактивность</h3>
+          <p style={{ fontSize: '14px', color: '#475569' }}>Наглядные интерактивные схемы корпусов и моментальная обработка заявок.</p>
         </div>
 
-        <div className="card p-6 flex flex-col items-center text-center hover:border-sky-200 transition-all">
-          <div className="w-12 h-12 bg-sky-100 text-sky-600 rounded-xl flex items-center justify-center mb-4">
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '24px' }}>
+          <div style={{ width: '48px', height: '48px', backgroundColor: '#e0f2fe', color: '#0284c7', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
             <CheckCircle size={24} />
           </div>
-          <h3 className="text-lg font-bold text-slate-800 mb-2">Командная работа</h3>
-          <p className="text-sm text-slate-600">Общие чаты, календари событий и совместное расселение команд.</p>
+          <h3 style={{ fontSize: '18px', fontWeight: 'bold', color: '#1e293b', marginBottom: '8px' }}>Командная работа</h3>
+          <p style={{ fontSize: '14px', color: '#475569' }}>Общие чаты, календари событий и совместное расселение команд.</p>
         </div>
       </div>
     </div>
