@@ -1,11 +1,18 @@
-import { Link } from 'react-router-dom';
+import { Link, NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { Skeleton } from './Skeleton';
+import { useState, useEffect } from 'react';
 
 export const Header = () => {
   const { user, logout, isAuthenticated, isAdmin, isModerator } = useAuth();
   const { siteTitle, loading: settingsLoading } = useSettings();
+  const location = useLocation();
+
+  // Определяем текущий раздел
+  const isAdminPage = location.pathname.startsWith('/admin-panel');
+  const isDashboardPage = location.pathname.startsWith('/dashboard');
+  const mode = isAdminPage ? 'admin' : isDashboardPage ? 'dashboard' : 'home';
 
   const handleLogout = async () => {
     try {
@@ -13,6 +20,24 @@ export const Header = () => {
     } catch (error) {
       console.error('Logout error:', error);
     }
+  };
+
+  // Кнопки для режима админки
+  const adminNavItems = [
+    { to: '/admin-panel', label: 'Главная', end: true },
+    { to: '/admin-panel/users', label: 'Пользователи', end: false },
+    { to: '/admin-panel/bookings', label: 'Бронирования', end: false },
+    { to: '/admin-panel/buildings', label: 'Корпуса и Этажи', end: false },
+  ];
+
+  // Общие стили для кнопок навигации
+  const navBtnStyles = {
+    fontSize: '14px',
+    padding: '8px 14px',
+    borderRadius: '6px',
+    textDecoration: 'none',
+    transition: 'all 0.2s ease',
+    fontWeight: 500,
   };
 
   return (
@@ -28,7 +53,7 @@ export const Header = () => {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        width: '100%'
+        width: '100%',
       }}>
         <div style={{ minWidth: '150px' }}>
           {settingsLoading ? (
@@ -45,18 +70,71 @@ export const Header = () => {
           )}
         </div>
         
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {isAuthenticated ? (
+        {/* Кнопки навигации в зависимости от режима */}
+        <div
+          key={mode}
+          className="nav-animation"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            animation: mode === 'home' ? 'fadeInRight 0.3s ease' : 'fadeInLeft 0.3s ease',
+          }}
+        >
+          {mode === 'admin' && (
+            <>
+              {/* Навигация по админке */}
+              <div style={{ display: 'flex', gap: '4px', padding: '4px', backgroundColor: '#f1f5f9', borderRadius: '8px' }}>
+                {adminNavItems.map((item) => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.end}
+                    style={({ isActive }) => ({
+                      ...navBtnStyles,
+                      backgroundColor: isActive ? '#ffffff' : 'transparent',
+                      color: isActive ? '#0f172a' : '#475569',
+                      boxShadow: isActive ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                    })}
+                  >
+                    {item.label}
+                  </NavLink>
+                ))}
+              </div>
+              
+              <Link
+                to="/"
+                className="btn btn-secondary"
+                style={{ fontSize: '14px', padding: '8px 14px' }}
+              >
+                На домашнюю
+              </Link>
+            </>
+          )}
+
+          {mode === 'dashboard' && (
+            <>
+              <Link
+                to="/"
+                className="btn btn-secondary"
+                style={{ fontSize: '14px', padding: '8px 14px' }}
+              >
+                На домашнюю
+              </Link>
+            </>
+          )}
+
+          {mode === 'home' && isAuthenticated && (
             <>
               <span style={{ fontSize: '14px', color: '#666', marginRight: '8px' }}>
-                {user?.last_name} {user?.first_name || user?.name} ({user?.role})
+                {user?.last_name} {user?.first_name || user?.name}
               </span>
 
               {(isAdmin || isModerator) && (
                 <Link
                   to="/admin-panel"
                   className="btn btn-secondary"
-                  style={{ backgroundColor: '#28a745' }}
+                  style={{ backgroundColor: '#28a745', fontSize: '14px', padding: '8px 14px' }}
                 >
                   Админка
                 </Link>
@@ -65,24 +143,31 @@ export const Header = () => {
               <Link
                 to="/dashboard"
                 className="btn btn-primary"
+                style={{ fontSize: '14px', padding: '8px 14px' }}
               >
                 Кабинет
               </Link>
-
-              <button
-                onClick={handleLogout}
-                className="btn btn-danger"
-              >
-                Выйти
-              </button>
             </>
-          ) : (
+          )}
+
+          {mode === 'home' && !isAuthenticated && (
             <Link
               to="/auth"
               className="btn btn-primary"
+              style={{ fontSize: '14px', padding: '8px 14px' }}
             >
               Войти
             </Link>
+          )}
+
+          {isAuthenticated && (
+            <button
+              onClick={handleLogout}
+              className="btn btn-danger"
+              style={{ fontSize: '14px', padding: '8px 14px' }}
+            >
+              Выйти
+            </button>
           )}
         </div>
       </div>

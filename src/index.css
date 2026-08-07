@@ -117,6 +117,24 @@ body {
   100% { transform: rotate(360deg); }
 }
 
+/* Анимации для навигации */
+@keyframes fadeInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes fadeInLeft {
+  from { opacity: 0; transform: translateX(-20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.nav-animation {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 /* ===== Адаптивность ===== */
 
 /* Для планшетов и мобильных */
@@ -180,7 +198,7 @@ body {
   /* Поворачиваем макет этажа на 90° для мобильных */
   .floor-layout-container {
     width: 100%;
-    height: 400px; /* Примерная высота */
+    height: 400px;
     overflow: auto;
     position: relative;
   }
@@ -188,7 +206,7 @@ body {
   .floor-layout {
     transform: rotate(90deg);
     transform-origin: top left;
-    width: calc(100vh - 20px); /* Используем высоту экрана для ширины */
+    width: calc(100vh - 20px);
     height: auto;
     margin-top: 20px;
   }
@@ -207,6 +225,27 @@ body {
   
   .admin-buildings-sidebar {
     padding: 12px !important;
+  }
+
+  /* Навигация: компактнее */
+  .container {
+    flex-wrap: wrap;
+  }
+  header .container {
+    gap: 8px;
+    padding: 10px 0;
+  }
+  header {
+    height: auto;
+    min-height: 64px;
+    padding: 8px 12px;
+  }
+  .nav-animation {
+    justify-content: flex-end;
+  }
+  header .btn {
+    padding: 6px 10px;
+    font-size: 13px;
   }
 }
 
@@ -227,5 +266,10 @@ body {
   .admin-buildings-main .btn {
     font-size: 12px;
     padding: 6px 10px;
+  }
+
+  /* На мобильных скрываем имя пользователя */
+  header .nav-animation span {
+    display: none;
   }
 }
