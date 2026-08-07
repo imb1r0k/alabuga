@@ -3,20 +3,16 @@ import { api } from '../services/api';
 
 interface User {
   id: number;
-  email?: string;
+  email: string;
   name: string;
   role: string;
-  first_name?: string;
-  last_name?: string;
-  phone?: string;
-  username?: string;
 }
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (login: string, password: string) => Promise<void>;
-  register: (firstName: string, lastName: string, phone: string, password: string) => Promise<any>;
+  login: (email: string, password: string) => Promise<void>;
+  register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   isAuthenticated: boolean;
@@ -55,31 +51,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   }, []);
 
-  const login = async (loginValue: string, password: string) => {
-    const response = await api.post('/login', { login: loginValue, password });
+  const login = async (email: string, password: string) => {
+    const response = await api.post('/login', { email, password });
     const { token, user } = response.data;
     localStorage.setItem('token', token);
     setUser(user);
-    await fetchUser();
+    await fetchUser(); // Обновляем профиль с бэкенда для получения актуальной роли
   };
 
-  const register = async (firstName: string, lastName: string, phone: string, password: string) => {
-    const cleanPhone = phone.replace(/\D/g, '');
-    const response = await api.post('/register', { first_name: firstName, last_name: lastName, phone: cleanPhone, password });
+  const register = async (name: string, email: string, password: string) => {
+    const response = await api.post('/register', { name, email, password });
     const { token, user } = response.data;
     localStorage.setItem('token', token);
     setUser(user);
     await fetchUser();
-    
-    // Возвращаем данные для модального окна
-    return {
-      success: true,
-      first_name: response.data.user.first_name || firstName,
-      last_name: response.data.user.last_name || lastName,
-      phone: response.data.user.phone || phone,
-      username: response.data.user.username,
-      password: response.data.user.password || password,
-    };
   };
 
   const logout = async () => {
