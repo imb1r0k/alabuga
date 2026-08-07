@@ -66,29 +66,29 @@ export const getAdminBookings = async () => {
   return response.data;
 };
 
-export const getRoomBookings = async (roomId: number) => {
-  const response = await api.get(`/admin/room-bookings?room_id=${roomId}`);
-  return response.data;
-};
-
 export const updateAdminBooking = async (bookingData: any) => {
   const response = await api.post('/admin/bookings', bookingData);
   return response.data;
 };
 
-// Корпуса и этажи
+export const getRoomBookings = async (roomId: number) => {
+  const response = await api.get(`/admin/room-bookings?room_id=${roomId}`);
+  return response.data;
+};
+
+// Корпуса и комната
 export const getAdminBuildings = async () => {
   const response = await api.get('/admin/buildings');
   return response.data;
 };
 
-export const saveAdminBuilding = async (buildingData: any) => {
-  const response = await api.post('/admin/buildings', buildingData);
+export const saveAdminBuilding = async (building: any) => {
+  const response = await api.post('/admin/buildings', building);
   return response.data;
 };
 
 export const deleteAdminBuilding = async (id: number) => {
-  const response = await api.post('/admin/buildings', { action: 'delete', id });
+  const response = await api.post('/admin/buildings', { id, action: 'delete' });
   return response.data;
 };
 
@@ -97,29 +97,28 @@ export const getAdminFloors = async (buildingId: number) => {
   return response.data;
 };
 
-export const saveAdminFloor = async (floorData: any) => {
-  const response = await api.post('/admin/floors', floorData);
+export const saveAdminFloor = async (floor: any) => {
+  const response = await api.post('/admin/floors', floor);
   return response.data;
 };
 
 export const deleteAdminFloor = async (id: number) => {
-  const response = await api.post('/admin/floors', { action: 'delete', id });
+  const response = await api.post('/admin/floors', { id, action: 'delete' });
   return response.data;
 };
 
-// Комнаты
 export const getAdminRooms = async (floorId: number) => {
   const response = await api.get(`/admin/rooms?floor_id=${floorId}`);
   return response.data;
 };
 
-export const saveAdminRoom = async (roomData: any) => {
-  const response = await api.post('/admin/rooms', roomData);
+export const saveAdminRoom = async (room: any) => {
+  const response = await api.post('/admin/rooms', room);
   return response.data;
 };
 
 export const deleteAdminRoom = async (id: number) => {
-  const response = await api.post('/admin/rooms', { action: 'delete', id });
+  const response = await api.post('/admin/rooms', { id, action: 'delete' });
   return response.data;
 };
 

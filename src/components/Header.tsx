@@ -50,7 +50,7 @@ export const Header = () => {
           {isAuthenticated ? (
             <>
               <span style={{ fontSize: '14px', color: '#666', marginRight: '8px' }}>
-                {user?.name || user?.login} ({user?.role})
+                {user?.name || user?.email} ({user?.role})
               </span>
 
               {(isAdmin || isModerator) && (
