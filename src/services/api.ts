@@ -26,19 +26,16 @@ export const updateSettings = async (settings: Record<string, string>) => {
 
 // ─── Глобальные уведомления ─────────────────────────────────────────────────
 
-// Публичная проверка активного глобального уведомления
 export const getGlobalNotification = async () => {
   const response = await api.get('/notifications/global');
   return response.data;
 };
 
-// Пометить уведомление как просмотренное текущим пользователем
 export const markGlobalNotificationViewed = async () => {
   const response = await api.post('/notifications/global/view');
   return response.data;
 };
 
-// Админ: сохранить глобальное уведомление
 export const saveGlobalNotification = async (payload: {
   text: string;
   type: string;
