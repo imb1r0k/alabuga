@@ -1069,15 +1069,22 @@ try {
         $activeBooking = $stmt->fetch();
 
         if ($activeBooking) {
-            jsonError(
-                "У вас уже есть активное бронирование: статус \""
-                . $activeBooking['status']
-                . "\", комната №" . $activeBooking['room_number']
-                . " в корпусе \"" . $activeBooking['building_name']
-                . "\", этаж " . $activeBooking['floor_number']
-                . " (ID: " . $activeBooking['id'] . ")",
-                400
-            );
+            // Если есть бронь в статусе "pending" – разрешаем замену (автоматически отменяем её)
+            if ($activeBooking['status'] === 'pending') {
+                $stmt = $pdo->prepare("UPDATE bookings SET status = 'rejected', comment = 'Заменено новой заявкой пользователя' WHERE id = ?");
+                $stmt->execute([$activeBooking['id']]);
+            } else {
+                // Для confirmed/approved или других статусов – запрещаем
+                jsonError(
+                    "У вас уже есть активное бронирование: статус \""
+                    . $activeBooking['status']
+                    . "\", комната №" . $activeBooking['room_number']
+                    . " в корпусе \"" . $activeBooking['building_name']
+                    . "\", этаж " . $activeBooking['floor_number']
+                    . " (ID: " . $activeBooking['id'] . ")",
+                    400
+                );
+            }
         }
 
         // Создаём бронь
@@ -1201,15 +1208,22 @@ try {
         $activeBooking = $stmt->fetch();
 
         if ($activeBooking) {
-            jsonError(
-                "У вас уже есть активное бронирование: статус \""
-                . $activeBooking['status']
-                . "\", комната №" . $activeBooking['room_number']
-                . " в корпусе \"" . $activeBooking['building_name']
-                . "\", этаж " . $activeBooking['floor_number']
-                . " (ID: " . $activeBooking['id'] . ")",
-                400
-            );
+            // Если есть бронь в статусе "pending" – разрешаем замену (автоматически отменяем её)
+            if ($activeBooking['status'] === 'pending') {
+                $stmt = $pdo->prepare("UPDATE bookings SET status = 'rejected', comment = 'Заменено новой заявкой пользователя' WHERE id = ?");
+                $stmt->execute([$activeBooking['id']]);
+            } else {
+                // Для confirmed/approved или других статусов – запрещаем
+                jsonError(
+                    "У вас уже есть активное бронирование: статус \""
+                    . $activeBooking['status']
+                    . "\", комната №" . $activeBooking['room_number']
+                    . " в корпусе \"" . $activeBooking['building_name']
+                    . "\", этаж " . $activeBooking['floor_number']
+                    . " (ID: " . $activeBooking['id'] . ")",
+                    400
+                );
+            }
         }
 
         // 3. Подбор доступной комнаты
