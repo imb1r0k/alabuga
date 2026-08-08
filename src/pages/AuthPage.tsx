@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { formatPhoneInput } from '../utils/phone';
 
 export const AuthPage = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -21,25 +22,8 @@ export const AuthPage = () => {
   const { login, register } = useAuth();
   const navigate = useNavigate();
 
-  const formatPhone = (value: string) => {
-    const digits = value.replace(/\D/g, '').slice(0, 11);
-    if (digits.length === 0) return '';
-    if (digits[0] === '8' || digits[0] === '7') {
-      const code = digits.slice(1, 4);
-      const first = digits.slice(4, 7);
-      const second = digits.slice(7, 9);
-      const third = digits.slice(9, 11);
-      let result = `+7 (${code}`;
-      if (first) result += `) ${first}`;
-      if (second) result += `-${second}`;
-      if (third) result += `-${third}`;
-      return result;
-    }
-    return digits;
-  };
-
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setPhone(formatPhone(e.target.value));
+    setPhone(formatPhoneInput(e.target.value));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

@@ -3,6 +3,7 @@ import { X, CheckCircle, KeyRound, UserCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from './Toast';
 import { bookRoom } from '../services/api';
+import { formatPhoneInput } from '../utils/phone';
 
 interface BookingModalProps {
   room: any;
@@ -33,21 +34,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({ room, buildingName, 
   const [result, setResult] = useState<any>(null);
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.replace(/\D/g, '').slice(0, 11);
-    if (value.length === 0) { setPhone(''); return; }
-    if (value[0] === '8' || value[0] === '7') {
-      const code = value.slice(1, 4);
-      const first = value.slice(4, 7);
-      const second = value.slice(7, 9);
-      const third = value.slice(9, 11);
-      let result = `+7 (${code}`;
-      if (first) result += `) ${first}`;
-      if (second) result += `-${second}`;
-      if (third) result += `-${third}`;
-      setPhone(result);
-    } else {
-      setPhone(value);
-    }
+    setPhone(formatPhoneInput(e.target.value));
   };
 
   const handleConfirm = async (e: React.FormEvent) => {

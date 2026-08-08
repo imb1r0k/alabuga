@@ -4,26 +4,10 @@ import { UserPlus, ArrowLeft, CheckCircle, UserCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/Toast';
 import { autoBook } from '../services/api';
+import { formatPhoneInput } from '../utils/phone';
 
 type Gender = 'M' | 'F' | null;
 type AuthStep = 'auth' | 'login' | 'register' | 'result';
-
-const formatPhone = (value: string) => {
-  const digits = value.replace(/\D/g, '').slice(0, 11);
-  if (digits.length === 0) return '';
-  if (digits[0] === '8' || digits[0] === '7') {
-    const code = digits.slice(1, 4);
-    const first = digits.slice(4, 7);
-    const second = digits.slice(7, 9);
-    const third = digits.slice(9, 11);
-    let result = `+7 (${code}`;
-    if (first) result += `) ${first}`;
-    if (second) result += `-${second}`;
-    if (third) result += `-${third}`;
-    return result;
-  }
-  return digits;
-};
 
 export const AutoBookingPage: React.FC = () => {
   const { isAuthenticated, user, refreshUser } = useAuth();
@@ -50,7 +34,7 @@ export const AutoBookingPage: React.FC = () => {
   const [result, setResult] = useState<any>(null);
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setPhone(formatPhone(e.target.value));
+    setPhone(formatPhoneInput(e.target.value));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
