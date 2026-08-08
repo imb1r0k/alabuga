@@ -8,7 +8,7 @@ import { GlobalNotification } from './pages/GlobalNotification';
 
 import { HomePage } from './pages/HomePage';
 import { AuthPage } from './pages/AuthPage';
-import DashboardPage from './pages/DashboardPage'; // default import
+import { DashboardPage } from './pages/DashboardPage';
 
 import { AutoBookingPage } from './pages/AutoBookingPage';
 import { AdminHomePage } from './pages/admin/AdminHomePage';
