@@ -1389,42 +1389,6 @@ try {
         jsonError('Метод не поддерживается', 405);
     }
 
-    // ─── Публичный профиль пользователя ─────────────────────────────────────
-
-    if ($uri === 'public-profile') {
-        $login = trim($_GET['login'] ?? '');
-        if (!$login) jsonError('Не указан логин', 400);
-
-        $stmt = $pdo->prepare("SELECT id, first_name, last_name, name, login, bio, social_vk, social_telegram, social_instagram, social_max, team_id, team_name FROM users WHERE login = ? AND status = 'active' LIMIT 1");
-        $stmt->execute([$login]);
-        $user = $stmt->fetch();
-        if (!$user) jsonError('Пользователь не найден', 404);
-
-        $team = null;
-        $members = [];
-        if ($user['team_id']) {
-            $teamStmt = $pdo->prepare("SELECT id, name, description FROM teams WHERE id = ?");
-            $teamStmt->execute([$user['team_id']]);
-            $team = $teamStmt->fetch() ?: null;
-
-            $membersStmt = $pdo->prepare("
-                SELECT u.id, u.first_name, u.last_name, u.name, u.login, COALESCE(tm.role, 'member') as role
-                FROM users u
-                LEFT JOIN team_members tm ON tm.user_id = u.id AND tm.team_id = ?
-                WHERE u.team_id = ?
-                ORDER BY u.last_name ASC
-            ");
-            $membersStmt->execute([$user['team_id'], $user['team_id']]);
-            $members = $membersStmt->fetchAll();
-        }
-
-        jsonResponse([
-            'user' => $user,
-            'team' => $team,
-            'members' => $members,
-        ]);
-    }
-
     // ─── Маршруты Админ-панели ──────────────────────────────────────────────
 
     if (strpos($uri, 'admin/') === 0) {

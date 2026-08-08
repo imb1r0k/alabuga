@@ -1,6 +1,5 @@
 import React from 'react';
-import { Users, Link2 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Users } from 'lucide-react';
 
 interface Member {
   id: number;
@@ -38,10 +37,8 @@ export const TeamSection: React.FC<{ team: Team | null; members: Member[] }> = (
       <h4 style={{ fontSize: '15px', marginBottom: '10px', color: '#334155' }}>Участники ({members.length})</h4>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {members.map((m) => (
-          <Link
+          <div
             key={m.id}
-            to={`/public_profile/${m.login}`}
-            title="Открыть публичный профиль"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -50,27 +47,39 @@ export const TeamSection: React.FC<{ team: Team | null; members: Member[] }> = (
               borderRadius: '8px',
               backgroundColor: m.role === 'captain' ? '#f0f9ff' : '#f8fafc',
               border: m.role === 'captain' ? '1px solid #bae6fd' : '1px solid #e2e8f0',
-              textDecoration: 'none',
-              color: 'inherit',
-              transition: 'background 0.15s',
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#e2e8f0')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = m.role === 'captain' ? '#f0f9ff' : '#f8fafc')}
           >
-            <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: m.role === 'captain' ? '#0284c7' : '#cbd5e1', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '14px' }}>
+            <div
+              style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                backgroundColor: m.role === 'captain' ? '#0284c7' : '#cbd5e1',
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 'bold',
+                fontSize: '14px',
+              }}
+            >
               {(m.last_name?.[0] || m.name?.[0] || '?').toUpperCase()}
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 600, fontSize: '14px', color: '#0f172a' }}>
                 {m.last_name} {m.first_name || m.name}
                 {m.role === 'captain' && (
-                  <span style={{ marginLeft: '8px', fontSize: '11px', backgroundColor: '#0284c7', color: '#fff', padding: '2px 6px', borderRadius: '4px' }}>Капитан</span>
+                  <span style={{ marginLeft: '8px', fontSize: '11px', backgroundColor: '#0284c7', color: '#fff', padding: '2px 6px', borderRadius: '4px' }}>
+                    Капитан
+                  </span>
                 )}
               </div>
               <div style={{ fontSize: '12px', color: '#64748b' }}>@{m.login}</div>
             </div>
-            <Link2 size={16} color="#94a3b8" style={{ flexShrink: 0 }} />
-          </Link>
+            {m.role !== 'captain' && (
+              <span style={{ fontSize: '12px', color: '#94a3b8' }}>Участник</span>
+            )}
+          </div>
         ))}
       </div>
     </div>
