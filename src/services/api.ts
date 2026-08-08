@@ -160,6 +160,16 @@ export const getAdminTeamMembers = async (teamId: number) => {
   return response.data;
 };
 
+export const addAdminTeamMember = async (teamId: number, userId: number) => {
+  const response = await api.post('/admin/teams/add-member', { team_id: teamId, user_id: userId });
+  return response.data;
+};
+
+export const removeAdminTeamMember = async (teamId: number, userId: number) => {
+  const response = await api.post('/admin/teams/remove-member', { team_id: teamId, user_id: userId });
+  return response.data;
+};
+
 export const getAdminTeamChat = async (teamId: number) => {
   const response = await api.get(`/admin/teams/chat?team_id=${teamId}`);
   return response.data;

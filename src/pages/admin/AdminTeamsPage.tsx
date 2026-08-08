@@ -7,13 +7,16 @@ import {
   saveAdminTeam,
   deleteAdminTeam,
   getAdminTeamMembers,
+  addAdminTeamMember,
+  removeAdminTeamMember,
+  getAdminUsers,
   getAdminTeamChat,
   sendAdminTeamMessage,
   getAdminTeamCalendar,
   addAdminTeamEvent,
   deleteAdminTeamEvent,
 } from '../../services/api';
-import { Users, MessageSquare, Calendar, Trash2, Plus, Save } from 'lucide-react';
+import { Users, MessageSquare, Calendar, Trash2, Plus, Save, UserPlus, UserMinus } from 'lucide-react';
 
 export const AdminTeamsPage: React.FC = () => {
   const [teams, setTeams] = useState<any[]>([]);
@@ -26,6 +29,9 @@ export const AdminTeamsPage: React.FC = () => {
   const [teamName, setTeamName] = useState('');
   const [teamDesc, setTeamDesc] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
 
   // Данные выбранной команды
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
@@ -39,7 +45,20 @@ export const AdminTeamsPage: React.FC = () => {
 
   useEffect(() => {
     loadTeams();
+    loadUsers();
   }, []);
+
+  const loadUsers = async () => {
+    setUsersLoading(true);
+    try {
+      const data = await getAdminUsers();
+      setAllUsers(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setUsersLoading(false);
+    }
+  };
 
   const loadTeams = async () => {
     setLoading(true);
@@ -152,6 +171,32 @@ export const AdminTeamsPage: React.FC = () => {
       showToast('Событие добавлено в календарь', 'success');
     } catch (err: any) {
       showToast('Ошибка при добавлении события: ' + (err.response?.data?.error || err.message), 'error');
+    }
+  };
+
+  const handleAddMember = async (userId: number) => {
+    if (!selectedTeam || !userId) return;
+    try {
+      await addAdminTeamMember(selectedTeam.id, userId);
+      const members = await getAdminTeamMembers(selectedTeam.id);
+      setTeamMembers(members);
+      setShowAddMemberModal(false);
+      showToast('Участник добавлен в команду', 'success');
+    } catch (err: any) {
+      showToast('Ошибка при добавлении участника: ' + (err.response?.data?.error || err.message), 'error');
+    }
+  };
+
+  const handleRemoveMember = async (userId: number, memberName: string) => {
+    if (!selectedTeam || !userId) return;
+    if (!window.confirm(`Удалить участника ${memberName} из команды?`)) return;
+    try {
+      await removeAdminTeamMember(selectedTeam.id, userId);
+      const members = await getAdminTeamMembers(selectedTeam.id);
+      setTeamMembers(members);
+      showToast('Участник удалён из команды', 'success');
+    } catch (err: any) {
+      showToast('Ошибка при удалении участника: ' + (err.response?.data?.error || err.message), 'error');
     }
   };
 
@@ -289,28 +334,49 @@ export const AdminTeamsPage: React.FC = () => {
               <div style={{ backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', padding: '16px', marginBottom: '16px' }}>
                 <h4 style={{ margin: '0 0 12px', fontSize: '14px', color: '#334155', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Users size={16} /> Участники ({teamMembers.length})
+                  <button
+                    onClick={() => setShowAddMemberModal(true)}
+                    className="btn btn-primary"
+                    style={{ marginLeft: 'auto', fontSize: '12px', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <UserPlus size={14} /> Добавить
+                  </button>
                 </h4>
                 {teamMembers.length === 0 ? (
                   <p style={{ fontSize: '13px', color: '#94a3b8' }}>В команде пока нет участников</p>
                 ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                    <thead>
-                      <tr style={{ backgroundColor: '#f8fafc', textAlign: 'left' }}>
-                        <th style={{ padding: '8px' }}>ФИО</th>
-                        <th style={{ padding: '8px' }}>Логин</th>
-                        <th style={{ padding: '8px' }}>Роль</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {teamMembers.map((m) => (
-                        <tr key={m.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                          <td style={{ padding: '8px' }}>{m.last_name} {m.first_name || m.name}</td>
-                          <td style={{ padding: '8px' }}>{m.login}</td>
-                          <td style={{ padding: '8px' }}>{m.role === 'captain' ? 'Капитан' : 'Участник'}</td>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                      <thead>
+                        <tr style={{ backgroundColor: '#f8fafc', textAlign: 'left' }}>
+                          <th style={{ padding: '8px' }}>ФИО</th>
+                          <th style={{ padding: '8px' }}>Логин</th>
+                          <th style={{ padding: '8px' }}>Роль</th>
+                          <th style={{ padding: '8px', width: '60px' }}>Действие</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {teamMembers.map((m) => (
+                          <tr key={m.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                            <td style={{ padding: '8px' }}>{m.last_name} {m.first_name || m.name}</td>
+                            <td style={{ padding: '8px' }}>{m.login}</td>
+                            <td style={{ padding: '8px' }}>{m.role === 'captain' ? 'Капитан' : 'Участник'}</td>
+                            <td style={{ padding: '8px' }}>
+                              {m.role !== 'captain' && (
+                                <button
+                                  onClick={() => handleRemoveMember(m.id, `${m.last_name} ${m.first_name || m.name}`)}
+                                  title="Удалить из команды"
+                                  style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#ef4444', display: 'flex' }}
+                                >
+                                  <UserMinus size={16} />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
 
@@ -392,6 +458,71 @@ export const AdminTeamsPage: React.FC = () => {
           ) : (
             <p style={{ color: '#94a3b8', fontStyle: 'italic' }}>Выберите команду слева</p>
           )}
+        </div>
+      )}
+
+      {/* Модальное окно добавления участника */}
+      {showAddMemberModal && selectedTeam && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: '16px'
+        }}>
+          <div style={{ backgroundColor: '#fff', padding: '24px', borderRadius: '8px', maxWidth: '500px', width: '100%', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
+            <h3 style={{ margin: '0 0 16px', fontSize: '18px' }}>Добавление участника в команду «{selectedTeam.name}»</h3>
+
+            {usersLoading ? (
+              <p>Загрузка пользователей...</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {allUsers.filter((u) => !u.team_id || Number(u.team_id) === Number(selectedTeam.id)).length === 0 ? (
+                  <p style={{ fontSize: '14px', color: '#94a3b8' }}>Нет доступных пользователей</p>
+                ) : (
+                  allUsers
+                    .filter((u) => !u.team_id || Number(u.team_id) === Number(selectedTeam.id))
+                    .map((u) => (
+                      <div
+                        key={u.id}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '10px 12px',
+                          borderRadius: '6px',
+                          border: '1px solid #e2e8f0',
+                          backgroundColor: '#f8fafc',
+                        }}
+                      >
+                        <div>
+                          <strong style={{ fontSize: '14px' }}>{u.last_name} {u.first_name || u.name}</strong>
+                          <div style={{ fontSize: '12px', color: '#64748b' }}>Логин: {u.email || u.login}</div>
+                        </div>
+                        {Number(u.team_id) === Number(selectedTeam.id) ? (
+                          <span style={{ fontSize: '12px', color: '#16a34a', fontWeight: 600 }}>В команде ✓</span>
+                        ) : (
+                          <button
+                            onClick={() => handleAddMember(u.id)}
+                            className="btn btn-primary"
+                            style={{ fontSize: '13px', padding: '6px 12px' }}
+                          >
+                            <Plus size={14} /> Добавить
+                          </button>
+                        )}
+                      </div>
+                    ))
+                )}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
+              <button className="btn btn-secondary" onClick={() => setShowAddMemberModal(false)}>Закрыть</button>
+            </div>
+          </div>
         </div>
       )}
 

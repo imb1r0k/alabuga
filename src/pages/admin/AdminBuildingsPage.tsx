@@ -21,7 +21,6 @@ import {
 import { 
   Bed, 
   ArrowUpDown, 
-  Footprints, 
   Wrench, 
   Plus, 
   SquareCheck,
@@ -58,10 +57,20 @@ interface TileTemplate {
   textColor: string;
 }
 
+// Кастомная SVG-иконка лестницы (в lucide-react нет подходящей)
+const StairsIcon: React.FC = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 21L9 15V9L15 3H21" />
+    <path d="M3 21H9" />
+    <path d="M9 15H15" />
+    <path d="M15 9H21" />
+  </svg>
+);
+
 const STANDARD_TEMPLATES: TileTemplate[] = [
   { type: 'room', title: 'Комната', icon: Bed, bg: '#d1e7dd', borderColor: '#a3cfbb', textColor: '#0f5132' },
   { type: 'elevator', title: 'Лифт', icon: ArrowUpDown, bg: '#cff4fc', borderColor: '#9eeaf9', textColor: '#055160' },
-  { type: 'stairs', title: 'Лестница', icon: Footprints, bg: '#fff3cd', borderColor: '#ffe69c', textColor: '#664d03' },
+  { type: 'stairs', title: 'Лестница', icon: StairsIcon, bg: '#fff3cd', borderColor: '#ffe69c', textColor: '#664d03' },
   { type: 'tech', title: 'Техническая', icon: Wrench, bg: '#e2e3e5', borderColor: '#c4c8cb', textColor: '#41464b' },
 ];
 
@@ -1178,7 +1187,7 @@ export const AdminBuildingsPage: React.FC = () => {
                                   fontSize: '11px',
                                   letterSpacing: '2px',
                                 }}>
-                                  <span style={{ transform: 'rotate(90deg)', whiteSpace: 'nowrap' }}>═══ КОРИДОР ═══</span>
+                                  <span style={{ transform: 'rotate(90deg)', whiteSpace: 'nowrap' }}>КОРИДОР</span>
                                 </div>
 
                                 {/* Нижний ряд (y=2) */}
@@ -1206,7 +1215,7 @@ export const AdminBuildingsPage: React.FC = () => {
                               fontSize: '11px',
                               letterSpacing: '2px',
                             }}>
-                              ═══ КОРИДОР ═══
+                              КОРИДОР
                             </div>
 
                             {/* Нижний ряд (y=2) */}

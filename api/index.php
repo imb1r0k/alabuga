@@ -564,6 +564,57 @@ try {
         jsonResponse(['success' => true]);
     }
 
+    if ($uri === 'admin/teams/add-member') {
+        $user = requireAdmin($pdo);
+        if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
+        $teamId = (int)($data['team_id'] ?? 0);
+        $userId = (int)($data['user_id'] ?? 0);
+        if ($teamId <= 0 || $userId <= 0) jsonError('Некорректные параметры');
+
+        // Проверяем, что команда существует
+        $stmt = $pdo->prepare("SELECT name FROM teams WHERE id = ?");
+        $stmt->execute([$teamId]);
+        $teamName = $stmt->fetchColumn();
+        if (!$teamName) jsonError('Команда не найдена', 404);
+
+        // Проверяем пользователя
+        $stmt = $pdo->prepare("SELECT id FROM users WHERE id = ?");
+        $stmt->execute([$userId]);
+        if (!$stmt->fetchColumn()) jsonError('Пользователь не найден', 404);
+
+        // Устанавливаем команду в таблице users
+        $stmt = $pdo->prepare("UPDATE users SET team_id = ?, team_name = ? WHERE id = ?");
+        $stmt->execute([$teamId, $teamName, $userId]);
+
+        // Добавляем запись в team_members (если её ещё нет)
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM team_members WHERE team_id = ? AND user_id = ?");
+        $stmt->execute([$teamId, $userId]);
+        if ($stmt->fetchColumn() == 0) {
+            $stmt = $pdo->prepare("INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, 'member')");
+            $stmt->execute([$teamId, $userId]);
+        }
+
+        jsonResponse(['success' => true]);
+    }
+
+    if ($uri === 'admin/teams/remove-member') {
+        $user = requireAdmin($pdo);
+        if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
+        $teamId = (int)($data['team_id'] ?? 0);
+        $userId = (int)($data['user_id'] ?? 0);
+        if ($teamId <= 0 || $userId <= 0) jsonError('Некорректные параметры');
+
+        // Убираем команду из пользователя (только если он сейчас в этой команде)
+        $stmt = $pdo->prepare("UPDATE users SET team_id = NULL, team_name = NULL WHERE id = ? AND team_id = ?");
+        $stmt->execute([$userId, $teamId]);
+
+        // Удаляем из team_members
+        $stmt = $pdo->prepare("DELETE FROM team_members WHERE team_id = ? AND user_id = ?");
+        $stmt->execute([$teamId, $userId]);
+
+        jsonResponse(['success' => true]);
+    }
+
     if ($uri === 'admin/teams/members') {
         $user = requireAdmin($pdo);
         if ($method !== 'GET') jsonError('Метод не поддерживается', 405);
@@ -571,12 +622,12 @@ try {
         $stmt = $pdo->prepare("
             SELECT u.id, u.first_name, u.last_name, u.name, u.login,
                    COALESCE(tm.role, 'member') as role
-            FROM team_members tm
-            JOIN users u ON tm.user_id = u.id
-            WHERE tm.team_id = ?
+            FROM users u
+            LEFT JOIN team_members tm ON tm.user_id = u.id AND tm.team_id = ?
+            WHERE u.team_id = ?
             ORDER BY u.last_name ASC
         ");
-        $stmt->execute([$teamId]);
+        $stmt->execute([$teamId, $teamId]);
         jsonResponse($stmt->fetchAll());
     }
 
@@ -678,6 +729,22 @@ try {
                         $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, name=?, phone=?, login=?, role=?, team_name=?, team_id=? WHERE id=?");
                         $stmt->execute([$firstName, $lastName, $fullName, $phone, $login, $role, $teamNameResolved, $teamId ?: null, $id]);
                     }
+
+                    // Синхронизируем team_members с назначенной командой
+                    // Если команда назначена — добавить запись (если её нет)
+                    if ($teamId > 0) {
+                        $stmt = $pdo->prepare("SELECT COUNT(*) FROM team_members WHERE team_id = ? AND user_id = ?");
+                        $stmt->execute([$teamId, $id]);
+                        if ($stmt->fetchColumn() == 0) {
+                            $stmt = $pdo->prepare("INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, 'member')");
+                            $stmt->execute([$teamId, $id]);
+                        }
+                    } else {
+                        // Команда убрана — удаляем из всех team_members для этого пользователя
+                        $stmt = $pdo->prepare("DELETE FROM team_members WHERE user_id = ?");
+                        $stmt->execute([$id]);
+                    }
+
                     jsonResponse(['success' => true]);
                 }
                 jsonError('ID пользователя не указан');
