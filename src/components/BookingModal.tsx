@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, CheckCircle, KeyRound } from 'lucide-react';
+import { X, CheckCircle, KeyRound, UserCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from './Toast';
 import { bookRoom } from '../services/api';
@@ -11,19 +11,19 @@ interface BookingModalProps {
   onClose: () => void;
 }
 
-type Stage = 'auth' | 'login' | 'register' | 'result';
+type Stage = 'auth' | 'login' | 'register' | 'confirm' | 'result';
 
 export const BookingModal: React.FC<BookingModalProps> = ({ room, buildingName, floorNumber, onClose }) => {
-  const { isAuthenticated, refreshUser } = useAuth();
+  const { isAuthenticated, user, refreshUser } = useAuth();
   const { showToast } = useToast();
 
-  const [stage, setStage] = useState<Stage>(isAuthenticated ? 'result' : 'auth');
+  const [stage, setStage] = useState<Stage>(isAuthenticated ? 'confirm' : 'auth');
   const [loginInput, setLoginInput] = useState('');
   const [password, setPassword] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [firstName, setFirstName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [regLogin, setRegLogin] = useState('');
+  const [lastName, setLastName] = useState(user?.last_name || '');
+  const [firstName, setFirstName] = useState(user?.first_name || '');
+  const [phone, setPhone] = useState(user?.phone || '');
+  const [regLogin, setRegLogin] = useState(user?.login || '');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -47,12 +47,31 @@ export const BookingModal: React.FC<BookingModalProps> = ({ room, buildingName, 
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleConfirm = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
     try {
+      // Если пользователь авторизован — используем его токен и отправляем бронь
+      if (isAuthenticated) {
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Токен не найден');
+        const response = await bookRoom({
+          mode: 'existing',
+          room_id: room.id,
+          first_name: firstName,
+          last_name: lastName,
+          phone,
+          login: regLogin,
+        });
+        setResult({ booking: response.booking, user: response.user, newUser: false });
+        setStage('result');
+        showToast('Бронирование отправлено!', 'success');
+        return;
+      }
+
+      // Обычный путь для неавторизованных
       let token = '';
       let userData = null;
       let booking = null;
@@ -116,10 +135,15 @@ export const BookingModal: React.FC<BookingModalProps> = ({ room, buildingName, 
       setStage('result');
       showToast('Бронирование отправлено!', 'success');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Произошла ошибка');
+      setError(err.response?.data?.error || err.message || 'Произошла ошибка');
     } finally {
       setLoading(false);
     }
+  };
+
+  // Обработчик "Нет, изменить данные" — переходим в режим редактирования
+  const handleEditData = () => {
+    setStage('register');
   };
 
   return (
@@ -180,8 +204,45 @@ export const BookingModal: React.FC<BookingModalProps> = ({ room, buildingName, 
             </div>
           )}
 
+          {/* Подтверждение для авторизованного пользователя */}
+          {stage === 'confirm' && isAuthenticated && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px', padding: '12px', backgroundColor: '#f0f9ff', borderRadius: '8px', border: '1px solid #bae6fd' }}>
+                <UserCheck size={20} color="#0284c7" />
+                <span style={{ fontSize: '14px', color: '#075985', fontWeight: 500 }}>
+                  Вы вошли как {user?.last_name} {user?.first_name}
+                </span>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <p style={{ fontSize: '15px', color: '#0f172a', marginBottom: '12px' }}>Проверьте ваши данные для бронирования:</p>
+                <div style={{ backgroundColor: '#f8fafc', borderRadius: '8px', padding: '16px', border: '1px solid #e2e8f0', fontSize: '14px', lineHeight: 1.8 }}>
+                  <p><strong>Фамилия:</strong> {lastName}</p>
+                  <p><strong>Имя:</strong> {firstName}</p>
+                  <p><strong>Телефон:</strong> {phone}</p>
+                  <p><strong>Логин:</strong> {regLogin || user?.login}</p>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px', flexDirection: 'column' }}>
+                <button className="btn btn-primary" onClick={handleConfirm} style={{ width: '100%', padding: '12px', fontSize: '15px' }}>
+                  Все верно, отправить заявку
+                </button>
+                <button className="btn btn-secondary" onClick={handleEditData} style={{ width: '100%', padding: '12px', fontSize: '15px' }}>
+                  Изменить данные
+                </button>
+              </div>
+
+              {error && (
+                <div style={{ marginTop: '12px', padding: '10px', borderRadius: '6px', backgroundColor: '#f8d7da', color: '#721c24', fontSize: '13px' }}>
+                  {error}
+                </div>
+              )}
+            </div>
+          )}
+
           {(stage === 'login' || stage === 'register') && (
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={handleConfirm}>
               {error && (
                 <div style={{ padding: '10px', borderRadius: '6px', marginBottom: '14px', backgroundColor: '#f8d7da', color: '#721c24', fontSize: '13px' }}>
                   {error}
@@ -213,16 +274,28 @@ export const BookingModal: React.FC<BookingModalProps> = ({ room, buildingName, 
                 </>
               ) : (
                 <>
-                  <div className="input-group">
-                    <label>Логин (необязательно)</label>
-                    <input
-                      type="text"
-                      value={regLogin}
-                      onChange={(e) => setRegLogin(e.target.value)}
-                      placeholder="Например, ivanov"
-                      disabled={loading}
-                    />
-                  </div>
+                  {!isAuthenticated && (
+                    <div className="input-group">
+                      <label>Логин (необязательно)</label>
+                      <input
+                        type="text"
+                        value={regLogin}
+                        onChange={(e) => setRegLogin(e.target.value)}
+                        placeholder="Например, ivanov"
+                        disabled={loading}
+                      />
+                    </div>
+                  )}
+                  {isAuthenticated && (
+                    <div className="input-group">
+                      <label>Логин (нельзя изменить)</label>
+                      <input
+                        type="text"
+                        value={user?.login}
+                        disabled
+                      />
+                    </div>
+                  )}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                     <div className="input-group">
                       <label>Фамилия</label>
@@ -237,29 +310,35 @@ export const BookingModal: React.FC<BookingModalProps> = ({ room, buildingName, 
                     <label>Номер телефона</label>
                     <input type="tel" value={phone} onChange={handlePhoneChange} placeholder="+7 (___) ___-__-__" disabled={loading} />
                   </div>
-                  <div className="input-group">
-                    <label>Пароль (минимум 6 символов)</label>
-                    <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={loading} />
-                  </div>
-                  <div className="input-group">
-                    <label>Повторите пароль</label>
-                    <input type="password" value={passwordConfirm} onChange={(e) => setPasswordConfirm(e.target.value)} disabled={loading} />
-                  </div>
+                  {!isAuthenticated && (
+                    <>
+                      <div className="input-group">
+                        <label>Пароль (минимум 6 символов)</label>
+                        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={loading} />
+                      </div>
+                      <div className="input-group">
+                        <label>Повторите пароль</label>
+                        <input type="password" value={passwordConfirm} onChange={(e) => setPasswordConfirm(e.target.value)} disabled={loading} />
+                      </div>
+                    </>
+                  )}
                 </>
               )}
 
               <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: '100%', padding: '12px', fontSize: '15px' }}>
-                {loading ? 'Отправка...' : (stage === 'login' ? 'Войти и забронировать' : 'Зарегистрироваться и забронировать')}
+                {loading ? 'Отправка...' : (isAuthenticated ? 'Сохранить и отправить' : (stage === 'login' ? 'Войти и забронировать' : 'Зарегистрироваться и забронировать'))}
               </button>
 
-              <button
-                type="button"
-                onClick={() => setStage(stage === 'login' ? 'register' : 'login')}
-                style={{ marginTop: '12px', background: 'none', border: 'none', color: '#0284c7', cursor: 'pointer', fontSize: '14px', width: '100%' }}
-                disabled={loading}
-              >
-                {stage === 'login' ? 'Нет аккаунта? Зарегистрироваться' : 'Уже есть аккаунт? Войти'}
-              </button>
+              {!isAuthenticated && (
+                <button
+                  type="button"
+                  onClick={() => setStage(stage === 'login' ? 'register' : 'login')}
+                  style={{ marginTop: '12px', background: 'none', border: 'none', color: '#0284c7', cursor: 'pointer', fontSize: '14px', width: '100%' }}
+                  disabled={loading}
+                >
+                  {stage === 'login' ? 'Нет аккаунта? Зарегистрироваться' : 'Уже есть аккаунт? Войти'}
+                </button>
+              )}
             </form>
           )}
 

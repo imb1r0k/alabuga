@@ -121,33 +121,6 @@ export const HomePage: React.FC = () => {
         </div>
       </div>
 
-      {/* Карточки преимуществ */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '24px', marginBottom: '48px' }}>
-        <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '24px' }}>
-          <div style={{ width: '48px', height: '48px', backgroundColor: '#e0f2fe', color: '#0284c7', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
-            <Shield size={24} />
-          </div>
-          <h3 style={{ fontSize: '18px', fontWeight: 'bold', color: '#1e293b', marginBottom: '8px' }}>Безопасность</h3>
-          <p style={{ fontSize: '14px', color: '#475569' }}>Надежная защита данных и распределение ролей участников форума.</p>
-        </div>
-
-        <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '24px' }}>
-          <div style={{ width: '48px', height: '48px', backgroundColor: '#e0f2fe', color: '#0284c7', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
-            <Zap size={24} />
-          </div>
-          <h3 style={{ fontSize: '18px', fontWeight: 'bold', color: '#1e293b', marginBottom: '8px' }}>Скорость и интерактивность</h3>
-          <p style={{ fontSize: '14px', color: '#475569' }}>Наглядные интерактивные схемы корпусов и моментальная обработка заявок.</p>
-        </div>
-
-        <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '24px' }}>
-          <div style={{ width: '48px', height: '48px', backgroundColor: '#e0f2fe', color: '#0284c7', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
-            <CheckCircle size={24} />
-          </div>
-          <h3 style={{ fontSize: '18px', fontWeight: 'bold', color: '#1e293b', marginBottom: '8px' }}>Командная работа</h3>
-          <p style={{ fontSize: '14px', color: '#475569' }}>Общие чаты, календари событий и совместное расселение команд.</p>
-        </div>
-      </div>
-
       {/* Блок бронирования комнаты */}
       <div className="card" style={{ marginBottom: '48px' }}>
         <div style={{ marginBottom: '24px' }}>
