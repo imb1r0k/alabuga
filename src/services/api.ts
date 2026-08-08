@@ -55,6 +55,11 @@ export const getAdminStats = async () => {
 // ─── Публичные данные для бронирования ───────────────────────────────────────
 
 // Получить список корпусов (публично)
+export const getMyBooking = async () => {
+  const response = await api.get('/my-booking');
+  return response.data;
+};
+
 export const getPublicBuildings = async () => {
   const response = await api.get('/public/buildings');
   return response.data;

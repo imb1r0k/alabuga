@@ -1,14 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Zap, CheckCircle, ArrowRight, Building2 } from 'lucide-react';
+import { ArrowRight, Building2, MapPin, Clock, XCircle, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
-import { getPublicBuildings } from '../services/api';
+import { getPublicBuildings, getMyBooking } from '../services/api';
 import { PublicFloorMap } from '../components/PublicFloorMap';
 import { BookingModal } from '../components/BookingModal';
 
 export const HomePage: React.FC = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const { hero } = useSettings();
 
   // Бронирование
@@ -18,6 +18,11 @@ export const HomePage: React.FC = () => {
   const [selectedBuildingName, setSelectedBuildingName] = useState('');
   const [selectedFloorNumber, setSelectedFloorNumber] = useState(0);
   const [loadingBuildings, setLoadingBuildings] = useState(false);
+
+  // Актуальная бронь пользователя
+  const [myBooking, setMyBooking] = useState<any>(null);
+  const [myBookingLoading, setMyBookingLoading] = useState(false);
+  const bookingSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     getPublicBuildings()
@@ -31,6 +36,18 @@ export const HomePage: React.FC = () => {
       .catch((err) => console.error(err))
       .finally(() => setLoadingBuildings(false));
   }, []);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      setMyBookingLoading(true);
+      getMyBooking()
+        .then((data) => setMyBooking(data?.booking || null))
+        .catch((err) => console.error(err))
+        .finally(() => setMyBookingLoading(false));
+    } else {
+      setMyBooking(null);
+    }
+  }, [isAuthenticated]);
 
   const handleBuildingSelect = (building: any) => {
     setSelectedBuildingId(building.id);
@@ -121,8 +138,82 @@ export const HomePage: React.FC = () => {
         </div>
       </div>
 
+      {/* Карточка статуса бронирования */}
+      {isAuthenticated && myBooking && (
+        <div style={{
+          position: 'fixed',
+          bottom: '20px',
+          right: '20px',
+          zIndex: 9999,
+          backgroundColor: '#ffffff',
+          borderRadius: '12px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          border: '1px solid #e2e8f0',
+          padding: '16px',
+          maxWidth: '320px',
+          fontSize: '14px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+            {myBooking.status === 'approved' ? (
+              <CheckCircle2 size={20} color="#16a34a" />
+            ) : myBooking.status === 'approved_bot' ? (
+              <CheckCircle2 size={20} color="#0284c7" />
+            ) : myBooking.status === 'rejected' ? (
+              <XCircle size={20} color="#ef4444" />
+            ) : myBooking.status === 'archived' ? (
+              <AlertCircle size={20} color="#6b7280" />
+            ) : (
+              <Clock size={20} color="#f59e0b" />
+            )}
+            <strong style={{ color: '#0f172a' }}>Статус бронирования</strong>
+          </div>
+
+          <div style={{ marginBottom: '12px' }}>
+            <div style={{ color: '#475569', marginBottom: '4px' }}>
+              <MapPin size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
+              {myBooking.building_name} — Этаж {myBooking.floor_number} — Комната №{myBooking.room_number}
+            </div>
+            <div>
+              <span style={{
+                display: 'inline-block',
+                padding: '2px 8px',
+                borderRadius: '4px',
+                fontSize: '12px',
+                fontWeight: 600,
+                color: '#fff',
+                backgroundColor: myBooking.status === 'approved' ? '#16a34a' :
+                                myBooking.status === 'approved_bot' ? '#0284c7' :
+                                myBooking.status === 'rejected' ? '#ef4444' :
+                                myBooking.status === 'archived' ? '#6b7280' : '#f59e0b',
+              }}>
+                {myBooking.status === 'approved' ? 'Одобрено' :
+                 myBooking.status === 'approved_bot' ? 'Одобрено ботом' :
+                 myBooking.status === 'rejected' ? 'Отклонено' :
+                 myBooking.status === 'archived' ? 'В архиве' : 'Ожидает подтверждения'}
+              </span>
+            </div>
+          </div>
+
+          {myBooking.status === 'rejected' && (
+            <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '8px', marginBottom: '12px', fontSize: '13px', color: '#b91c1c' }}>
+              <strong>Комментарий:</strong> {myBooking.comment || 'Не указан'}
+            </div>
+          )}
+
+          {(myBooking.status === 'rejected' || myBooking.status === 'archived') && (
+            <button
+              className="btn btn-primary"
+              style={{ width: '100%', fontSize: '13px', padding: '8px 12px' }}
+              onClick={() => bookingSectionRef.current?.scrollIntoView({ behavior: 'smooth' })}
+            >
+              Отправить новое бронирование
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Блок бронирования комнаты */}
-      <div className="card" style={{ marginBottom: '48px' }}>
+      <div ref={bookingSectionRef} className="card" style={{ marginBottom: '48px' }}>
         <div style={{ marginBottom: '24px' }}>
           <h2 style={{ fontSize: '24px', fontWeight: 'bold', color: '#0f172a', marginBottom: '8px' }}>Выберите комнату</h2>
           <p style={{ fontSize: '14px', color: '#64748b' }}>Просмотрите доступные комнаты в корпусах и нажмите на интересующую для бронирования.</p>

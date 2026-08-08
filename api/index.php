@@ -166,6 +166,7 @@ function initFreshDatabase($pdo) {
           `user_id` INT NOT NULL,
           `room_id` INT NOT NULL,
           `status` ENUM('pending', 'rejected', 'approved', 'approved_bot', 'archived') NOT NULL DEFAULT 'pending',
+          `comment` VARCHAR(500) NULL,
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
@@ -195,6 +196,11 @@ function ensureTablesExist($pdo) {
             try {
                 $pdo->exec("ALTER TABLE `bookings` MODIFY COLUMN `status` ENUM('pending', 'rejected', 'approved', 'approved_bot', 'archived') NOT NULL DEFAULT 'pending'");
             } catch (Exception $e3) {}
+
+            // Добавляем колонку comment, если её нет
+            try {
+                $pdo->exec("ALTER TABLE `bookings` ADD COLUMN `comment` VARCHAR(500) NULL AFTER `status`");
+            } catch (Exception $e4) {}
         } catch (Exception $e1) {
             initFreshDatabase($pdo);
         }
@@ -669,6 +675,25 @@ try {
         jsonResponse(['success' => true]);
     }
 
+    // ─── Моё текущее бронирование ─────────────────────────────────────────
+
+    if ($uri === 'my-booking') {
+        $user = requireAuth($pdo);
+        // Возвращаем последнюю бронь пользователя (любую, включая отклонённую)
+        $stmt = $pdo->prepare("
+            SELECT b.id, b.status, b.comment, r.room_number, bu.name as building_name, f.floor_number
+            FROM bookings b
+            JOIN rooms r ON b.room_id = r.id
+            JOIN buildings bu ON r.building_id = bu.id
+            JOIN floors f ON r.floor_id = f.id
+            WHERE b.user_id = ?
+            ORDER BY b.id DESC LIMIT 1
+        ");
+        $stmt->execute([$user['id']]);
+        $booking = $stmt->fetch();
+        jsonResponse(['booking' => $booking]);
+    }
+
     // ─── Команды ────────────────────────────────────────────────────────────
 
     if ($uri === 'admin/teams') {
@@ -1006,6 +1031,32 @@ try {
         $expiresAt = date('Y-m-d H:i:s', strtotime('+30 days'));
         $stmt = $pdo->prepare("INSERT INTO tokens (user_id, token, expires_at) VALUES (?, ?, ?)");
         $stmt->execute([$user['id'], $token, $expiresAt]);
+
+        // Проверяем наличие активного бронирования (не отклонённого и не архивного)
+        $stmt = $pdo->prepare("
+            SELECT b.id, b.status, b.comment, r.room_number, bu.name as building_name, f.floor_number
+            FROM bookings b
+            JOIN rooms r ON b.room_id = r.id
+            JOIN buildings bu ON r.building_id = bu.id
+            JOIN floors f ON r.floor_id = f.id
+            WHERE b.user_id = ?
+            AND b.status NOT IN ('rejected', 'archived')
+            ORDER BY b.id DESC LIMIT 1
+        ");
+        $stmt->execute([$user['id']]);
+        $activeBooking = $stmt->fetch();
+
+        if ($activeBooking) {
+            jsonError(
+                "У вас уже есть активное бронирование: статус \""
+                . $activeBooking['status']
+                . "\", комната №" . $activeBooking['room_number']
+                . " в корпусе \"" . $activeBooking['building_name']
+                . "\", этаж " . $activeBooking['floor_number']
+                . " (ID: " . $activeBooking['id'] . ")",
+                400
+            );
+        }
 
         // Создаём бронь
         $stmt = $pdo->prepare("INSERT INTO bookings (user_id, room_id, status) VALUES (?, ?, 'pending')");
