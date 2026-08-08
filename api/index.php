@@ -1054,37 +1054,16 @@ try {
             }
         }
 
-        // Проверяем наличие активного бронирования (не отклонённого и не архивного)
+        // Проверяем наличие активного бронирования (pending, approved, approved_bot)
         $stmt = $pdo->prepare("
-            SELECT b.id, b.status, b.comment, r.room_number, bu.name as building_name, f.floor_number
-            FROM bookings b
-            JOIN rooms r ON b.room_id = r.id
-            JOIN buildings bu ON r.building_id = bu.id
-            JOIN floors f ON r.floor_id = f.id
+            SELECT b.id FROM bookings b
             WHERE b.user_id = ?
-            AND b.status NOT IN ('rejected', 'archived')
-            ORDER BY b.id DESC LIMIT 1
+            AND b.status IN ('pending', 'approved', 'approved_bot')
+            LIMIT 1
         ");
         $stmt->execute([$user['id']]);
-        $activeBooking = $stmt->fetch();
-
-        if ($activeBooking) {
-            // Если есть бронь в статусе "pending" – разрешаем замену (автоматически отменяем её)
-            if ($activeBooking['status'] === 'pending') {
-                $stmt = $pdo->prepare("UPDATE bookings SET status = 'rejected', comment = 'Заменено новой заявкой пользователя' WHERE id = ?");
-                $stmt->execute([$activeBooking['id']]);
-            } else {
-                // Для confirmed/approved или других статусов – запрещаем
-                jsonError(
-                    "У вас уже есть активное бронирование: статус \""
-                    . $activeBooking['status']
-                    . "\", комната №" . $activeBooking['room_number']
-                    . " в корпусе \"" . $activeBooking['building_name']
-                    . "\", этаж " . $activeBooking['floor_number']
-                    . " (ID: " . $activeBooking['id'] . ")",
-                    400
-                );
-            }
+        if ($stmt->fetch()) {
+            jsonError("У вас уже есть активное бронирование. Оно находится в статусе ожидания или подтверждено.", 400);
         }
 
         // Создаём бронь
@@ -1193,37 +1172,16 @@ try {
             unset($user['password']);
         }
 
-        // 2. Проверка активного бронирования
+        // 2. Проверка наличия активного бронирования (pending, approved, approved_bot)
         $stmt = $pdo->prepare("
-            SELECT b.id, b.status, b.comment, r.room_number, bu.name as building_name, f.floor_number
-            FROM bookings b
-            JOIN rooms r ON b.room_id = r.id
-            JOIN buildings bu ON r.building_id = bu.id
-            JOIN floors f ON r.floor_id = f.id
+            SELECT b.id FROM bookings b
             WHERE b.user_id = ?
-            AND b.status NOT IN ('rejected', 'archived')
-            ORDER BY b.id DESC LIMIT 1
+            AND b.status IN ('pending', 'approved', 'approved_bot')
+            LIMIT 1
         ");
         $stmt->execute([$user['id']]);
-        $activeBooking = $stmt->fetch();
-
-        if ($activeBooking) {
-            // Если есть бронь в статусе "pending" – разрешаем замену (автоматически отменяем её)
-            if ($activeBooking['status'] === 'pending') {
-                $stmt = $pdo->prepare("UPDATE bookings SET status = 'rejected', comment = 'Заменено новой заявкой пользователя' WHERE id = ?");
-                $stmt->execute([$activeBooking['id']]);
-            } else {
-                // Для confirmed/approved или других статусов – запрещаем
-                jsonError(
-                    "У вас уже есть активное бронирование: статус \""
-                    . $activeBooking['status']
-                    . "\", комната №" . $activeBooking['room_number']
-                    . " в корпусе \"" . $activeBooking['building_name']
-                    . "\", этаж " . $activeBooking['floor_number']
-                    . " (ID: " . $activeBooking['id'] . ")",
-                    400
-                );
-            }
+        if ($stmt->fetch()) {
+            jsonError("У вас уже есть активное бронирование. Оно находится в статусе ожидания или подтверждено.", 400);
         }
 
         // 3. Подбор доступной комнаты
