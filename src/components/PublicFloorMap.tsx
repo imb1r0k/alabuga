@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Bed, ArrowUpDown, Wrench } from 'lucide-react';
 import { Skeleton } from './Skeleton';
 import { getPublicLayout } from '../services/api';
+import { useOrientation } from '../hooks/useOrientation';
 
 // Кастомная иконка лестницы (как в админке)
 const StairsIcon: React.FC = () => (
@@ -70,6 +71,10 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
   const [selectedFloor, setSelectedFloor] = useState<Floor | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Автоопределение ориентации устройства
+  const isPortrait = useOrientation();
+  const showVertical = isPortrait;
+
   useEffect(() => {
     setLoading(true);
     setSelectedFloor(null);
@@ -129,11 +134,13 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
     const IconComp = tmpl?.icon || Bed;
     const bookedCount = room?.occupied || 0;
 
+    const clickable = room && room.room_type === 'room' && room.is_technical === 0;
+
     return (
       <div
         key={`cell-${x}-${y}`}
         onClick={() => {
-          if (room && room.room_type === 'room' && room.is_technical === 0 && layout?.building && floor) {
+          if (clickable && layout?.building && floor) {
             onRoomSelect(room, layout.building, floor);
           }
         }}
@@ -148,7 +155,7 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          cursor: room && room.room_type === 'room' && room.is_technical === 0 ? 'pointer' : 'default',
+          cursor: clickable ? 'pointer' : 'default',
           fontSize: '13px',
           padding: '4px',
           textAlign: 'center',
@@ -164,7 +171,7 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
         )}
 
         {room ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ transform: showVertical ? 'rotate(90deg)' : 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
             <IconComp size={24} style={{ marginBottom: '3px', marginTop: '4px' }} />
             <strong>{room.room_number || room.name}</strong>
 
@@ -175,7 +182,7 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
             )}
           </div>
         ) : (
-          <div style={{ color: '#94a3b8', fontSize: '13px', textAlign: 'center' }}>
+          <div style={{ transform: showVertical ? 'rotate(90deg)' : 'none', color: '#94a3b8', fontSize: '13px', textAlign: 'center' }}>
             <span style={{ fontSize: '12px', display: 'block', fontWeight: 'bold', color: '#cbd5e1' }}>№ {calcRoomNum}</span>
             Свободно
           </div>
@@ -195,6 +202,8 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
   const cellSize = 145;
   const corridorHeight = 40;
   const gridGap = 10;
+  const gridHeight = 110 * 2 + corridorHeight + gridGap * 2;
+  const gridWidth = floorWidth * cellSize + (floorWidth - 1) * gridGap;
 
   return (
     <div>
@@ -220,33 +229,77 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
         ))}
       </div>
 
-      {/* Сетка */}
-      <div style={{ overflowX: 'auto' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${floorWidth}, ${cellSize}px)`, gap: gridGap, width: 'max-content' }}>
-          {/* Верхний ряд */}
-          {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 0))}
-
-          {/* Коридор */}
+      {/* Сетка (адаптивная: на смартфоне повёрнута на 90° влево) */}
+      <div className="w-full overflow-auto py-2">
+        {showVertical ? (
           <div style={{
-            gridColumn: `1 / span ${floorWidth}`,
-            height: corridorHeight,
-            backgroundColor: '#e2e8f0',
-            border: '1px solid #cbd5e1',
-            borderRadius: '6px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#475569',
-            fontWeight: 'bold',
-            fontSize: '11px',
-            letterSpacing: '2px',
+            width: gridHeight,
+            height: gridWidth,
+            position: 'relative',
+            margin: '0 auto',
           }}>
-            КОРИДОР
-          </div>
+            <div style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              width: gridWidth,
+              height: gridHeight,
+              transform: 'translate(-50%, -50%) rotate(-90deg)',
+            }}>
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${floorWidth}, ${cellSize}px)`, gap: gridGap, justifyContent: 'start' }}>
+                {/* Верхний ряд (y=0) */}
+                {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 0))}
 
-          {/* Нижний ряд */}
-          {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 2))}
-        </div>
+                {/* Коридор (y=1) */}
+                <div style={{
+                  gridColumn: `1 / span ${floorWidth}`,
+                  height: corridorHeight,
+                  backgroundColor: '#e2e8f0',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '6px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#475569',
+                  fontWeight: 'bold',
+                  fontSize: '11px',
+                  letterSpacing: '2px',
+                }}>
+                  <span style={{ transform: 'rotate(90deg)', whiteSpace: 'nowrap' }}>КОРИДОР</span>
+                </div>
+
+                {/* Нижний ряд (y=2) */}
+                {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 2))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${floorWidth}, ${cellSize}px)`, gap: gridGap, justifyContent: 'start' }}>
+            {/* Верхний ряд (y=0) */}
+            {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 0))}
+
+            {/* Коридор (y=1) */}
+            <div style={{
+              gridColumn: `1 / span ${floorWidth}`,
+              height: corridorHeight,
+              backgroundColor: '#e2e8f0',
+              border: '1px solid #cbd5e1',
+              borderRadius: '6px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#475569',
+              fontWeight: 'bold',
+              fontSize: '11px',
+              letterSpacing: '2px',
+            }}>
+              КОРИДОР
+            </div>
+
+            {/* Нижний ряд (y=2) */}
+            {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 2))}
+          </div>
+        )}
       </div>
     </div>
   );
