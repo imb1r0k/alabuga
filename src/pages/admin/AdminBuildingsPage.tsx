@@ -594,7 +594,7 @@ export const AdminBuildingsPage: React.FC = () => {
 
       const currentRemote = rooms;
       for (const remoteR of currentRemote) {
-        const existsInLocal = localRooms.some((l) => Number(l.x_pos) === Number(remoteR.x_pos) && Number(l.y_pos) === Number(remoteR.y_pos));
+        const existsInLocal = localRooms.some((l) => l.id === remoteR.id);
         if (!existsInLocal) {
           await deleteAdminRoom(remoteR.id);
         }
