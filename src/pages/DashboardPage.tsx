@@ -9,16 +9,12 @@ import {
   Save, 
   X, 
   Send,
-  Phone,
   UserCheck,
   Building2,
-  ChevronRight,
-  MapPin,
   Clock,
   CheckCircle2,
   XCircle,
-  AlertCircle,
-  Megaphone
+  AlertCircle
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/Toast';
@@ -61,7 +57,6 @@ const DashboardPage = () => {
   // Чат
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [chatInput, setChatInput] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
 
   // Календарь
   const [calendarEvents, setCalendarEvents] = useState<any[]>([]);
