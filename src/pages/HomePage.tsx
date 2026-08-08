@@ -32,11 +32,9 @@ export const HomePage: React.FC = () => {
       .finally(() => setLoadingBuildings(false));
   }, []);
 
-  const handleBuildingChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const id = Number(e.target.value);
-    setSelectedBuildingId(id);
-    const b = buildings.find((b) => b.id === id);
-    setSelectedBuildingName(b?.name || '');
+  const handleBuildingSelect = (building: any) => {
+    setSelectedBuildingId(building.id);
+    setSelectedBuildingName(building.name);
     setSelectedRoom(null);
   };
 
@@ -44,6 +42,22 @@ export const HomePage: React.FC = () => {
     setSelectedRoom(room);
     setSelectedBuildingName(building.name);
     setSelectedFloorNumber(floor.floor_number);
+  };
+
+  const getGenderLabel = (gender: string) => {
+    if (gender === 'M') return 'Мальчики';
+    if (gender === 'F') return 'Девочки';
+    return 'Смешанный';
+  };
+
+  const getGenderColors = (gender: string) => {
+    if (gender === 'M') {
+      return { bg: '#e0f2fe', border: '#0284c7', text: '#0c4a6e' };
+    }
+    if (gender === 'F') {
+      return { bg: '#fce7f3', border: '#ec4899', text: '#831843' };
+    }
+    return { bg: '#f3e8ff', border: '#8b5cf6', text: '#6b21a8' };
   };
 
   return (
@@ -147,20 +161,41 @@ export const HomePage: React.FC = () => {
           <p style={{ color: '#94a3b8' }}>Корпуса ещё не созданы. Загляните позже.</p>
         ) : (
           <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
-              <label style={{ fontSize: '14px', fontWeight: 600, color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {/* Плитки выбора корпуса */}
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ fontSize: '14px', fontWeight: 600, color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
                 <Building2 size={18} color="#0284c7" />
-                Корпус:
+                Выберите корпус:
               </label>
-              <select
-                value={selectedBuildingId || ''}
-                onChange={handleBuildingChange}
-                style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', minWidth: '200px' }}
-              >
-                {buildings.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
+                {buildings.map((b) => {
+                  const isSelected = selectedBuildingId === b.id;
+                  const leftPlaces = (b.total_capacity || 0) - (b.occupied_places || 0);
+                  const colors = getGenderColors(b.gender);
+                  return (
+                    <div
+                      key={b.id}
+                      onClick={() => handleBuildingSelect(b)}
+                      style={{
+                        backgroundColor: colors.bg,
+                        border: `2px solid ${isSelected ? '#0284c7' : colors.border}`,
+                        borderRadius: '12px',
+                        padding: '16px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        boxShadow: isSelected ? '0 4px 8px rgba(0,0,0,0.15)' : '0 1px 3px rgba(0,0,0,0.08)',
+                        transform: isSelected ? 'scale(1.02)' : 'scale(1)',
+                      }}
+                    >
+                      <div style={{ fontWeight: 'bold', fontSize: '16px', color: colors.text, marginBottom: '6px' }}>{b.name}</div>
+                      <div style={{ fontSize: '13px', color: colors.text, opacity: 0.8 }}>{getGenderLabel(b.gender)}</div>
+                      <div style={{ fontSize: '14px', color: colors.text, fontWeight: 600, marginTop: '8px' }}>
+                        Осталось {leftPlaces} из {b.total_capacity || 0} мест
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
             {selectedBuildingId && (

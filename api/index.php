@@ -840,7 +840,32 @@ try {
 
     if ($uri === 'public/buildings') {
         $stmt = $pdo->query("SELECT * FROM buildings ORDER BY id ASC");
-        jsonResponse($stmt->fetchAll());
+        $buildings = $stmt->fetchAll();
+        $result = [];
+        foreach ($buildings as $b) {
+            // Суммарная вместимость
+            $capStmt = $pdo->prepare("SELECT COALESCE(SUM(capacity),0) FROM rooms WHERE building_id = ? AND is_technical = 0 AND room_type = 'room'");
+            $capStmt->execute([$b['id']]);
+            $total_capacity = (int)$capStmt->fetchColumn();
+
+            // Занятые места (одобренные брони)
+            $occStmt = $pdo->prepare("
+                SELECT COUNT(*) FROM bookings b
+                JOIN rooms r ON b.room_id = r.id
+                WHERE r.building_id = ? AND b.status IN ('approved','approved_bot')
+            ");
+            $occStmt->execute([$b['id']]);
+            $occupied = (int)$occStmt->fetchColumn();
+
+            $result[] = [
+                'id' => $b['id'],
+                'name' => $b['name'],
+                'gender' => $b['gender'],
+                'total_capacity' => $total_capacity,
+                'occupied_places' => $occupied,
+            ];
+        }
+        jsonResponse($result);
     }
 
     if ($uri === 'public/layout') {
