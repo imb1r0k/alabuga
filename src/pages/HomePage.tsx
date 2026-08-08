@@ -1,12 +1,50 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Zap, CheckCircle, ArrowRight } from 'lucide-react';
+import { Shield, Zap, CheckCircle, ArrowRight, Building2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
+import { getPublicBuildings } from '../services/api';
+import { PublicFloorMap } from '../components/PublicFloorMap';
+import { BookingModal } from '../components/BookingModal';
 
 export const HomePage: React.FC = () => {
   const { isAuthenticated } = useAuth();
   const { hero } = useSettings();
+
+  // Бронирование
+  const [buildings, setBuildings] = useState<any[]>([]);
+  const [selectedBuildingId, setSelectedBuildingId] = useState<number | null>(null);
+  const [selectedRoom, setSelectedRoom] = useState<any>(null);
+  const [selectedBuildingName, setSelectedBuildingName] = useState('');
+  const [selectedFloorNumber, setSelectedFloorNumber] = useState(0);
+  const [loadingBuildings, setLoadingBuildings] = useState(false);
+
+  useEffect(() => {
+    getPublicBuildings()
+      .then((data) => {
+        setBuildings(data);
+        if (data.length > 0) {
+          setSelectedBuildingId(data[0].id);
+          setSelectedBuildingName(data[0].name);
+        }
+      })
+      .catch((err) => console.error(err))
+      .finally(() => setLoadingBuildings(false));
+  }, []);
+
+  const handleBuildingChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const id = Number(e.target.value);
+    setSelectedBuildingId(id);
+    const b = buildings.find((b) => b.id === id);
+    setSelectedBuildingName(b?.name || '');
+    setSelectedRoom(null);
+  };
+
+  const handleRoomSelect = (room: any, building: any, floor: any) => {
+    setSelectedRoom(room);
+    setSelectedBuildingName(building.name);
+    setSelectedFloorNumber(floor.floor_number);
+  };
 
   return (
     <div style={{ padding: '32px 24px', width: '100%' }}>
@@ -95,6 +133,55 @@ export const HomePage: React.FC = () => {
           <p style={{ fontSize: '14px', color: '#475569' }}>Общие чаты, календари событий и совместное расселение команд.</p>
         </div>
       </div>
+
+      {/* Блок бронирования комнаты */}
+      <div className="card" style={{ marginBottom: '48px' }}>
+        <div style={{ marginBottom: '24px' }}>
+          <h2 style={{ fontSize: '24px', fontWeight: 'bold', color: '#0f172a', marginBottom: '8px' }}>Выберите комнату</h2>
+          <p style={{ fontSize: '14px', color: '#64748b' }}>Просмотрите доступные комнаты в корпусах и нажмите на интересующую для бронирования.</p>
+        </div>
+
+        {loadingBuildings ? (
+          <p>Загрузка корпусов...</p>
+        ) : buildings.length === 0 ? (
+          <p style={{ color: '#94a3b8' }}>Корпуса ещё не созданы. Загляните позже.</p>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
+              <label style={{ fontSize: '14px', fontWeight: 600, color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Building2 size={18} color="#0284c7" />
+                Корпус:
+              </label>
+              <select
+                value={selectedBuildingId || ''}
+                onChange={handleBuildingChange}
+                style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', minWidth: '200px' }}
+              >
+                {buildings.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {selectedBuildingId && (
+              <PublicFloorMap
+                buildingId={selectedBuildingId}
+                onRoomSelect={handleRoomSelect}
+              />
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Модальное окно бронирования */}
+      {selectedRoom && (
+        <BookingModal
+          room={selectedRoom}
+          buildingName={selectedBuildingName}
+          floorNumber={selectedFloorNumber}
+          onClose={() => setSelectedRoom(null)}
+        />
+      )}
     </div>
   );
 };

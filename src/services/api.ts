@@ -55,6 +55,26 @@ export const getAdminStats = async () => {
   return response.data;
 };
 
+// ─── Публичные данные для бронирования ───────────────────────────────────────
+
+// Получить список корпусов (публично)
+export const getPublicBuildings = async () => {
+  const response = await api.get('/public/buildings');
+  return response.data;
+};
+
+// Получить макет корпуса (здание, этажи, комнаты с занятостью)
+export const getPublicLayout = async (buildingId: number) => {
+  const response = await api.get(`/public/layout?building_id=${buildingId}`);
+  return response.data;
+};
+
+// Отправить заявку на бронирование (с входом или регистрацией)
+export const bookRoom = async (payload: any) => {
+  const response = await api.post('/book', payload);
+  return response.data;
+};
+
 // ─── Экспорт (Админка) ───────────────────────────────────────────────────────
 
 export const getExportBookings = async () => {
