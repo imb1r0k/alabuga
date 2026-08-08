@@ -654,7 +654,7 @@ export const AdminBuildingsPage: React.FC = () => {
         onDragOver={(e) => isEditLayout && e.preventDefault()}
         onDrop={(e) => isEditLayout && handleDrop(e, x, y)}
         style={{
-          height: '90px',
+          height: '110px',
           width: '100%',
           border: room ? `2px solid ${tmpl?.borderColor || '#0284c7'}` : '2px dashed #cbd5e1',
           borderRadius: '8px',
@@ -665,7 +665,7 @@ export const AdminBuildingsPage: React.FC = () => {
           alignItems: 'center',
           justifyContent: 'center',
           cursor: 'pointer',
-          fontSize: '11px',
+          fontSize: '13px',
           padding: '4px',
           textAlign: 'center',
           position: 'relative',
@@ -674,7 +674,7 @@ export const AdminBuildingsPage: React.FC = () => {
       >
         {room && (
           <div style={{ position: 'absolute', top: '3px', right: '4px', display: 'flex', alignItems: 'center', gap: '3px' }}>
-            <GenderBadge gender={effectiveRoomGender} size={15} />
+            <GenderBadge gender={effectiveRoomGender} size={18} />
             {isEditLayout && (
               <button
                 onClick={(e) => {
@@ -693,11 +693,11 @@ export const AdminBuildingsPage: React.FC = () => {
 
         {room ? (
           <div style={{ transform: showVertical ? 'rotate(90deg)' : 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-            <IconComp size={18} style={{ marginBottom: '2px', marginTop: '4px' }} />
+            <IconComp size={24} style={{ marginBottom: '3px', marginTop: '4px' }} />
             <strong>{room.room_number || room.name}</strong>
 
             {room.room_type === 'room' && (
-              <span style={{ fontSize: '10px', marginTop: '2px', fontWeight: 600, color: bookedCount >= room.capacity ? '#dc2626' : '#16a34a' }}>
+              <span style={{ fontSize: '12px', marginTop: '2px', fontWeight: 600, color: bookedCount >= room.capacity ? '#dc2626' : '#16a34a' }}>
                 {bookedCount} / {room.capacity}
               </span>
             )}
@@ -726,15 +726,15 @@ export const AdminBuildingsPage: React.FC = () => {
                     }}
                     title={`Повернуть: ${dVal}`}
                   >
-                    <IconD size={11} />
+                    <IconD size={14} />
                   </button>
                 ))}
               </div>
             )}
           </div>
         ) : (
-          <div style={{ transform: showVertical ? 'rotate(90deg)' : 'none', color: '#94a3b8', fontSize: '11px', textAlign: 'center' }}>
-            <span style={{ fontSize: '10px', display: 'block', fontWeight: 'bold', color: '#cbd5e1' }}>№ {calcRoomNum}</span>
+          <div style={{ transform: showVertical ? 'rotate(90deg)' : 'none', color: '#94a3b8', fontSize: '13px', textAlign: 'center' }}>
+            <span style={{ fontSize: '12px', display: 'block', fontWeight: 'bold', color: '#cbd5e1' }}>№ {calcRoomNum}</span>
             {isEditLayout ? '+ Пусто' : 'Свободно'}
           </div>
         )}
@@ -745,10 +745,10 @@ export const AdminBuildingsPage: React.FC = () => {
   const floorWidth = Number(selectedFloor?.width) || 8;
 
   // Размеры горизонтальной сетки этажа (нужны для корректного поворота на 90° для смартфонов)
-  const cellSize = 115;
-  const corridorHeight = 32;
-  const gridGap = 8;
-  const gridHeight = 90 * 2 + corridorHeight + gridGap * 2; // 228 — высота сетки по вертикали
+  const cellSize = 145;
+  const corridorHeight = 40;
+  const gridGap = 10;
+  const gridHeight = 110 * 2 + corridorHeight + gridGap * 2; // высота сетки по вертикали
   const gridWidth = floorWidth * cellSize + (floorWidth - 1) * gridGap; // ширина сетки
 
   return (
