@@ -969,7 +969,11 @@ try {
         $isNewUser = false;
         $rawPassword = null;
 
-        if ($mode === 'register') {
+        if ($mode === 'existing') {
+            // Пользователь уже авторизован – берём его из токена
+            $user = requireAuth($pdo);
+            $isNewUser = false;
+        } elseif ($mode === 'register') {
             // Регистрация нового пользователя
             $firstName = trim($data['first_name'] ?? '');
             $lastName  = trim($data['last_name'] ?? '');
