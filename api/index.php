@@ -836,6 +836,173 @@ try {
         jsonError('Метод не поддерживается', 405);
     }
 
+    // ─── Публичные данные для бронирования ──────────────────────────────────
+
+    if ($uri === 'public/buildings') {
+        $stmt = $pdo->query("SELECT * FROM buildings ORDER BY id ASC");
+        jsonResponse($stmt->fetchAll());
+    }
+
+    if ($uri === 'public/layout') {
+        $buildingId = (int)($_GET['building_id'] ?? 0);
+        $stmt = $pdo->prepare("SELECT * FROM buildings WHERE id = ?");
+        $stmt->execute([$buildingId]);
+        $building = $stmt->fetch();
+        if (!$building) jsonError('Корпус не найден', 404);
+
+        $floors = $pdo->prepare("SELECT * FROM floors WHERE building_id = ? ORDER BY floor_number ASC");
+        $floors->execute([$buildingId]);
+        $floorsData = [];
+
+        foreach ($floors->fetchAll() as $floor) {
+            $rooms = $pdo->prepare("
+                SELECT r.*,
+                       (SELECT COUNT(*) FROM bookings b
+                        WHERE b.room_id = r.id AND b.status IN ('approved','approved_bot')) as occupied
+                FROM rooms r
+                WHERE r.floor_id = ?
+                ORDER BY r.y_pos ASC, r.x_pos ASC
+            ");
+            $rooms->execute([$floor['id']]);
+            $floorsData[] = [
+                'id' => (int)$floor['id'],
+                'floor_number' => (int)$floor['floor_number'],
+                'width' => (int)$floor['width'],
+                'start_room_number' => $floor['start_room_number'],
+                'room_order_type' => $floor['room_order_type'],
+                'gender' => $floor['gender'],
+                'rooms' => array_map(function($r) {
+                    $r['occupied'] = (int)$r['occupied'];
+                    return $r;
+                }, $rooms->fetchAll()),
+            ];
+        }
+
+        jsonResponse([
+            'building' => [
+                'id' => (int)$building['id'],
+                'name' => $building['name'],
+                'gender' => $building['gender'],
+            ],
+            'floors' => $floorsData,
+        ]);
+    }
+
+    if ($uri === 'book') {
+        if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
+
+        $mode = $data['mode'] ?? 'login';
+        $roomId = (int)($data['room_id'] ?? 0);
+
+        if (!$roomId) jsonError('Комната не выбрана', 400);
+
+        // Проверяем комнату
+        $stmt = $pdo->prepare("SELECT r.*, bu.name as building_name, f.floor_number FROM rooms r JOIN buildings bu ON r.building_id = bu.id JOIN floors f ON r.floor_id = f.id WHERE r.id = ?");
+        $stmt->execute([$roomId]);
+        $room = $stmt->fetch();
+        if (!$room) jsonError('Комната не найдена', 404);
+
+        // Авторизация или регистрация
+        $user = null;
+        $isNewUser = false;
+        $rawPassword = null;
+
+        if ($mode === 'register') {
+            // Регистрация нового пользователя
+            $firstName = trim($data['first_name'] ?? '');
+            $lastName  = trim($data['last_name'] ?? '');
+            $phone     = trim($data['phone'] ?? '');
+            $password  = trim($data['password'] ?? '');
+            $customLogin = trim($data['login'] ?? '');
+
+            $errors = [];
+            if (!$firstName) $errors[] = 'Имя обязательно';
+            if (!$lastName) $errors[] = 'Фамилия обязательна';
+            if (!$phone) $errors[] = 'Номер телефона обязателен';
+            if (strlen($password) < 6) $errors[] = 'Пароль должен быть минимум 6 символов';
+            $phoneDigits = preg_replace('/\D/', '', $phone);
+            if (strlen($phoneDigits) < 10) $errors[] = 'Укажите корректный номер телефона';
+            if ($errors) jsonError(implode('. ', $errors), 400);
+
+            // Логин (уникальный)
+            $finalLogin = $customLogin ?: ('u' . substr($phoneDigits, -8));
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE login = ?");
+            $stmt->execute([$finalLogin]);
+            if ($stmt->fetchColumn() > 0) {
+                if ($customLogin) jsonError('Логин уже занят', 400);
+                $finalLogin = 'u' . $phoneDigits . rand(10, 99);
+            }
+
+            $fullName = $lastName . ' ' . $firstName;
+            $hash = password_hash($password, PASSWORD_DEFAULT);
+            $stmt = $pdo->prepare("INSERT INTO users (first_name, last_name, name, login, phone, password, role, status) VALUES (?, ?, ?, ?, ?, ?, 'user', 'active')");
+            $stmt->execute([$firstName, $lastName, $fullName, $finalLogin, $phone, $hash]);
+            $userId = (int)$pdo->lastInsertId();
+
+            $user = [
+                'id' => $userId,
+                'first_name' => $firstName,
+                'last_name' => $lastName,
+                'name' => $fullName,
+                'login' => $finalLogin,
+                'phone' => $phone,
+                'role' => 'user',
+                'status' => 'active',
+                'password' => $password, // возвращаем для показа
+            ];
+            $isNewUser = true;
+        } else {
+            // Авторизация
+            $loginInput = trim($data['login'] ?? $data['phone'] ?? '');
+            $password   = trim($data['password'] ?? '');
+            if (!$loginInput || !$password) jsonError('Введите логин/телефон и пароль', 400);
+
+            $phoneDigits = preg_replace('/\D/', '', $loginInput);
+            $stmt = $pdo->prepare("
+                SELECT * FROM users
+                WHERE (login = :input OR phone = :input OR (CHAR_LENGTH(:digits) >= 10 AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, '+', ''), ' ', ''), '(', ''), ')', ''), '-', '') LIKE CONCAT('%', :digits2)))
+                  AND status = 'active'
+                LIMIT 1
+            ");
+            $stmt->execute([
+                'input'   => $loginInput,
+                'digits'  => $phoneDigits,
+                'digits2' => $phoneDigits,
+            ]);
+            $user = $stmt->fetch();
+            if (!$user || !password_verify($password, $user['password'])) {
+                jsonError('Неверный логин/телефон или пароль', 401);
+            }
+            unset($user['password']);
+        }
+
+        // Создаём токен
+        $token = bin2hex(random_bytes(32));
+        $expiresAt = date('Y-m-d H:i:s', strtotime('+30 days'));
+        $stmt = $pdo->prepare("INSERT INTO tokens (user_id, token, expires_at) VALUES (?, ?, ?)");
+        $stmt->execute([$user['id'], $token, $expiresAt]);
+
+        // Создаём бронь
+        $stmt = $pdo->prepare("INSERT INTO bookings (user_id, room_id, status) VALUES (?, ?, 'pending')");
+        $stmt->execute([$user['id'], $roomId]);
+        $bookingId = (int)$pdo->lastInsertId();
+
+        $booking = [
+            'id' => $bookingId,
+            'room_number' => $room['room_number'],
+            'building_name' => $room['building_name'],
+            'floor_number' => $room['floor_number'],
+            'status' => 'pending',
+        ];
+
+        jsonResponse([
+            'token' => $token,
+            'user' => $user,
+            'booking' => $booking,
+            'new_user' => $isNewUser,
+        ]);
+    }
+
     // ─── Маршруты Админ-панели ──────────────────────────────────────────────
 
     if (strpos($uri, 'admin/') === 0) {
