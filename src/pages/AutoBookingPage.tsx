@@ -39,6 +39,9 @@ export const AutoBookingPage: React.FC = () => {
   const [password, setPassword] = useState('');
   const [lastName, setLastName] = useState(user?.last_name || '');
   const [firstName, setFirstName] = useState(user?.first_name || '');
+  const [patronymic, setPatronymic] = useState(user?.patronymic || '');
+  const [showPatronymic, setShowPatronymic] = useState(false);
+  const [manualPassword, setManualPassword] = useState(false);
   const [phone, setPhone] = useState(user?.phone || '');
   const [regLogin, setRegLogin] = useState(user?.login || '');
   const [passwordConfirm, setPasswordConfirm] = useState('');
@@ -96,23 +99,27 @@ export const AutoBookingPage: React.FC = () => {
           setLoading(false);
           return;
         }
-        if (password.length < 6) {
-          setError('Пароль должен быть минимум 6 символов');
-          setLoading(false);
-          return;
-        }
-        if (password !== passwordConfirm) {
-          setError('Пароли не совпадают');
-          setLoading(false);
-          return;
+        // Проверяем пароль только если пользователь решил указать свой
+        if (manualPassword) {
+          if (password.length < 6) {
+            setError('Пароль должен быть минимум 6 символов');
+            setLoading(false);
+            return;
+          }
+          if (password !== passwordConfirm) {
+            setError('Пароли не совпадают');
+            setLoading(false);
+            return;
+          }
         }
         payload = {
           ...payload,
           mode: 'register',
           first_name: firstName,
           last_name: lastName,
+          patronymic,
           phone,
-          password,
+          password: manualPassword ? password : '',
           login: regLogin.trim(),
         };
         const response = await autoBook(payload);
@@ -302,18 +309,75 @@ export const AutoBookingPage: React.FC = () => {
                               <input type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} disabled={loading} />
                             </div>
                           </div>
+
+                          {/* Переключатель «Укажу отчество» */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '14px', color: '#334155' }}>
+                              <input
+                                type="checkbox"
+                                checked={showPatronymic}
+                                onChange={(e) => setShowPatronymic(e.target.checked)}
+                                disabled={loading}
+                                style={{ width: '18px', height: '18px' }}
+                              />
+                              Укажу отчество
+                            </label>
+                          </div>
+
+                          {showPatronymic && (
+                            <div className="input-group">
+                              <label>Отчество (необязательно)</label>
+                              <input
+                                type="text"
+                                value={patronymic}
+                                onChange={(e) => setPatronymic(e.target.value)}
+                                placeholder="Например, Иванович"
+                                disabled={loading}
+                              />
+                            </div>
+                          )}
+
                           <div className="input-group">
                             <label>Номер телефона</label>
                             <input type="tel" value={phone} onChange={handlePhoneChange} placeholder="+7 (___) ___-__-__" disabled={loading} />
                           </div>
-                          <div className="input-group">
-                            <label>Пароль (минимум 6 символов)</label>
-                            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={loading} />
+
+                          {/* Переключатель «Придумаю пароль сам» */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '14px', color: '#334155' }}>
+                              <input
+                                type="checkbox"
+                                checked={manualPassword}
+                                onChange={(e) => {
+                                  setManualPassword(e.target.checked);
+                                  if (!e.target.checked) {
+                                    setPassword('');
+                                    setPasswordConfirm('');
+                                  }
+                                }}
+                                disabled={loading}
+                                style={{ width: '18px', height: '18px' }}
+                              />
+                              Придумаю пароль сам
+                            </label>
                           </div>
-                          <div className="input-group">
-                            <label>Повторите пароль</label>
-                            <input type="password" value={passwordConfirm} onChange={(e) => setPasswordConfirm(e.target.value)} disabled={loading} />
-                          </div>
+
+                          {manualPassword ? (
+                            <>
+                              <div className="input-group">
+                                <label>Пароль (минимум 6 символов)</label>
+                                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={loading} />
+                              </div>
+                              <div className="input-group">
+                                <label>Повторите пароль</label>
+                                <input type="password" value={passwordConfirm} onChange={(e) => setPasswordConfirm(e.target.value)} disabled={loading} />
+                              </div>
+                            </>
+                          ) : (
+                            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '14px' }}>
+                              🔑 Система автоматически сгенерирует пароль для вашего аккаунта.
+                            </p>
+                          )}
                         </>
                       )}
                       <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: '100%', padding: '12px', fontSize: '15px' }}>
@@ -354,6 +418,7 @@ export const AutoBookingPage: React.FC = () => {
               <div style={{ fontSize: '14px', color: '#664d03', lineHeight: '1.8' }}>
                 <p><strong>Фамилия:</strong> {result.user.last_name}</p>
                 <p><strong>Имя:</strong> {result.user.first_name}</p>
+                {result.user.patronymic && <p><strong>Отчество:</strong> {result.user.patronymic}</p>}
                 <p><strong>Логин:</strong> <strong style={{ backgroundColor: '#fff', padding: '2px 6px', borderRadius: '4px' }}>{result.user.login}</strong></p>
                 <p><strong>Пароль:</strong> <strong style={{ backgroundColor: '#fff', padding: '2px 6px', borderRadius: '4px' }}>{result.user.password}</strong></p>
               </div>

@@ -28,187 +28,6 @@ try {
     exit();
 }
 
-// ─── Инициализация БД ───────────────────────────────────────────────────────
-
-function initFreshDatabase($pdo) {
-    $sql = "
-        SET FOREIGN_KEY_CHECKS = 0;
-        DROP TABLE IF EXISTS `bookings`;
-        DROP TABLE IF EXISTS `rooms`;
-        DROP TABLE IF EXISTS `floors`;
-        DROP TABLE IF EXISTS `buildings`;
-        DROP TABLE IF EXISTS `tokens`;
-        DROP TABLE IF EXISTS `users`;
-        DROP TABLE IF EXISTS `settings`;
-        DROP TABLE IF EXISTS `team_members`;
-        DROP TABLE IF EXISTS `team_chat_messages`;
-        DROP TABLE IF EXISTS `team_calendar_events`;
-        DROP TABLE IF EXISTS `teams`;
-        SET FOREIGN_KEY_CHECKS = 1;
-
-        CREATE TABLE `settings` (
-          `key` VARCHAR(50) NOT NULL PRIMARY KEY,
-          `value` TEXT NULL,
-          `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-        INSERT INTO `settings` (`key`, `value`) VALUES
-        ('site_title', 'Алабуга - форум 2025'),
-        ('hero_badge', 'Форум 2025'),
-        ('hero_title', 'Добро пожаловать в систему проживания <span style=\"color: #38bdf8\">Алабуга</span>'),
-        ('hero_description', 'Интерактивный сервис бронирования жилых помещений, работы с командами и расселения участников форума в реальном времени.'),
-        ('hero_button_text', 'Войти / Зарегистрироваться'),
-        ('hero_button_text_auth', 'Перейти в личный кабинет');
-
-        CREATE TABLE `users` (
-          `id` INT AUTO_INCREMENT PRIMARY KEY,
-          `first_name` VARCHAR(100) NULL,
-          `last_name` VARCHAR(100) NULL,
-          `name` VARCHAR(255) NOT NULL,
-          `login` VARCHAR(100) NOT NULL UNIQUE,
-          `phone` VARCHAR(50) NULL,
-          `password` VARCHAR(255) NOT NULL,
-          `role` VARCHAR(50) NOT NULL DEFAULT 'user',
-          `status` ENUM('active','archived') NOT NULL DEFAULT 'active',
-          `team_name` VARCHAR(100) NULL,
-          `team_id` INT NULL DEFAULT NULL,
-          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (`team_id`) REFERENCES `teams`(`id`) ON DELETE SET NULL
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-        CREATE TABLE `tokens` (
-          `id` INT AUTO_INCREMENT PRIMARY KEY,
-          `user_id` INT NOT NULL,
-          `token` VARCHAR(255) NOT NULL UNIQUE,
-          `expires_at` DATETIME NOT NULL,
-          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-        CREATE TABLE `teams` (
-          `id` INT AUTO_INCREMENT PRIMARY KEY,
-          `name` VARCHAR(100) NOT NULL UNIQUE,
-          `description` TEXT NULL,
-          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-        CREATE TABLE `team_members` (
-          `id` INT AUTO_INCREMENT PRIMARY KEY,
-          `team_id` INT NOT NULL,
-          `user_id` INT NOT NULL,
-          `role` ENUM('captain','member') DEFAULT 'member',
-          `joined_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (`team_id`) REFERENCES `teams`(`id`) ON DELETE CASCADE,
-          FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-        CREATE TABLE `team_chat_messages` (
-          `id` INT AUTO_INCREMENT PRIMARY KEY,
-          `team_id` INT NOT NULL,
-          `user_id` INT NOT NULL,
-          `message` TEXT NOT NULL,
-          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (`team_id`) REFERENCES `teams`(`id`) ON DELETE CASCADE,
-          FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-        CREATE TABLE `team_calendar_events` (
-          `id` INT AUTO_INCREMENT PRIMARY KEY,
-          `team_id` INT NOT NULL,
-          `title` VARCHAR(255) NOT NULL,
-          `event_date` DATETIME NOT NULL,
-          `description` TEXT NULL,
-          `created_by` INT NULL,
-          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (`team_id`) REFERENCES `teams`(`id`) ON DELETE CASCADE,
-          FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-        CREATE TABLE `buildings` (
-          `id` INT AUTO_INCREMENT PRIMARY KEY,
-          `name` VARCHAR(255) NOT NULL,
-          `gender` ENUM('M', 'F', 'MIXED') NOT NULL DEFAULT 'MIXED',
-          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-        CREATE TABLE `floors` (
-          `id` INT AUTO_INCREMENT PRIMARY KEY,
-          `building_id` INT NOT NULL,
-          `floor_number` INT NOT NULL,
-          `width` INT NOT NULL DEFAULT 8,
-          `start_room_number` INT NULL DEFAULT NULL,
-          `room_order_type` VARCHAR(20) NOT NULL DEFAULT 'clockwise',
-          `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
-          `layout_data` LONGTEXT NULL,
-          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (`building_id`) REFERENCES `buildings`(`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-        CREATE TABLE `rooms` (
-          `id` INT AUTO_INCREMENT PRIMARY KEY,
-          `floor_id` INT NOT NULL,
-          `building_id` INT NOT NULL,
-          `room_number` VARCHAR(50) NOT NULL,
-          `name` VARCHAR(255) NULL,
-          `capacity` INT NOT NULL DEFAULT 2,
-          `is_technical` TINYINT(1) NOT NULL DEFAULT 0,
-          `room_type` VARCHAR(50) NOT NULL DEFAULT 'room',
-          `gender` ENUM('M', 'F', 'MIXED', 'DEFAULT') NOT NULL DEFAULT 'DEFAULT',
-          `x_pos` INT NOT NULL DEFAULT 0,
-          `y_pos` INT NOT NULL DEFAULT 0,
-          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (`floor_id`) REFERENCES `floors`(`id`) ON DELETE CASCADE,
-          FOREIGN KEY (`building_id`) REFERENCES `buildings`(`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-        CREATE TABLE `bookings` (
-          `id` INT AUTO_INCREMENT PRIMARY KEY,
-          `user_id` INT NOT NULL,
-          `room_id` INT NOT NULL,
-          `status` ENUM('pending', 'rejected', 'approved', 'approved_bot', 'archived') NOT NULL DEFAULT 'pending',
-          `comment` VARCHAR(500) NULL,
-          `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
-          FOREIGN KEY (`room_id`) REFERENCES `rooms`(`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ";
-
-    $pdo->exec($sql);
-
-    $adminHash = password_hash('admin123', PASSWORD_DEFAULT);
-    $stmt = $pdo->prepare("INSERT INTO `users` (`first_name`, `last_name`, `name`, `login`, `phone`, `password`, `role`, `status`, `team_name`) VALUES (?, ?, ?, ?, ?, ?, 'admin', 'active', ?)");
-    $stmt->execute(['Админ', 'Главный', 'Администратор', 'admin', '+79990000000', $adminHash, 'Оргкомитет']);
-}
-
-function ensureTablesExist($pdo) {
-    try {
-        $pdo->query("SELECT `status` FROM `users` LIMIT 1");
-        $pdo->query("SELECT `status` FROM `bookings` LIMIT 1");
-    } catch (Exception $e) {
-        // Проверяем, существует ли таблица users вообще
-        try {
-            $pdo->query("SELECT 1 FROM `users` LIMIT 1");
-            // Таблица есть, но нет колонки status — добавляем миграцию
-            try {
-                $pdo->exec("ALTER TABLE `users` ADD COLUMN `status` ENUM('active','archived') NOT NULL DEFAULT 'active' AFTER `role`");
-            } catch (Exception $e2) {}
-            try {
-                $pdo->exec("ALTER TABLE `bookings` MODIFY COLUMN `status` ENUM('pending', 'rejected', 'approved', 'approved_bot', 'archived') NOT NULL DEFAULT 'pending'");
-            } catch (Exception $e3) {}
-
-            // Добавляем колонку comment, если её нет
-            try {
-                $pdo->exec("ALTER TABLE `bookings` ADD COLUMN `comment` VARCHAR(500) NULL AFTER `status`");
-            } catch (Exception $e4) {}
-        } catch (Exception $e1) {
-            initFreshDatabase($pdo);
-        }
-    }
-}
-
-ensureTablesExist($pdo);
-
 // ─── Вспомогательные функции ─────────────────────────────────────────────────
 
 // Определяет пол по окончанию фамилии (простое правило)
@@ -221,6 +40,16 @@ function detectGenderByLastName($lastName) {
         return 'F';
     }
     return 'M';
+}
+
+// Генерирует случайный пароль указанной длины (по умолчанию 8 символов)
+function generatePassword($length = 8) {
+    $chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    $password = '';
+    for ($i = 0; $i < $length; $i++) {
+        $password .= $chars[random_int(0, strlen($chars) - 1)];
+    }
+    return $password;
 }
 
 function getBearerToken() {
@@ -289,13 +118,6 @@ $rawInput = file_get_contents('php://input');
 $data = json_decode($rawInput, true) ?: [];
 
 try {
-
-    // ─── Инициализация БД вручную ─────────────────────────────────────────
-
-    if ($uri === 'init-db') {
-        initFreshDatabase($pdo);
-        jsonResponse(['success' => true, 'message' => 'База данных успешно инициализирована заново. Логин: admin / Пароль: admin123']);
-    }
 
     // ─── Статистика для админ-панели ──────────────────────────────────────
 
@@ -555,6 +377,7 @@ try {
 
         $firstName = trim($data['first_name'] ?? '');
         $lastName  = trim($data['last_name'] ?? '');
+        $patronymic = trim($data['patronymic'] ?? '');
         $phone     = trim($data['phone'] ?? '');
         $password  = trim($data['password'] ?? '');
         $customLogin = trim($data['login'] ?? '');
@@ -564,12 +387,17 @@ try {
         if (!$firstName) $errors[] = 'Имя обязательно';
         if (!$lastName) $errors[] = 'Фамилия обязательна';
         if (!$phone) $errors[] = 'Номер телефона обязателен';
-        if (strlen($password) < 6) $errors[] = 'Пароль должен быть минимум 6 символов';
+        if ($password !== '' && strlen($password) < 6) $errors[] = 'Пароль должен быть минимум 6 символов';
 
         $phoneDigits = preg_replace('/\D/', '', $phone);
         if (strlen($phoneDigits) < 10) $errors[] = 'Укажите корректный номер телефона';
 
         if ($errors) jsonError(implode('. ', $errors), 400);
+
+        // Если пароль не указан — генерируем автоматически (8 символов)
+        if ($password === '') {
+            $password = generatePassword();
+        }
 
         // Определяем логин: используем указанный или генерируем
         if ($customLogin) {
@@ -595,11 +423,11 @@ try {
             jsonError('Пользователь с таким номером телефона уже зарегистрирован', 400);
         }
 
-        $fullName = $lastName . ' ' . $firstName;
+        $fullName = $lastName . ' ' . $firstName . ($patronymic ? ' ' . $patronymic : '');
         $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
 
-        $stmt = $pdo->prepare("INSERT INTO users (first_name, last_name, name, login, phone, password, role, status) VALUES (?, ?, ?, ?, ?, ?, 'user', 'active')");
-        $stmt->execute([$firstName, $lastName, $fullName, $finalLogin, $phone, $hashedPassword]);
+        $stmt = $pdo->prepare("INSERT INTO users (first_name, last_name, patronymic, name, login, phone, password, role, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'user', 'active')");
+        $stmt->execute([$firstName, $lastName, $patronymic, $fullName, $finalLogin, $phone, $hashedPassword]);
         $userId = (int)$pdo->lastInsertId();
 
         // Создаём токен
@@ -613,6 +441,7 @@ try {
             'id'         => $userId,
             'first_name' => $firstName,
             'last_name'  => $lastName,
+            'patronymic' => $patronymic,
             'name'       => $fullName,
             'login'      => $finalLogin,
             'phone'      => $phone,
@@ -977,6 +806,7 @@ try {
             // Регистрация нового пользователя
             $firstName = trim($data['first_name'] ?? '');
             $lastName  = trim($data['last_name'] ?? '');
+            $patronymic = trim($data['patronymic'] ?? '');
             $phone     = trim($data['phone'] ?? '');
             $password  = trim($data['password'] ?? '');
             $customLogin = trim($data['login'] ?? '');
@@ -985,10 +815,15 @@ try {
             if (!$firstName) $errors[] = 'Имя обязательно';
             if (!$lastName) $errors[] = 'Фамилия обязательна';
             if (!$phone) $errors[] = 'Номер телефона обязателен';
-            if (strlen($password) < 6) $errors[] = 'Пароль должен быть минимум 6 символов';
+            if ($password !== '' && strlen($password) < 6) $errors[] = 'Пароль должен быть минимум 6 символов';
             $phoneDigits = preg_replace('/\D/', '', $phone);
             if (strlen($phoneDigits) < 10) $errors[] = 'Укажите корректный номер телефона';
             if ($errors) jsonError(implode('. ', $errors), 400);
+
+            // Если пароль не указан — генерируем автоматически (8 символов)
+            if ($password === '') {
+                $password = generatePassword();
+            }
 
             // Логин (уникальный)
             $finalLogin = $customLogin ?: ('u' . substr($phoneDigits, -8));
@@ -999,16 +834,17 @@ try {
                 $finalLogin = 'u' . $phoneDigits . rand(10, 99);
             }
 
-            $fullName = $lastName . ' ' . $firstName;
+            $fullName = $lastName . ' ' . $firstName . ($patronymic ? ' ' . $patronymic : '');
             $hash = password_hash($password, PASSWORD_DEFAULT);
-            $stmt = $pdo->prepare("INSERT INTO users (first_name, last_name, name, login, phone, password, role, status) VALUES (?, ?, ?, ?, ?, ?, 'user', 'active')");
-            $stmt->execute([$firstName, $lastName, $fullName, $finalLogin, $phone, $hash]);
+            $stmt = $pdo->prepare("INSERT INTO users (first_name, last_name, patronymic, name, login, phone, password, role, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'user', 'active')");
+            $stmt->execute([$firstName, $lastName, $patronymic, $fullName, $finalLogin, $phone, $hash]);
             $userId = (int)$pdo->lastInsertId();
 
             $user = [
                 'id' => $userId,
                 'first_name' => $firstName,
                 'last_name' => $lastName,
+                'patronymic' => $patronymic,
                 'name' => $fullName,
                 'login' => $finalLogin,
                 'phone' => $phone,
@@ -1112,6 +948,7 @@ try {
         } elseif ($mode === 'register') {
             $firstName = trim($data['first_name'] ?? '');
             $lastName  = trim($data['last_name'] ?? '');
+            $patronymic = trim($data['patronymic'] ?? '');
             $phone     = trim($data['phone'] ?? '');
             $password  = trim($data['password'] ?? '');
             $customLogin = trim($data['login'] ?? '');
@@ -1120,10 +957,15 @@ try {
             if (!$firstName) $errors[] = 'Имя обязательно';
             if (!$lastName) $errors[] = 'Фамилия обязательна';
             if (!$phone) $errors[] = 'Номер телефона обязателен';
-            if (strlen($password) < 6) $errors[] = 'Пароль должен быть минимум 6 символов';
+            if ($password !== '' && strlen($password) < 6) $errors[] = 'Пароль должен быть минимум 6 символов';
             $phoneDigits = preg_replace('/\D/', '', $phone);
             if (strlen($phoneDigits) < 10) $errors[] = 'Укажите корректный номер телефона';
             if ($errors) jsonError(implode('. ', $errors), 400);
+
+            // Если пароль не указан — генерируем автоматически (8 символов)
+            if ($password === '') {
+                $password = generatePassword();
+            }
 
             $finalLogin = $customLogin ?: ('u' . substr($phoneDigits, -8));
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE login = ?");
@@ -1133,16 +975,17 @@ try {
                 $finalLogin = 'u' . $phoneDigits . rand(10, 99);
             }
 
-            $fullName = $lastName . ' ' . $firstName;
+            $fullName = $lastName . ' ' . $firstName . ($patronymic ? ' ' . $patronymic : '');
             $hash = password_hash($password, PASSWORD_DEFAULT);
-            $stmt = $pdo->prepare("INSERT INTO users (first_name, last_name, name, login, phone, password, role, status) VALUES (?, ?, ?, ?, ?, ?, 'user', 'active')");
-            $stmt->execute([$firstName, $lastName, $fullName, $finalLogin, $phone, $hash]);
+            $stmt = $pdo->prepare("INSERT INTO users (first_name, last_name, patronymic, name, login, phone, password, role, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'user', 'active')");
+            $stmt->execute([$firstName, $lastName, $patronymic, $fullName, $finalLogin, $phone, $hash]);
             $userId = (int)$pdo->lastInsertId();
 
             $user = [
                 'id' => $userId,
                 'first_name' => $firstName,
                 'last_name' => $lastName,
+                'patronymic' => $patronymic,
                 'name' => $fullName,
                 'login' => $finalLogin,
                 'phone' => $phone,
@@ -1452,7 +1295,7 @@ try {
 
         if ($uri === 'admin/users') {
             if ($method === 'GET') {
-                $stmt = $pdo->query("SELECT id, first_name, last_name, name, login as email, phone, role, status, team_name, team_id, created_at FROM users ORDER BY id DESC");
+                $stmt = $pdo->query("SELECT id, first_name, last_name, patronymic, name, login as email, phone, role, status, team_name, team_id, created_at FROM users ORDER BY id DESC");
                 jsonResponse($stmt->fetchAll());
             }
 
@@ -1460,6 +1303,7 @@ try {
                 $id = (int)($data['id'] ?? 0);
                 $firstName = trim($data['first_name'] ?? '');
                 $lastName = trim($data['last_name'] ?? '');
+                $patronymic = trim($data['patronymic'] ?? '');
                 $phone = trim($data['phone'] ?? '');
                 $login = trim($data['email'] ?? $data['login'] ?? '');
                 $role = trim($data['role'] ?? 'user');
@@ -1469,7 +1313,7 @@ try {
                 $password = trim($data['password'] ?? '');
 
                 if ($id > 0) {
-                    $fullName = $lastName . ' ' . $firstName;
+                    $fullName = $lastName . ' ' . $firstName . ($patronymic ? ' ' . $patronymic : '');
                     $teamNameResolved = $teamName;
                     if ($teamId > 0) {
                         $stmt = $pdo->prepare("SELECT name FROM teams WHERE id = ?");
@@ -1478,11 +1322,11 @@ try {
                     }
                     if ($password) {
                         $hash = password_hash($password, PASSWORD_DEFAULT);
-                        $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, name=?, phone=?, login=?, role=?, status=?, team_name=?, team_id=?, password=? WHERE id=?");
-                        $stmt->execute([$firstName, $lastName, $fullName, $phone, $login, $role, $status, $teamNameResolved, $teamId ?: null, $hash, $id]);
+                        $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, patronymic=?, name=?, phone=?, login=?, role=?, status=?, team_name=?, team_id=?, password=? WHERE id=?");
+                        $stmt->execute([$firstName, $lastName, $patronymic, $fullName, $phone, $login, $role, $status, $teamNameResolved, $teamId ?: null, $hash, $id]);
                     } else {
-                        $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, name=?, phone=?, login=?, role=?, status=?, team_name=?, team_id=? WHERE id=?");
-                        $stmt->execute([$firstName, $lastName, $fullName, $phone, $login, $role, $status, $teamNameResolved, $teamId ?: null, $id]);
+                        $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, patronymic=?, name=?, phone=?, login=?, role=?, status=?, team_name=?, team_id=? WHERE id=?");
+                        $stmt->execute([$firstName, $lastName, $patronymic, $fullName, $phone, $login, $role, $status, $teamNameResolved, $teamId ?: null, $id]);
                     }
 
                     // Синхронизируем team_members с назначенной командой
