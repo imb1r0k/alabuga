@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { SettingsProvider } from './contexts/SettingsContext';
+import { ToastProvider } from './components/Toast';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Header } from './components/Header';
 
@@ -17,71 +18,73 @@ import { AdminTeamsPage } from './pages/admin/AdminTeamsPage';
 function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <SettingsProvider>
-          <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-            <Header />
-            <main style={{ flex: 1 }}>
-              <Routes>
-                <Route path="/" element={<HomePage />} />
-                <Route path="/auth" element={<AuthPage />} />
-                <Route
-                  path="/dashboard"
-                  element={
-                    <ProtectedRoute>
-                      <DashboardPage />
-                    </ProtectedRoute>
-                  }
-                />
-                
-                {/* Маршруты админ-панели */}
-                <Route
-                  path="/admin-panel"
-                  element={
-                    <ProtectedRoute>
-                      <AdminHomePage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/admin-panel/users"
-                  element={
-                    <ProtectedRoute>
-                      <AdminUsersPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/admin-panel/buildings"
-                  element={
-                    <ProtectedRoute>
-                      <AdminBuildingsPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/admin-panel/bookings"
-                  element={
-                    <ProtectedRoute>
-                      <AdminBookingsPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/admin-panel/teams"
-                  element={
-                    <ProtectedRoute>
-                      <AdminTeamsPage />
-                    </ProtectedRoute>
-                  }
-                />
+      <ToastProvider>
+        <AuthProvider>
+          <SettingsProvider>
+            <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+              <Header />
+              <main style={{ flex: 1 }}>
+                <Routes>
+                  <Route path="/" element={<HomePage />} />
+                  <Route path="/auth" element={<AuthPage />} />
+                  <Route
+                    path="/dashboard"
+                    element={
+                      <ProtectedRoute>
+                        <DashboardPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  
+                  {/* Маршруты админ-панели */}
+                  <Route
+                    path="/admin-panel"
+                    element={
+                      <ProtectedRoute>
+                        <AdminHomePage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin-panel/users"
+                    element={
+                      <ProtectedRoute>
+                        <AdminUsersPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin-panel/buildings"
+                    element={
+                      <ProtectedRoute>
+                        <AdminBuildingsPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin-panel/bookings"
+                    element={
+                      <ProtectedRoute>
+                        <AdminBookingsPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin-panel/teams"
+                    element={
+                      <ProtectedRoute>
+                        <AdminTeamsPage />
+                      </ProtectedRoute>
+                    }
+                  />
 
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </main>
-          </div>
-        </SettingsProvider>
-      </AuthProvider>
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </main>
+            </div>
+          </SettingsProvider>
+        </AuthProvider>
+      </ToastProvider>
     </BrowserRouter>
   );
 }

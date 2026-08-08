@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Skeleton } from '../../components/Skeleton';
 import { AdminLayout } from '../../components/AdminLayout';
 import { useOrientation } from '../../hooks/useOrientation';
+import { useToast } from '../../components/Toast';
 import {
   getAdminBuildings,
   saveAdminBuilding,
@@ -42,9 +43,7 @@ import {
   Save,
   RotateCcw,
   Hash,
-  Pencil,
-  Smartphone,
-  Monitor
+  Pencil
 } from 'lucide-react';
 
 type TileType = 'room' | 'elevator' | 'stairs' | 'tech' | 'gen-start' | 'gen-turn' | 'gen-end';
@@ -104,10 +103,9 @@ export const AdminBuildingsPage: React.FC = () => {
   const [isEditLayout, setIsEditLayout] = useState(false);
   // Автоопределение ориентации устройства (портрет/ландшафт)
   const isPortrait = useOrientation();
-  // Предпочтение пользователя: auto | landscape | portrait
-  const [viewOverride, setViewOverride] = useState<'auto' | 'landscape' | 'portrait'>('auto');
-  // Показываем вертикальный (повёрнутый) макет на портретных устройствах или по выбору пользователя
-  const showVertical = viewOverride === 'portrait' || (viewOverride === 'auto' && isPortrait);
+  const { showToast } = useToast();
+  // Вертикальный (повёрнутый) макет показываем автоматически на портретных устройствах
+  const showVertical = isPortrait;
 
   const [buildingsLoading, setBuildingsLoading] = useState(false);
   const [savingBuilding, setSavingBuilding] = useState(false);
@@ -259,10 +257,11 @@ export const AdminBuildingsPage: React.FC = () => {
     try {
       await saveAdminBuilding({ name: newBuildingName, gender: newBuildingGender });
       setNewBuildingName('');
+      showToast('Корпус успешно создан', 'success');
       loadBuildings();
       loadAllBookingsAndRooms();
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      showToast('Ошибка при создании корпуса: ' + (err.response?.data?.error || err.message), 'error');
     } finally {
       setSavingBuilding(false);
     }
@@ -307,9 +306,10 @@ export const AdminBuildingsPage: React.FC = () => {
         room_order_type: newFloorOrderType,
       });
       setShowAddFloorModal(false);
+      showToast(`Этаж ${newFloorNumberInput} успешно создан`, 'success');
       handleSelectBuilding(selectedBuilding);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      showToast('Ошибка при создании этажа: ' + (err.response?.data?.error || err.message), 'error');
     }
   };
 
@@ -600,9 +600,9 @@ export const AdminBuildingsPage: React.FC = () => {
       setLocalRooms(updatedRooms);
       setHasUnsavedChanges(false);
       loadAllBookingsAndRooms();
-      alert('Макет этажа успешно сохранен в базе данных!');
+      showToast('Макет этажа успешно сохранен в базе данных!', 'success');
     } catch (err: any) {
-      alert('Ошибка при сохранении макета: ' + err.message);
+      showToast('Ошибка при сохранении макета: ' + err.message, 'error');
     } finally {
       setSavingLayout(false);
     }
@@ -745,7 +745,7 @@ export const AdminBuildingsPage: React.FC = () => {
   const floorWidth = Number(selectedFloor?.width) || 8;
 
   // Размеры горизонтальной сетки этажа (нужны для корректного поворота на 90° для смартфонов)
-  const cellSize = 95;
+  const cellSize = 115;
   const corridorHeight = 32;
   const gridGap = 8;
   const gridHeight = 90 * 2 + corridorHeight + gridGap * 2; // 228 — высота сетки по вертикали
@@ -757,10 +757,10 @@ export const AdminBuildingsPage: React.FC = () => {
         {buildingsLoading ? (
           <Skeleton width="100%" height={250} />
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '20px', gridTemplateAreas: '"sidebar main"' }} className="admin-buildings-grid">
+          <div style={{ display: 'grid', gridTemplateColumns: '230px 1fr', gap: '14px', gridTemplateAreas: '"sidebar main"' }} className="admin-buildings-grid">
             
             {/* Сайдбар выбора и создания корпуса */}
-            <div style={{ backgroundColor: '#fff', padding: '16px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', gridArea: 'sidebar' }}>
+            <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', gridArea: 'sidebar' }}>
               <h4 style={{ fontSize: '16px', marginBottom: '14px', color: '#1e293b' }}>Список корпусов</h4>
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
@@ -855,7 +855,7 @@ export const AdminBuildingsPage: React.FC = () => {
             </div>
 
             {/* Основной редактор этажей */}
-            <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', gridArea: 'main' }}>
+            <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', gridArea: 'main' }}>
               {selectedBuilding ? (
                 <div>
                   {/* Шапка корпуса */}
@@ -926,16 +926,6 @@ export const AdminBuildingsPage: React.FC = () => {
                       </button>
 
                       {/* Кнопка ручного переключения Вертикального/Горизонтального макета */}
-                      <button
-                        onClick={() => setViewOverride(showVertical ? 'landscape' : 'portrait')}
-                        className="btn btn-secondary"
-                        style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
-                        title="Переключить ориентацию макета этажа"
-                      >
-                        {showVertical ? <Monitor size={16} /> : <Smartphone size={16} />}
-                        <span className="hidden md:inline">{showVertical ? 'Горизонтально' : 'Вертикально'}</span>
-                      </button>
-
                       {isEditLayout && (
                         <button
                           onClick={() => setGenMode(!genMode)}

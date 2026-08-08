@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Skeleton } from '../../components/Skeleton';
 import { AdminLayout } from '../../components/AdminLayout';
+import { useToast } from '../../components/Toast';
 import {
   getAdminTeams,
   saveAdminTeam,
@@ -33,6 +34,8 @@ export const AdminTeamsPage: React.FC = () => {
   const [calendarEvents, setCalendarEvents] = useState<any[]>([]);
   const [newEventTitle, setNewEventTitle] = useState('');
   const [newEventDate, setNewEventDate] = useState('');
+
+  const { showToast } = useToast();
 
   useEffect(() => {
     loadTeams();
@@ -82,9 +85,10 @@ export const AdminTeamsPage: React.FC = () => {
       setNewTeamName('');
       setNewTeamDesc('');
       setShowCreateForm(false);
+      showToast('Команда успешно создана', 'success');
       loadTeams();
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      showToast('Ошибка при создании команды: ' + (err.response?.data?.error || err.message), 'error');
     }
   };
 
@@ -100,9 +104,10 @@ export const AdminTeamsPage: React.FC = () => {
     try {
       await saveAdminTeam({ id: editingTeam.id, name: teamName, description: teamDesc, action: 'update' });
       setEditingTeam(null);
+      showToast('Команда успешно обновлена', 'success');
       loadTeams();
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      showToast('Ошибка при обновлении команды: ' + (err.response?.data?.error || err.message), 'error');
     }
   };
 
@@ -111,9 +116,10 @@ export const AdminTeamsPage: React.FC = () => {
     try {
       await deleteAdminTeam(id);
       setDeleteConfirmId(null);
+      showToast('Команда удалена', 'success');
       loadTeams();
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      showToast('Ошибка при удалении команды: ' + (err.response?.data?.error || err.message), 'error');
     }
   };
 
@@ -125,8 +131,8 @@ export const AdminTeamsPage: React.FC = () => {
       setChatInput('');
       const newChat = await getAdminTeamChat(selectedTeam.id);
       setChatMessages(newChat);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      showToast('Ошибка при отправке сообщения: ' + (err.response?.data?.error || err.message), 'error');
     }
   };
 
@@ -143,8 +149,9 @@ export const AdminTeamsPage: React.FC = () => {
       setNewEventDate('');
       const newEvents = await getAdminTeamCalendar(selectedTeam.id);
       setCalendarEvents(newEvents);
-    } catch (err) {
-      console.error(err);
+      showToast('Событие добавлено в календарь', 'success');
+    } catch (err: any) {
+      showToast('Ошибка при добавлении события: ' + (err.response?.data?.error || err.message), 'error');
     }
   };
 
@@ -154,8 +161,9 @@ export const AdminTeamsPage: React.FC = () => {
       await deleteAdminTeamEvent(eventId);
       const newEvents = await getAdminTeamCalendar(selectedTeam.id);
       setCalendarEvents(newEvents);
-    } catch (err) {
-      console.error(err);
+      showToast('Событие удалено', 'success');
+    } catch (err: any) {
+      showToast('Ошибка при удалении события: ' + (err.response?.data?.error || err.message), 'error');
     }
   };
 

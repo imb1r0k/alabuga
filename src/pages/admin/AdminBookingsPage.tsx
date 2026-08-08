@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Skeleton } from '../../components/Skeleton';
 import { AdminLayout } from '../../components/AdminLayout';
+import { useToast } from '../../components/Toast';
 import { getAdminBookings, updateAdminBooking, getAllRooms } from '../../services/api';
 
 export const AdminBookingsPage: React.FC = () => {
@@ -10,6 +11,7 @@ export const AdminBookingsPage: React.FC = () => {
   const [allAvailableRooms, setAllAvailableRooms] = useState<any[]>([]);
   const [savingBooking, setSavingBooking] = useState(false);
   const [bookingMsg, setBookingMsg] = useState('');
+  const { showToast } = useToast();
 
   useEffect(() => {
     loadBookings();
@@ -40,9 +42,12 @@ export const AdminBookingsPage: React.FC = () => {
     try {
       await updateAdminBooking(selectedBooking);
       setBookingMsg('Бронирование обновлено');
+      showToast('Бронирование успешно обновлено', 'success');
       loadBookings();
     } catch (err: any) {
-      setBookingMsg('Ошибка: ' + (err.response?.data?.error || err.message));
+      const errorText = 'Ошибка: ' + (err.response?.data?.error || err.message);
+      setBookingMsg(errorText);
+      showToast(errorText, 'error');
     } finally {
       setSavingBooking(false);
     }

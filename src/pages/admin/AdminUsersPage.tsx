@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Skeleton } from '../../components/Skeleton';
 import { AdminLayout } from '../../components/AdminLayout';
+import { useToast } from '../../components/Toast';
 import { getAdminUsers, updateAdminUser, getUserDetails, getAdminTeams } from '../../services/api';
 
 export const AdminUsersPage: React.FC = () => {
@@ -22,6 +23,7 @@ export const AdminUsersPage: React.FC = () => {
   });
   const [msg, setMsg] = useState('');
   const [saving, setSaving] = useState(false);
+  const { showToast } = useToast();
 
   useEffect(() => {
     loadUsers();
@@ -78,9 +80,12 @@ export const AdminUsersPage: React.FC = () => {
     try {
       await updateAdminUser(userFormData);
       setMsg('Пользователь успешно обновлен');
+      showToast('Пользователь успешно обновлен', 'success');
       loadUsers();
     } catch (err: any) {
-      setMsg('Ошибка: ' + (err.response?.data?.error || err.message));
+      const errorText = 'Ошибка: ' + (err.response?.data?.error || err.message);
+      setMsg(errorText);
+      showToast(errorText, 'error');
     } finally {
       setSaving(false);
     }

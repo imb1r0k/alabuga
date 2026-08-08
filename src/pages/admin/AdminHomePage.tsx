@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useSettings } from '../../contexts/SettingsContext';
+import { useToast } from '../../components/Toast';
 import { AdminLayout } from '../../components/AdminLayout';
 
 export const AdminHomePage: React.FC = () => {
   const { siteTitle, hero, updateAllSettings } = useSettings();
+  const { showToast } = useToast();
 
   // Состояния для всех полей
   const [titleInput, setTitleInput] = useState(siteTitle);
@@ -39,8 +41,11 @@ export const AdminHomePage: React.FC = () => {
         hero_button_text_auth: btnTextAuthInput,
       });
       setMsg('Все настройки успешно сохранены!');
+      showToast('Все настройки успешно сохранены!', 'success');
     } catch (err: any) {
-      setMsg('Ошибка: ' + (err.response?.data?.error || err.message));
+      const errorText = 'Ошибка: ' + (err.response?.data?.error || err.message);
+      setMsg(errorText);
+      showToast(errorText, 'error');
     } finally {
       setSaving(false);
     }
