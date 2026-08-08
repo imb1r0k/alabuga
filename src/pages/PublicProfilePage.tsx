@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Users } from 'lucide-react';
+import { ArrowLeft, Users, MapPin, Clock, CheckCircle2 } from 'lucide-react';
 import { getPublicProfile } from '../services/api';
 
 export const PublicProfilePage: React.FC = () => {
@@ -22,7 +22,7 @@ export const PublicProfilePage: React.FC = () => {
   if (error) return <div style={{ textAlign: 'center', padding: '40px' }}><p style={{ color: '#ef4444' }}>{error}</p></div>;
   if (!profile) return null;
 
-  const { user, team, members } = profile;
+  const { user, team, members, booking } = profile;
 
   const socialFields = [
     { key: 'social_vk', label: 'VK' },
@@ -74,6 +74,29 @@ export const PublicProfilePage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {booking && (
+        <div className="card" style={{ marginBottom: '24px' }}>
+          <h3 style={{ margin: '0 0 16px', fontSize: '18px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <MapPin size={20} color="#0284c7" /> Проживание
+          </h3>
+          <div style={{ fontSize: '14px', lineHeight: 1.8 }}>
+            <p><strong>Корпус:</strong> {booking.building_name}</p>
+            <p><strong>Этаж:</strong> {booking.floor_number}</p>
+            <p><strong>Комната:</strong> №{booking.room_number}</p>
+            <p style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {booking.status === 'approved' || booking.status === 'approved_bot' ? (
+                <CheckCircle2 size={16} color="#16a34a" />
+              ) : (
+                <Clock size={16} color="#f59e0b" />
+              )}
+              <strong>Статус:</strong>&nbsp;
+              {booking.status === 'approved' ? 'Проживает' : booking.status === 'approved_bot' ? 'Проживает (подтверждено ботом)' : booking.status === 'pending' ? 'Ожидает подтверждения' : ''}
+            </p>
+            {booking.comment && <p><strong>Комментарий:</strong> {booking.comment}</p>}
+          </div>
+        </div>
+      )}
 
       {team && (
         <div className="card">
