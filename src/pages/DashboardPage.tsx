@@ -181,7 +181,7 @@ export const DashboardPage = () => {
         setMyBooking(null);
       }
     } catch (err) {
-      setBookingError('Не удалось загрузить статус бронирования');
+      console.error(err);
     }
   }, []);
 

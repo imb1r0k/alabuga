@@ -59,7 +59,7 @@ export const HomePage: React.FC = () => {
         } catch (err) {
           console.error(err);
         } finally {
-          setMyBookingLoading(false);
+          // загрузка не отслеживается
         }
       };
       fetchBooking();
@@ -67,7 +67,6 @@ export const HomePage: React.FC = () => {
       return () => clearInterval(interval);
     } else {
       setMyBooking(null);
-      setMyBookingLoading(false);
     }
   }, [isAuthenticated]);
 
