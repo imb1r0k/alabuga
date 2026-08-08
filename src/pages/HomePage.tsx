@@ -8,7 +8,7 @@ import { PublicFloorMap } from '../components/PublicFloorMap';
 import { BookingModal } from '../components/BookingModal';
 
 export const HomePage: React.FC = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const { hero } = useSettings();
 
   // Бронирование
@@ -21,6 +21,7 @@ export const HomePage: React.FC = () => {
 
   // Актуальная бронь пользователя
   const [myBooking, setMyBooking] = useState<any>(null);
+  const [myBookingLoading, setMyBookingLoading] = useState(false);
   const bookingSectionRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
 
@@ -35,12 +36,10 @@ export const HomePage: React.FC = () => {
   useEffect(() => {
     getPublicBuildings()
       .then((data) => {
-        // API может вернуть массив или объект с полем buildings
-        const buildingsList = Array.isArray(data) ? data : (data?.buildings || []);
-        setBuildings(buildingsList);
-        if (buildingsList.length > 0) {
-          setSelectedBuildingId(buildingsList[0].id);
-          setSelectedBuildingName(buildingsList[0].name);
+        setBuildings(data);
+        if (data.length > 0) {
+          setSelectedBuildingId(data[0].id);
+          setSelectedBuildingName(data[0].name);
         }
       })
       .catch((err) => console.error(err))
@@ -61,7 +60,7 @@ export const HomePage: React.FC = () => {
         } catch (err) {
           console.error(err);
         } finally {
-          // загрузка не отслеживается
+          setMyBookingLoading(false);
         }
       };
       fetchBooking();
@@ -69,6 +68,7 @@ export const HomePage: React.FC = () => {
       return () => clearInterval(interval);
     } else {
       setMyBooking(null);
+      setMyBookingLoading(false);
     }
   }, [isAuthenticated]);
 
