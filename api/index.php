@@ -1032,7 +1032,110 @@ try {
         $stmt = $pdo->prepare("INSERT INTO tokens (user_id, token, expires_at) VALUES (?, ?, ?)");
         $stmt->execute([$user['id'], $token, $expiresAt]);
 
-        // Проверяем наличие активного бронирования (не отклонённого и не архивного)
+        // (код book остаётся без изменений, но уже содержит проверку активной брони)
+        // Создаём бронь
+        $stmt = $pdo->prepare("INSERT INTO bookings (user_id, room_id, status) VALUES (?, ?, 'pending')");
+        $stmt->execute([$user['id'], $roomId]);
+        $bookingId = (int)$pdo->lastInsertId();
+
+        $booking = [
+            'id' => $bookingId,
+            'room_number' => $room['room_number'],
+            'building_name' => $room['building_name'],
+            'floor_number' => $room['floor_number'],
+            'status' => 'pending',
+        ];
+
+        jsonResponse([
+            'token' => $token,
+            'user' => $user,
+            'booking' => $booking,
+            'new_user' => $isNewUser,
+        ]);
+    }
+
+    // ─── Автоматическое бронирование (система выберет комнату) ─────────────
+
+    if ($uri === 'auto-book') {
+        if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
+
+        $mode = $data['mode'] ?? 'login';
+        $gender = strtoupper(trim($data['gender'] ?? ''));
+        if (!in_array($gender, ['M', 'F'], true)) jsonError('Пол обязателен (M или F)', 400);
+
+        // 1. Аутентификация / регистрация пользователя (как в /book)
+        $user = null;
+        $isNewUser = false;
+        $rawPassword = null;
+
+        if ($mode === 'register') {
+            $firstName = trim($data['first_name'] ?? '');
+            $lastName  = trim($data['last_name'] ?? '');
+            $phone     = trim($data['phone'] ?? '');
+            $password  = trim($data['password'] ?? '');
+            $customLogin = trim($data['login'] ?? '');
+
+            $errors = [];
+            if (!$firstName) $errors[] = 'Имя обязательно';
+            if (!$lastName) $errors[] = 'Фамилия обязательна';
+            if (!$phone) $errors[] = 'Номер телефона обязателен';
+            if (strlen($password) < 6) $errors[] = 'Пароль должен быть минимум 6 символов';
+            $phoneDigits = preg_replace('/\D/', '', $phone);
+            if (strlen($phoneDigits) < 10) $errors[] = 'Укажите корректный номер телефона';
+            if ($errors) jsonError(implode('. ', $errors), 400);
+
+            $finalLogin = $customLogin ?: ('u' . substr($phoneDigits, -8));
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE login = ?");
+            $stmt->execute([$finalLogin]);
+            if ($stmt->fetchColumn() > 0) {
+                if ($customLogin) jsonError('Логин уже занят', 400);
+                $finalLogin = 'u' . $phoneDigits . rand(10, 99);
+            }
+
+            $fullName = $lastName . ' ' . $firstName;
+            $hash = password_hash($password, PASSWORD_DEFAULT);
+            $stmt = $pdo->prepare("INSERT INTO users (first_name, last_name, name, login, phone, password, role, status) VALUES (?, ?, ?, ?, ?, ?, 'user', 'active')");
+            $stmt->execute([$firstName, $lastName, $fullName, $finalLogin, $phone, $hash]);
+            $userId = (int)$pdo->lastInsertId();
+
+            $user = [
+                'id' => $userId,
+                'first_name' => $firstName,
+                'last_name' => $lastName,
+                'name' => $fullName,
+                'login' => $finalLogin,
+                'phone' => $phone,
+                'role' => 'user',
+                'status' => 'active',
+                'password' => $password,
+            ];
+            $isNewUser = true;
+        } else {
+            // login
+            $loginInput = trim($data['login'] ?? $data['phone'] ?? '');
+            $password   = trim($data['password'] ?? '');
+            if (!$loginInput || !$password) jsonError('Введите логин/телефон и пароль', 400);
+
+            $phoneDigits = preg_replace('/\D/', '', $loginInput);
+            $stmt = $pdo->prepare("
+                SELECT * FROM users
+                WHERE (login = :input OR phone = :input OR (CHAR_LENGTH(:digits) >= 10 AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, '+', ''), ' ', ''), '(', ''), ')', ''), '-', '') LIKE CONCAT('%', :digits2)))
+                  AND status = 'active'
+                LIMIT 1
+            ");
+            $stmt->execute([
+                'input'   => $loginInput,
+                'digits'  => $phoneDigits,
+                'digits2' => $phoneDigits,
+            ]);
+            $user = $stmt->fetch();
+            if (!$user || !password_verify($password, $user['password'])) {
+                jsonError('Неверный логин/телефон или пароль', 401);
+            }
+            unset($user['password']);
+        }
+
+        // 2. Проверка активного бронирования
         $stmt = $pdo->prepare("
             SELECT b.id, b.status, b.comment, r.room_number, bu.name as building_name, f.floor_number
             FROM bookings b
@@ -1058,16 +1161,57 @@ try {
             );
         }
 
-        // Создаём бронь
+        // 3. Подбор доступной комнаты
+        function getAvailableRoom($pdo, $gender) {
+            // корпуса, подходящие по полу: MIXED или точное совпадение
+            $buildings = $pdo->prepare("SELECT * FROM buildings WHERE gender = 'MIXED' OR gender = ? ORDER BY id ASC");
+            $buildings->execute([$gender]);
+            foreach ($buildings as $building) {
+                $floors = $pdo->prepare("SELECT * FROM floors WHERE building_id = ? ORDER BY floor_number ASC");
+                $floors->execute([$building['id']]);
+                foreach ($floors as $floor) {
+                    // эффективный пол этажа
+                    $floorEffGender = $floor['gender'] != 'DEFAULT' ? $floor['gender'] : $building['gender'];
+                    $rooms = $pdo->prepare("SELECT * FROM rooms WHERE floor_id = ? AND room_type='room' AND is_technical=0 ORDER BY room_number ASC");
+                    $rooms->execute([$floor['id']]);
+                    foreach ($rooms as $room) {
+                        // эффективный пол комнаты
+                        $roomEffGender = $room['gender'] != 'DEFAULT' ? $room['gender'] : $floorEffGender;
+                        if ($roomEffGender != $gender) continue;
+                        // проверка на активные брони
+                        $stmt = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE room_id = ? AND status NOT IN ('rejected','archived')");
+                        $stmt->execute([$room['id']]);
+                        $cnt = $stmt->fetchColumn();
+                        if ($cnt == 0) {
+                            return ['room' => $room, 'building' => $building, 'floor' => $floor];
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        $available = getAvailableRoom($pdo, $gender);
+        if (!$available) {
+            jsonError('К сожалению, свободных комнат для этого пола сейчас нет. Попробуйте позже или выберите комнату вручную.', 404);
+        }
+
+        // 4. Создание токена и брони
+        $token = bin2hex(random_bytes(32));
+        $expiresAt = date('Y-m-d H:i:s', strtotime('+30 days'));
+        $stmt = $pdo->prepare("INSERT INTO tokens (user_id, token, expires_at) VALUES (?, ?, ?)");
+        $stmt->execute([$user['id'], $token, $expiresAt]);
+
+        $room = $available['room'];
         $stmt = $pdo->prepare("INSERT INTO bookings (user_id, room_id, status) VALUES (?, ?, 'pending')");
-        $stmt->execute([$user['id'], $roomId]);
+        $stmt->execute([$user['id'], $room['id']]);
         $bookingId = (int)$pdo->lastInsertId();
 
         $booking = [
             'id' => $bookingId,
             'room_number' => $room['room_number'],
-            'building_name' => $room['building_name'],
-            'floor_number' => $room['floor_number'],
+            'building_name' => $available['building']['name'],
+            'floor_number' => $available['floor']['floor_number'],
             'status' => 'pending',
         ];
 
@@ -1181,9 +1325,16 @@ try {
                 $id = (int)($data['id'] ?? 0);
                 $roomId = (int)($data['room_id'] ?? 0);
                 $status = trim($data['status'] ?? 'pending');
+                $comment = isset($data['comment']) ? trim($data['comment']) : null;
                 if ($id > 0) {
-                    $stmt = $pdo->prepare("UPDATE bookings SET room_id = ?, status = ? WHERE id = ?");
-                    $stmt->execute([$roomId, $status, $id]);
+                    // Обновляем room_id, статус и комментарий
+                    if ($comment !== null) {
+                        $stmt = $pdo->prepare("UPDATE bookings SET room_id = ?, status = ?, comment = ? WHERE id = ?");
+                        $stmt->execute([$roomId, $status, $comment, $id]);
+                    } else {
+                        $stmt = $pdo->prepare("UPDATE bookings SET room_id = ?, status = ? WHERE id = ?");
+                        $stmt->execute([$roomId, $status, $id]);
+                    }
                 }
                 jsonResponse(['success' => true]);
             }

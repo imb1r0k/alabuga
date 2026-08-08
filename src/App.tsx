@@ -10,6 +10,7 @@ import { HomePage } from './pages/HomePage';
 import { AuthPage } from './pages/AuthPage';
 import { DashboardPage } from './pages/DashboardPage';
 
+import { AutoBookingPage } from './pages/AutoBookingPage';
 import { AdminHomePage } from './pages/admin/AdminHomePage';
 import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 import { AdminBuildingsPage } from './pages/admin/AdminBuildingsPage';
@@ -38,6 +39,8 @@ function App() {
                     }
                   />
                   
+                  <Route path="/auto-booking" element={<AutoBookingPage />} />
+
                   {/* Маршруты админ-панели */}
                   <Route
                     path="/admin-panel"

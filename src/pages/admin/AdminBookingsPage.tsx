@@ -184,7 +184,19 @@ export const AdminBookingsPage: React.FC = () => {
                       <option value="approved">Одобрено</option>
                       <option value="approved_bot">Одобрено ботом</option>
                       <option value="rejected">Отклонено</option>
+                      <option value="archived">В архиве</option>
                     </select>
+                  </div>
+
+                  <div className="input-group" style={{ gridColumn: '1 / -1' }}>
+                    <label>Комментарий (при отклонении)</label>
+                    <textarea
+                      value={selectedBooking.comment || ''}
+                      onChange={(e) => setSelectedBooking({ ...selectedBooking, comment: e.target.value })}
+                      rows={3}
+                      placeholder="Причина отклонения, заметка для пользователя"
+                      style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd', fontFamily: 'inherit', resize: 'vertical' }}
+                    />
                   </div>
 
                   <div style={{ gridColumn: '1 / -1', marginTop: '10px' }}>

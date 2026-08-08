@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
-import { ArrowRight, Building2, MapPin, Clock, XCircle, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
+import { ArrowRight, Building2, MapPin, Clock, XCircle, CheckCircle2, AlertCircle, UserPlus } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { getPublicBuildings, getMyBooking } from '../services/api';
@@ -23,6 +23,15 @@ export const HomePage: React.FC = () => {
   const [myBooking, setMyBooking] = useState<any>(null);
   const [myBookingLoading, setMyBookingLoading] = useState(false);
   const bookingSectionRef = useRef<HTMLDivElement>(null);
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.state?.scrollToBooking) {
+      bookingSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
+      // Очищаем state, чтобы не прокручивать при обычных переходах
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
 
   useEffect(() => {
     getPublicBuildings()
@@ -39,13 +48,22 @@ export const HomePage: React.FC = () => {
 
   useEffect(() => {
     if (isAuthenticated) {
-      setMyBookingLoading(true);
-      getMyBooking()
-        .then((data) => setMyBooking(data?.booking || null))
-        .catch((err) => console.error(err))
-        .finally(() => setMyBookingLoading(false));
+      const fetchBooking = async () => {
+        try {
+          const data = await getMyBooking();
+          setMyBooking(data?.booking || null);
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setMyBookingLoading(false);
+        }
+      };
+      fetchBooking();
+      const interval = setInterval(fetchBooking, 10000); // каждые 10 секунд
+      return () => clearInterval(interval);
     } else {
       setMyBooking(null);
+      setMyBookingLoading(false);
     }
   }, [isAuthenticated]);
 
@@ -134,6 +152,27 @@ export const HomePage: React.FC = () => {
                 <ArrowRight size={18} />
               </Link>
             )}
+
+            {/* Большая кнопка для линейной системы заселения */}
+            <Link
+              to="/auto-booking"
+              className="btn btn-secondary"
+              style={{
+                padding: '12px 28px',
+                borderRadius: '12px',
+                fontSize: '15px',
+                textDecoration: 'none',
+                background: '#f0f9ff',
+                border: '2px solid #0284c7',
+                color: '#0284c7',
+                fontWeight: 'bold',
+                gap: '8px',
+                boxShadow: '0 4px 10px rgba(2,132,199,0.2)',
+              }}
+            >
+              <UserPlus size={20} />
+              Забронировать место
+            </Link>
           </div>
         </div>
       </div>

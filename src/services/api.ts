@@ -77,6 +77,11 @@ export const bookRoom = async (payload: any) => {
   return response.data;
 };
 
+export const autoBook = async (payload: any) => {
+  const response = await api.post('/auto-book', payload);
+  return response.data;
+};
+
 // ─── Экспорт (Админка) ───────────────────────────────────────────────────────
 
 export const getExportBookings = async () => {
