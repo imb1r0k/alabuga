@@ -15,8 +15,6 @@ import {
 import {
   User,
   Clock,
-  Check,
-  X,
   MessageSquare,
   Calendar,
   Users,
@@ -25,11 +23,8 @@ import {
   Save,
   XCircle,
   CheckCircle2,
-  AlertCircle,
   MapPin,
-  Building2,
   Shield,
-  Mail,
   Phone,
   AtSign,
   Globe,
@@ -150,14 +145,12 @@ export const DashboardPage = () => {
   const [myBooking, setMyBooking] = useState<any>(null);
   const [bookingHistory, setBookingHistory] = useState<any[]>([]);
   const [bookingLoading, setBookingLoading] = useState(false);
-  const [bookingError, setBookingError] = useState('');
 
   const [myTeam, setMyTeam] = useState<any>(null);
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
 
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [chatInput, setChatInput] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
 
   const [calendarEvents, setCalendarEvents] = useState<any[]>([]);
   const [calendarLoading, setCalendarLoading] = useState(false);

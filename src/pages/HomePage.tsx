@@ -8,7 +8,7 @@ import { PublicFloorMap } from '../components/PublicFloorMap';
 import { BookingModal } from '../components/BookingModal';
 
 export const HomePage: React.FC = () => {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated } = useAuth();
   const { hero } = useSettings();
 
   // Бронирование
@@ -21,7 +21,6 @@ export const HomePage: React.FC = () => {
 
   // Актуальная бронь пользователя
   const [myBooking, setMyBooking] = useState<any>(null);
-  const [myBookingLoading, setMyBookingLoading] = useState(false);
   const bookingSectionRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
 
