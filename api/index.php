@@ -691,14 +691,14 @@ try {
 
     if ($uri === 'my-booking') {
         $user = requireAuth($pdo);
-        // Возвращаем последнюю бронь пользователя (любую, включая отклонённую)
+        // Возвращаем последнюю активную (не архивную) бронь пользователя (включая отклонённую)
         $stmt = $pdo->prepare("
             SELECT b.id, b.status, b.comment, r.room_number, bu.name as building_name, f.floor_number
             FROM bookings b
             JOIN rooms r ON b.room_id = r.id
             JOIN buildings bu ON r.building_id = bu.id
             JOIN floors f ON r.floor_id = f.id
-            WHERE b.user_id = ?
+            WHERE b.user_id = ? AND b.status <> 'archived'
             ORDER BY b.id DESC LIMIT 1
         ");
         $stmt->execute([$user['id']]);

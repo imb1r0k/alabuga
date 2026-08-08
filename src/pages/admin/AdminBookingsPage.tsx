@@ -3,6 +3,7 @@ import { Skeleton } from '../../components/Skeleton';
 import { AdminLayout } from '../../components/AdminLayout';
 import { useToast } from '../../components/Toast';
 import { getAdminBookings, updateAdminBooking, getAllRooms } from '../../services/api';
+import { X } from 'lucide-react';
 
 export const AdminBookingsPage: React.FC = () => {
   const [bookings, setBookings] = useState<any[]>([]);
@@ -53,6 +54,17 @@ export const AdminBookingsPage: React.FC = () => {
     }
   };
 
+  // Быстрая смена статуса прямо в таблице
+  const handleQuickStatusChange = async (booking: any, newStatus: string) => {
+    try {
+      await updateAdminBooking({ id: booking.id, room_id: booking.room_id, status: newStatus, comment: booking.comment });
+      showToast('Статус обновлен', 'success');
+      loadBookings();
+    } catch (err: any) {
+      showToast('Ошибка обновления статуса: ' + (err.response?.data?.error || err.message), 'error');
+    }
+  };
+
   return (
     <AdminLayout>
       <div>
@@ -73,6 +85,7 @@ export const AdminBookingsPage: React.FC = () => {
                     <th style={{ padding: '8px' }}>Комната</th>
                     <th style={{ padding: '8px' }}>Пол</th>
                     <th style={{ padding: '8px' }}>Статус</th>
+                    <th style={{ padding: '8px' }}>Действие</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -94,22 +107,33 @@ export const AdminBookingsPage: React.FC = () => {
                       <td style={{ padding: '8px' }}>{b.room_number}</td>
                       <td style={{ padding: '8px' }}>{b.gender === 'M' ? 'М' : 'Ж'}</td>
                       <td style={{ padding: '8px' }}>
-                        <span style={{
-                          padding: '2px 8px',
-                          borderRadius: '4px',
-                          fontSize: '12px',
-                          color: '#fff',
-                          backgroundColor:
-                            b.status === 'approved' ? '#28a745' :
-                            b.status === 'approved_bot' ? '#17a2b8' :
-                            b.status === 'rejected' ? '#dc3545' : '#ffc107',
-                        }}>
-                          {
-                            b.status === 'approved' ? 'Одобрено' :
-                            b.status === 'approved_bot' ? 'Одобрено ботом' :
-                            b.status === 'rejected' ? 'Отклонено' : 'Ожидает'
-                          }
-                        </span>
+                        <select
+                          value={b.status}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            handleQuickStatusChange(b, e.target.value);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ padding: '4px', borderRadius: '4px', fontSize: '13px' }}
+                        >
+                          <option value="pending">Ожидает</option>
+                          <option value="approved">Одобрено</option>
+                          <option value="approved_bot">Одобрено ботом</option>
+                          <option value="rejected">Отклонено</option>
+                          <option value="archived">В архиве</option>
+                        </select>
+                      </td>
+                      <td style={{ padding: '8px' }}>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ fontSize: '12px', padding: '4px 8px' }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSelectBooking(b);
+                          }}
+                        >
+                          Управление
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -117,94 +141,120 @@ export const AdminBookingsPage: React.FC = () => {
               </table>
             </div>
 
+            {/* Модальное окно управления бронированием */}
             {selectedBooking && (
-              <div style={{ marginTop: '24px', backgroundColor: '#f8f9fa', padding: '20px', borderRadius: '8px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h3>Редактирование бронирования #{selectedBooking.id}</h3>
-                  <button onClick={() => setSelectedBooking(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+              <div style={{
+                position: 'fixed',
+                inset: 0,
+                backgroundColor: 'rgba(0,0,0,0.5)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 1000,
+                padding: '16px',
+              }}>
+                <div style={{
+                  backgroundColor: '#fff',
+                  borderRadius: '12px',
+                  maxWidth: '600px',
+                  width: '100%',
+                  maxHeight: '90vh',
+                  overflowY: 'auto',
+                  boxShadow: '0 10px 25px rgba(0,0,0,0.25)',
+                  position: 'relative',
+                  padding: '24px',
+                }}>
+                  <button
+                    onClick={() => setSelectedBooking(null)}
+                    style={{ position: 'absolute', top: '12px', right: '12px', border: 'none', background: 'none', cursor: 'pointer', fontSize: '18px', color: '#64748b' }}
+                  >
+                    <X size={20} />
+                  </button>
+
+                  <h3 style={{ marginTop: 0, marginBottom: '16px' }}>Управление бронированием #{selectedBooking.id}</h3>
+
+                  {bookingMsg && (
+                    <div style={{ padding: '8px', borderRadius: '4px', marginBottom: '12px', backgroundColor: bookingMsg.includes('Ошибка') ? '#f8d7da' : '#d4edda', fontSize: '14px' }}>
+                      {bookingMsg}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleSaveBooking} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                    <div className="input-group">
+                      <label>Имя пользователя</label>
+                      <input
+                        type="text"
+                        value={selectedBooking.first_name || ''}
+                        onChange={(e) => setSelectedBooking({ ...selectedBooking, first_name: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="input-group">
+                      <label>Фамилия пользователя</label>
+                      <input
+                        type="text"
+                        value={selectedBooking.last_name || ''}
+                        onChange={(e) => setSelectedBooking({ ...selectedBooking, last_name: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="input-group">
+                      <label>Телефон</label>
+                      <input
+                        type="text"
+                        value={selectedBooking.user_phone || ''}
+                        onChange={(e) => setSelectedBooking({ ...selectedBooking, user_phone: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="input-group">
+                      <label>Выберите комнату из базы</label>
+                      <select
+                        value={selectedBooking.room_id}
+                        onChange={(e) => setSelectedBooking({ ...selectedBooking, room_id: Number(e.target.value) })}
+                        style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd' }}
+                      >
+                        {allAvailableRooms.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.building_name} — Этаж {r.floor_number} — Комната {r.room_number} ({r.name || 'Без названия'})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="input-group">
+                      <label>Статус бронирования</label>
+                      <select
+                        value={selectedBooking.status}
+                        onChange={(e) => setSelectedBooking({ ...selectedBooking, status: e.target.value })}
+                        style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd' }}
+                      >
+                        <option value="pending">Ожидает</option>
+                        <option value="approved">Одобрено</option>
+                        <option value="approved_bot">Одобрено ботом</option>
+                        <option value="rejected">Отклонено</option>
+                        <option value="archived">В архиве</option>
+                      </select>
+                    </div>
+
+                    <div className="input-group" style={{ gridColumn: '1 / -1' }}>
+                      <label>Комментарий (при отклонении)</label>
+                      <textarea
+                        value={selectedBooking.comment || ''}
+                        onChange={(e) => setSelectedBooking({ ...selectedBooking, comment: e.target.value })}
+                        rows={3}
+                        placeholder="Причина отклонения, заметка для пользователя"
+                        style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd', fontFamily: 'inherit', resize: 'vertical' }}
+                      />
+                    </div>
+
+                    <div style={{ gridColumn: '1 / -1', marginTop: '10px' }}>
+                      <button type="submit" className="btn btn-primary" disabled={savingBooking}>
+                        {savingBooking ? 'Сохранение...' : 'Сохранить изменения бронирования'}
+                      </button>
+                    </div>
+                  </form>
                 </div>
-
-                {bookingMsg && (
-                  <div style={{ padding: '8px', borderRadius: '4px', marginBottom: '12px', backgroundColor: bookingMsg.includes('Ошибка') ? '#f8d7da' : '#d4edda', fontSize: '14px' }}>
-                    {bookingMsg}
-                  </div>
-                )}
-
-                <form onSubmit={handleSaveBooking} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-                  <div className="input-group">
-                    <label>Имя пользователя</label>
-                    <input
-                      type="text"
-                      value={selectedBooking.first_name || ''}
-                      onChange={(e) => setSelectedBooking({ ...selectedBooking, first_name: e.target.value })}
-                    />
-                  </div>
-
-                  <div className="input-group">
-                    <label>Фамилия пользователя</label>
-                    <input
-                      type="text"
-                      value={selectedBooking.last_name || ''}
-                      onChange={(e) => setSelectedBooking({ ...selectedBooking, last_name: e.target.value })}
-                    />
-                  </div>
-
-                  <div className="input-group">
-                    <label>Телефон</label>
-                    <input
-                      type="text"
-                      value={selectedBooking.user_phone || ''}
-                      onChange={(e) => setSelectedBooking({ ...selectedBooking, user_phone: e.target.value })}
-                    />
-                  </div>
-
-                  <div className="input-group">
-                    <label>Выберите комнату из базы</label>
-                    <select
-                      value={selectedBooking.room_id}
-                      onChange={(e) => setSelectedBooking({ ...selectedBooking, room_id: Number(e.target.value) })}
-                      style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd' }}
-                    >
-                      {allAvailableRooms.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.building_name} — Этаж {r.floor_number} — Комната {r.room_number} ({r.name || 'Без названия'})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="input-group">
-                    <label>Статус бронирования</label>
-                    <select
-                      value={selectedBooking.status}
-                      onChange={(e) => setSelectedBooking({ ...selectedBooking, status: e.target.value })}
-                      style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ddd' }}
-                    >
-                      <option value="pending">Ожидает</option>
-                      <option value="approved">Одобрено</option>
-                      <option value="approved_bot">Одобрено ботом</option>
-                      <option value="rejected">Отклонено</option>
-                      <option value="archived">В архиве</option>
-                    </select>
-                  </div>
-
-                  <div className="input-group" style={{ gridColumn: '1 / -1' }}>
-                    <label>Комментарий (при отклонении)</label>
-                    <textarea
-                      value={selectedBooking.comment || ''}
-                      onChange={(e) => setSelectedBooking({ ...selectedBooking, comment: e.target.value })}
-                      rows={3}
-                      placeholder="Причина отклонения, заметка для пользователя"
-                      style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd', fontFamily: 'inherit', resize: 'vertical' }}
-                    />
-                  </div>
-
-                  <div style={{ gridColumn: '1 / -1', marginTop: '10px' }}>
-                    <button type="submit" className="btn btn-primary" disabled={savingBooking}>
-                      {savingBooking ? 'Сохранение...' : 'Сохранить изменения бронирования'}
-                    </button>
-                  </div>
-                </form>
               </div>
             )}
           </div>
