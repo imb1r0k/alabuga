@@ -15,7 +15,6 @@ import {
   ShieldCheck
 } from 'lucide-react';
 
-// Проверяем, является ли значение ссылкой на изображение (svg, png и др.)
 const isImageUrl = (value: string) => {
   if (!value) return false;
   const trimmed = value.trim();
@@ -49,6 +48,13 @@ export const Header: React.FC = () => {
     transition: 'all 0.2s ease',
   });
 
+  const getRoleLabel = () => {
+    const role = user?.role?.toLowerCase();
+    if (role === 'admin') return 'Администратор';
+    if (role === 'curator') return 'Куратор';
+    return role || '';
+  };
+
   return (
     <header style={{
       backgroundColor: '#0f172a',
@@ -67,7 +73,6 @@ export const Header: React.FC = () => {
                     alignItems: 'center',
                   }}>
               
-              {/* Логотип: картинка (svg/png) или текст из БД */}
               <Link to="/" style={{ display: 'flex', alignItems: 'center', color: '#fff', textDecoration: 'none', fontWeight: 'bold', fontSize: '18px', marginRight: 'auto', flexShrink: 0 }}>
                               {settingsLoading ? (
                                 <Skeleton width="200px" height="28px" rounded="6px" />
@@ -82,7 +87,6 @@ export const Header: React.FC = () => {
                               )}
                             </Link>
       
-              {/* Навигация ПК */}
               <nav className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', flexShrink: 0 }}>
           <NavLink to="/" end style={navLinkStyle}>
             <Home size={16} />
@@ -126,7 +130,6 @@ export const Header: React.FC = () => {
           )}
         </nav>
 
-        {/* Блок аккаунта ПК */}
                 <div className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: '12px', marginLeft: '16px' }}>
           {isAuthenticated ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', backgroundColor: '#1e293b', padding: '6px 12px', borderRadius: '20px', border: '1px solid #334155' }}>
@@ -155,7 +158,6 @@ export const Header: React.FC = () => {
           )}
         </div>
 
-        {/* Мобильная шапка */}
         <div className="mobile-only" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {isAuthenticated ? (
             <Link
@@ -183,13 +185,12 @@ export const Header: React.FC = () => {
         </div>
       </div>
 
-      {/* Мобильное меню */}
       {mobileMenuOpen && (
         <div style={{ backgroundColor: '#0f172a', borderBottom: '1px solid #1e293b', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {isAuthenticated && (
             <div style={{ paddingBottom: '8px', marginBottom: '8px', borderBottom: '1px solid #1e293b', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#94a3b8' }}>
               <span>{user?.last_name} {user?.first_name || user?.name}</span>
-              <span style={{ backgroundColor: '#1e293b', padding: '2px 8px', borderRadius: '4px', color: '#38bdf8' }}>{user?.role}</span>
+              <span style={{ backgroundColor: '#1e293b', padding: '2px 8px', borderRadius: '4px', color: '#38bdf8' }}>{getRoleLabel()}</span>
             </div>
           )}
 

@@ -27,12 +27,12 @@ export const updateSettings = async (settings: Record<string, string>) => {
 // ─── Глобальные уведомления ─────────────────────────────────────────────────
 
 export const getGlobalNotification = async () => {
-  const response = await api.get('/notifications/global');
+  const response = await api.get('/get-global-notification');
   return response.data;
 };
 
 export const markGlobalNotificationViewed = async () => {
-  const response = await api.post('/notifications/global/view');
+  const response = await api.post('/mark-notification-viewed');
   return response.data;
 };
 
@@ -41,7 +41,7 @@ export const saveGlobalNotification = async (payload: {
   type: string;
   enabled: boolean;
 }) => {
-  const response = await api.post('/notifications/global', payload);
+  const response = await api.post('/save-global-notification', payload);
   return response.data;
 };
 
@@ -60,7 +60,7 @@ export const getMyBooking = async () => {
 };
 
 export const cancelMyBooking = async () => {
-  const response = await api.post('/my-booking/cancel');
+  const response = await api.post('/cancel-booking');
   return response.data;
 };
 

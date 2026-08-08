@@ -78,7 +78,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       phone,
       login: customLogin?.trim() || '',
     };
-    // Если пароль указан вручную — отправляем его; иначе бэкенд сгенерирует сам
     if (password) {
       payload.password = password;
     }
@@ -87,7 +86,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     localStorage.setItem('token', token);
     setUser(user);
     await fetchUser();
-    return user; // содержит login и password для окна
+    return user;
   };
 
   const logout = async () => {
@@ -108,7 +107,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const roleNormalized = user?.role ? String(user.role).trim().toLowerCase() : '';
   const isAdmin = roleNormalized === 'admin';
-  const isModerator = roleNormalized === 'moderator' || isAdmin;
+  const isModerator = roleNormalized === 'curator' || isAdmin;
 
   return (
     <AuthContext.Provider
