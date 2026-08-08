@@ -1,10 +1,8 @@
 RewriteEngine On
 
-# Передача заголовка Authorization в PHP
-SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
-RewriteCond %{HTTP:Authorization} ^(.*)
-RewriteRule .* - [e=HTTP_AUTHORIZATION:%1]
-
+# Если файл или директория существуют - используем их напрямую
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^ index.php [QSA,L]
+
+# Все остальные запросы перенаправляем на index.php с сохранением пути
+RewriteRule ^(.*)$ index.php?route=$1 [QSA,L]
