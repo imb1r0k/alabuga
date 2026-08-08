@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { Pencil, Save, X, User, Camera, Send, Globe, MessageCircle } from 'lucide-react';
+import { Pencil, Save, X, User, Camera, Send, Globe, MessageCircle, QrCode, Link as LinkIcon } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { QRCodeSVG } from 'qrcode.react';
 import { useToast } from '../Toast';
 import { updateMyProfile } from '../../services/api';
 
@@ -42,85 +44,102 @@ export const UserProfileCard: React.FC<Props> = ({ user, onUpdate }) => {
     }
   };
 
+  const publicUrl = `${window.location.origin}/public_profile/${user?.login}`;
+
   return (
     <div className="card" style={{ marginBottom: '24px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
         <h3 style={{ margin: 0, fontSize: '18px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <User size={20} color="#0284c7" /> Мой профиль
         </h3>
-        {!isEditing && (
-          <button className="btn btn-secondary" onClick={() => setIsEditing(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}>
-            <Pencil size={16} /> Редактировать профиль
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <Link to={`/public_profile/${user?.login}`} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}>
+            <LinkIcon size={16} /> Публичная страница
+          </Link>
+          {!isEditing && (
+            <button className="btn btn-secondary" onClick={() => setIsEditing(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}>
+              <Pencil size={16} /> Редактировать профиль
+            </button>
+          )}
+        </div>
       </div>
 
-      {!isEditing ? (
-        <div>
-          <div style={{ marginBottom: '16px' }}>
-            <strong>ФИО:</strong> {user?.last_name} {user?.first_name}
-          </div>
-          <div style={{ marginBottom: '16px' }}>
-            <strong>Логин:</strong> {user?.login}
-          </div>
-          <div style={{ marginBottom: '16px' }}>
-            <strong>Телефон:</strong> {user?.phone || '—'}
-          </div>
-          <div style={{ marginBottom: '16px' }}>
-            <strong>О себе:</strong> {bio ? bio : '—'}
-          </div>
-          <div>
-            <strong>Соцсети:</strong>
-            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '8px' }}>
-              {socialFields.map(({ key, label, icon: Icon }) => (
-                <span key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', backgroundColor: '#f1f5f9', padding: '6px 12px', borderRadius: '20px', fontSize: '13px' }}>
-                  <Icon size={16} /> {label}: {socials[key] || '—'}
-                </span>
-              ))}
-            </div>
-          </div>
+      <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+        {/* QR-код */}
+        <div style={{ textAlign: 'center' }}>
+          <QRCodeSVG value={publicUrl} size={120} />
+          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '6px' }}>Переход по QR</div>
         </div>
-      ) : (
-        <form onSubmit={handleSave}>
-          <div className="input-group">
-            <label>О себе</label>
-            <textarea
-              value={bio}
-              onChange={(e) => setBio(e.target.value)}
-              rows={4}
-              placeholder="Расскажите о себе: интересы, деятельность..."
-              disabled={saving}
-              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', resize: 'vertical' }}
-            />
-          </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '16px' }}>
-            {socialFields.map(({ key, label, icon: Icon }) => (
-              <div key={key} className="input-group" style={{ marginBottom: 0 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Icon size={16} /> {label}
-                </label>
-                <input
-                  type="text"
-                  value={socials[key]}
-                  onChange={(e) => setSocials({ ...socials, [key]: e.target.value })}
-                  placeholder={`Ссылка на ${label}`}
+        <div style={{ flex: 1, minWidth: '250px' }}>
+          {!isEditing ? (
+            <div>
+              <div style={{ marginBottom: '16px' }}>
+                <strong>ФИО:</strong> {user?.last_name} {user?.first_name}
+              </div>
+              <div style={{ marginBottom: '16px' }}>
+                <strong>Логин:</strong> {user?.login}
+              </div>
+              <div style={{ marginBottom: '16px' }}>
+                <strong>Телефон:</strong> {user?.phone || '—'}
+              </div>
+              <div style={{ marginBottom: '16px' }}>
+                <strong>О себе:</strong> {bio ? bio : '—'}
+              </div>
+              <div>
+                <strong>Соцсети:</strong>
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '8px' }}>
+                  {socialFields.map(({ key, label, icon: Icon }) => (
+                    <span key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', backgroundColor: '#f1f5f9', padding: '6px 12px', borderRadius: '20px', fontSize: '13px' }}>
+                      <Icon size={16} /> {label}: {socials[key] || '—'}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={handleSave}>
+              <div className="input-group">
+                <label>О себе</label>
+                <textarea
+                  value={bio}
+                  onChange={(e) => setBio(e.target.value)}
+                  rows={4}
+                  placeholder="Расскажите о себе: интересы, деятельность..."
                   disabled={saving}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', resize: 'vertical' }}
                 />
               </div>
-            ))}
-          </div>
 
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <button type="submit" className="btn btn-primary" disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Save size={16} /> {saving ? 'Сохранение...' : 'Сохранить'}
-            </button>
-            <button type="button" className="btn btn-secondary" onClick={() => setIsEditing(false)} disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <X size={16} /> Отмена
-            </button>
-          </div>
-        </form>
-      )}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+                {socialFields.map(({ key, label, icon: Icon }) => (
+                  <div key={key} className="input-group" style={{ marginBottom: 0 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Icon size={16} /> {label}
+                    </label>
+                    <input
+                      type="text"
+                      value={socials[key]}
+                      onChange={(e) => setSocials({ ...socials, [key]: e.target.value })}
+                      placeholder={`Ссылка на ${label}`}
+                      disabled={saving}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button type="submit" className="btn btn-primary" disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Save size={16} /> {saving ? 'Сохранение...' : 'Сохранить'}
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => setIsEditing(false)} disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <X size={16} /> Отмена
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
