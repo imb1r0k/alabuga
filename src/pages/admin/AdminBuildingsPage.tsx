@@ -692,7 +692,7 @@ export const AdminBuildingsPage: React.FC = () => {
         )}
 
         {room ? (
-          <>
+          <div style={{ transform: showVertical ? 'rotate(90deg)' : 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
             <IconComp size={18} style={{ marginBottom: '2px', marginTop: '4px' }} />
             <strong>{room.room_number || room.name}</strong>
 
@@ -731,9 +731,9 @@ export const AdminBuildingsPage: React.FC = () => {
                 ))}
               </div>
             )}
-          </>
+          </div>
         ) : (
-          <div style={{ color: '#94a3b8', fontSize: '11px', textAlign: 'center' }}>
+          <div style={{ transform: showVertical ? 'rotate(90deg)' : 'none', color: '#94a3b8', fontSize: '11px', textAlign: 'center' }}>
             <span style={{ fontSize: '10px', display: 'block', fontWeight: 'bold', color: '#cbd5e1' }}>№ {calcRoomNum}</span>
             {isEditLayout ? '+ Пусто' : 'Свободно'}
           </div>
@@ -753,7 +753,7 @@ export const AdminBuildingsPage: React.FC = () => {
 
   return (
     <AdminLayout>
-      <div style={{ padding: '0 10px' }}>
+      <div>
         {buildingsLoading ? (
           <Skeleton width="100%" height={250} />
         ) : (
@@ -1153,11 +1153,6 @@ export const AdminBuildingsPage: React.FC = () => {
 
                       {/* СЕТКА ЭТАЖА (АДАПТИВНАЯ: ориентация определяется автоматически; на смартфоне макет повёрнут на 90° влево) */}
                       <div className="w-full overflow-auto py-2">
-                        <div className="text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1.5">
-                          {showVertical ? <Monitor size={14} /> : <Smartphone size={14} />}
-                          {showVertical ? 'Вертикальный вид (смартфон, макет повёрнут на 90° влево):' : 'Горизонтальный вид (ПК):'}
-                        </div>
-
                         {/* Горизонтальный макет: общий для ПК и смартфона (на смартфоне просто повёрнут) */}
                         {showVertical ? (
                           <div style={{
@@ -1193,7 +1188,7 @@ export const AdminBuildingsPage: React.FC = () => {
                                   fontSize: '11px',
                                   letterSpacing: '2px',
                                 }}>
-                                  ═══ КОРИДОР ═══
+                                  <span style={{ transform: 'rotate(90deg)', whiteSpace: 'nowrap' }}>═══ КОРИДОР ═══</span>
                                 </div>
 
                                 {/* Нижний ряд (y=2) */}
