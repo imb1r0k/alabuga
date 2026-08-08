@@ -134,7 +134,7 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
     const IconComp = tmpl?.icon || Bed;
     const bookedCount = room?.occupied || 0;
 
-    const clickable = room && room.room_type === 'room' && room.is_technical === 0;
+    const clickable = room && room.room_type === 'room';
 
     return (
       <div
