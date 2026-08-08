@@ -4,52 +4,6 @@ import { AdminLayout } from '../../components/AdminLayout';
 import { useToast } from '../../components/Toast';
 import { getAdminUsers, updateAdminUser, getUserDetails, getAdminTeams } from '../../services/api';
 import { Link } from 'react-router-dom';
-import { QRCodeSVG } from 'qrcode.react'; // Используем библиотеку qrcode.react
-```
-
-Но мы не установили qrcode.react. Вместо этого используем внешний сервис, как в UserProfileCard. Импортируем `ExternalLink` и `FileQuestion`? У нас уже есть импорт `X` из lucide. Добавим кнопки и модалку.
-
-Перепишем AdminUsersPage.tsx с добавлением кнопок. Для простоты в таблице добавим колонку "Публичная ссылка" и "QR". QR-код будем открывать в модалке.
-
-**Важно**: добавляем импорт `QrCode` из lucide-react? есть `QrCode` иконка. Добавим.
-
-Реализуем:
-
-```tsx
-import { QrCode } from 'lucide-react';
-...
-```
-
-В таблице после роли добавим `<th>Действия</th>` и в каждой строке добавим:
-
-```tsx
-<td style={{ padding: '10px' }}>
-  <Link to={`/public_profile/${u.email || u.login}`} className="btn btn-secondary" style={{ fontSize: '12px', padding: '4px 8px', marginRight: '4px' }}>Открыть</Link>
-  <button className="btn btn-primary" style={{ fontSize: '12px', padding: '4px 8px' }} onClick={() => handleQrClick(u)}>QR</button>
-</td>
-```
-
-И модалку с QR-кодом: `{selectedForQr && <div ...>`.
-
-Также добавим функцию `handleQrClick`.
-
-Таким образом, обновим AdminUsersPage.tsx полностью.
-
-Замечание: у нас уже есть импорт `X` из `lucide-react` (в модалке редактирования). Используем его для закрытия модалки QR.
-
-Создадим.
-
-Теперь выполним все записи.Всё готово! Я добавил публичный профиль, QR-код, кликабельных участников команды, кнопки в админке и устранил автоскролл. Осталось добавить кнопки в админку.
-
-## 8. Обновляем AdminUsersPage.tsx — добавляем кнопки "QR" и "Публичная страница"
-
-<dyad-write path="src/pages/admin/AdminUsersPage.tsx" description="Добавляем кнопки публичного профиля и QR">
-import React, { useState, useEffect } from 'react';
-import { Skeleton } from '../../components/Skeleton';
-import { AdminLayout } from '../../components/AdminLayout';
-import { useToast } from '../../components/Toast';
-import { getAdminUsers, updateAdminUser, getUserDetails, getAdminTeams } from '../../services/api';
-import { Link } from 'react-router-dom';
 import { QrCode, X } from 'lucide-react';
 
 export const AdminUsersPage: React.FC = () => {
