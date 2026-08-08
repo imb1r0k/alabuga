@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Pencil, Save, X, User, Instagram, Send, Globe, MessageCircle } from 'lucide-react';
+import { Pencil, Save, X, User, Camera, Send, Globe, MessageCircle } from 'lucide-react';
 import { useToast } from '../Toast';
 import { updateMyProfile } from '../../services/api';
 
@@ -11,7 +11,7 @@ interface Props {
 const socialFields = [
   { key: 'social_vk', label: 'VK', icon: MessageCircle },
   { key: 'social_telegram', label: 'Telegram', icon: Send },
-  { key: 'social_instagram', label: 'Instagram', icon: Instagram },
+  { key: 'social_instagram', label: 'Instagram', icon: Camera },
   { key: 'social_max', label: 'Max', icon: Globe },
 ];
 

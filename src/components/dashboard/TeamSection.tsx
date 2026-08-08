@@ -1,5 +1,5 @@
 import React from 'react';
-import { Users, ShieldCheck } from 'lucide-react';
+import { Users } from 'lucide-react';
 
 interface Member {
   id: number;

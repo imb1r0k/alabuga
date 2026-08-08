@@ -54,7 +54,6 @@ export const getAdminStats = async () => {
 
 // ─── Публичные данные для бронирования ───────────────────────────────────────
 
-// Получить список корпусов (публично)
 export const getMyBooking = async () => {
   const response = await api.get('/my-booking');
   return response.data;
@@ -65,13 +64,11 @@ export const getPublicBuildings = async () => {
   return response.data;
 };
 
-// Получить макет корпуса (здание, этажи, комнаты с занятостью)
 export const getPublicLayout = async (buildingId: number) => {
   const response = await api.get(`/public/layout?building_id=${buildingId}`);
   return response.data;
 };
 
-// Отправить заявку на бронирование (с входом или регистрацией)
 export const bookRoom = async (payload: any) => {
   const response = await api.post('/book', payload);
   return response.data;
@@ -196,7 +193,7 @@ export const deleteAdminRoom = async (id: number) => {
   return response.data;
 };
 
-// ─── Команды ──────────────────────────────────────────────────────────────────
+// ─── Команды (Админка) ────────────────────────────────────────────────────────
 
 export const getAdminTeams = async () => {
   const response = await api.get('/admin/teams');
@@ -250,5 +247,50 @@ export const addAdminTeamEvent = async (teamId: number, eventData: any) => {
 
 export const deleteAdminTeamEvent = async (id: number) => {
   const response = await api.post('/admin/teams/calendar', { action: 'delete', id });
+  return response.data;
+};
+
+// ─── Профиль пользователя (личный кабинет) ────────────────────────────────────
+
+export const getMyProfile = async () => {
+  const response = await api.get('/profile');
+  return response.data;
+};
+
+export const updateMyProfile = async (profileData: Record<string, string>) => {
+  const response = await api.post('/profile', profileData);
+  return response.data;
+};
+
+// ─── Мои бронирования (история) ───────────────────────────────────────────────
+
+export const getMyBookingsHistory = async () => {
+  const response = await api.get('/my-bookings');
+  return response.data;
+};
+
+// ─── Моя команда ──────────────────────────────────────────────────────────────
+
+export const getMyTeam = async () => {
+  const response = await api.get('/my-team');
+  return response.data;
+};
+
+// ─── Мой командный чат ───────────────────────────────────────────────────────
+
+export const getMyTeamChat = async () => {
+  const response = await api.get('/my-team/chat');
+  return response.data;
+};
+
+export const sendMyTeamMessage = async (message: string) => {
+  const response = await api.post('/my-team/chat', { message });
+  return response.data;
+};
+
+// ─── Мой командный календарь ─────────────────────────────────────────────────
+
+export const getMyTeamCalendar = async () => {
+  const response = await api.get('/my-team/calendar');
   return response.data;
 };

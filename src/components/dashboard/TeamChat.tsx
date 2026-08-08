@@ -53,9 +53,6 @@ export const TeamChat: React.FC<{ teamId: number }> = ({ teamId }) => {
     }
   };
 
-  const isMine = (msg: Message) => user && (Number(user.id) === Number(msg.id)); // здесь нужно передавать id отправителя, но пока не имеем. Вместо этого можно определить по имени? Лучше добавить в API user_id. Пока просто не выделяем свои сообщения.
-  // Вместо этого можно использовать сравнение по имени, но лучше добавить поле user_id в ответах чата. Пока сделаем без этого.
-
   return (
     <div className="card" style={{ marginBottom: '24px' }}>
       <h3 style={{ margin: '0 0 16px', fontSize: '18px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -66,7 +63,6 @@ export const TeamChat: React.FC<{ teamId: number }> = ({ teamId }) => {
           <p style={{ color: '#94a3b8', textAlign: 'center' }}>Сообщений пока нет</p>
         ) : (
           messages.map((msg) => {
-            // Определяем куратора (admin или moderator)
             const isCurator = msg.role === 'admin' || msg.role === 'moderator';
             return (
               <div key={msg.id} style={{ marginBottom: '12px' }}>

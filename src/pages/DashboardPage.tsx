@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { getMyBookingsHistory, getMyTeam } from '../services/api';
 import { UserProfileCard } from '../components/dashboard/UserProfileCard';
@@ -53,7 +53,7 @@ export const DashboardPage = () => {
     );
   }
 
-  const handleProfileUpdate = (updatedUser: any) => {
+  const handleProfileUpdate = () => {
     refreshUser(); // обновляем данные в контексте
   };
 
