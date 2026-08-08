@@ -13,8 +13,8 @@ export const DashboardPage = () => {
   const [teamData, setTeamData] = useState<{ team: any; members: any[] }>({ team: null, members: [] });
   const [loadingData, setLoadingData] = useState(true);
 
+  // Принудительно поднимаем страницу вверх при загрузке /dashboard
   useEffect(() => {
-    // Сбрасываем прокрутку страницы вверх при загрузке страницы
     window.scrollTo(0, 0);
   }, []);
 

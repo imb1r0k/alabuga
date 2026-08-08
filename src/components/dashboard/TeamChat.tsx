@@ -16,7 +16,6 @@ export const TeamChat: React.FC<{ teamId: number }> = ({ teamId }) => {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const firstRender = useRef(true);
 
   const loadMessages = async () => {
     try {
@@ -33,15 +32,6 @@ export const TeamChat: React.FC<{ teamId: number }> = ({ teamId }) => {
     return () => clearInterval(interval);
   }, [teamId]);
 
-  useEffect(() => {
-    // Прокручиваем к последнему сообщению только при добавлении новых (после первого рендера)
-    if (firstRender.current) {
-      firstRender.current = false;
-      return;
-    }
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
@@ -50,6 +40,8 @@ export const TeamChat: React.FC<{ teamId: number }> = ({ teamId }) => {
       await sendMyTeamMessage(input);
       setInput('');
       await loadMessages();
+      // Прокручиваем к последнему сообщению только явно после отправки
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } catch (err: any) {
       console.error(err);
     } finally {
