@@ -32,7 +32,7 @@ export const AutoBookingPage: React.FC = () => {
 
   const [gender, setGender] = useState<Gender>(null);
   const [autoMode, setAutoMode] = useState(false); // выбран ли автоматический метод
-  const [authStep, setAuthStep] = useState<AuthStep>(isAuthenticated ? 'result' : 'auth');
+  const [authStep, setAuthStep] = useState<AuthStep>('auth'); // изначально всегда auth
 
   // Данные формы
   const [loginInput, setLoginInput] = useState('');
@@ -224,7 +224,7 @@ export const AutoBookingPage: React.FC = () => {
                 <ArrowLeft size={18} />
               </button>
               <button
-                onClick={() => { setAutoMode(true); setAuthStep(isAuthenticated ? 'result' : 'auth'); }}
+                onClick={() => { setAutoMode(true); setAuthStep('auth'); }}
                 disabled={!gender}
                 style={{
                   padding: '16px',
@@ -366,6 +366,13 @@ export const AutoBookingPage: React.FC = () => {
           <button className="btn btn-primary" onClick={() => navigate('/')} style={{ width: '100%', padding: '12px' }}>
             На главную
           </button>
+        </div>
+      )}
+
+      {/* Если авторизован и результат ещё не получен, но страница может быть пустой – добавляем заглушку */}
+      {authStep === 'result' && !result && (
+        <div style={{ textAlign: 'center', padding: '40px' }}>
+          <p style={{ color: '#94a3b8' }}>Загрузка...</p>
         </div>
       )}
     </div>
