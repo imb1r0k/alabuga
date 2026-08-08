@@ -4,6 +4,7 @@ import { SettingsProvider } from './contexts/SettingsContext';
 import { ToastProvider } from './components/Toast';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Header } from './components/Header';
+import { GlobalNotification } from './pages/GlobalNotification';
 
 import { HomePage } from './pages/HomePage';
 import { AuthPage } from './pages/AuthPage';
@@ -23,6 +24,7 @@ function App() {
           <SettingsProvider>
             <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
               <Header />
+              <GlobalNotification />
               <main style={{ flex: 1 }}>
                 <Routes>
                   <Route path="/" element={<HomePage />} />

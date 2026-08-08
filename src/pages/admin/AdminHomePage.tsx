@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useToast } from '../../components/Toast';
 import { AdminLayout } from '../../components/AdminLayout';
+import { getGlobalNotification, saveGlobalNotification } from '../../services/api';
 
 export const AdminHomePage: React.FC = () => {
   const { siteTitle, hero, updateAllSettings } = useSettings();
@@ -18,14 +19,30 @@ export const AdminHomePage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
 
+  // Глобальное уведомление
+  const [notifText, setNotifText] = useState('');
+  const [notifType, setNotifType] = useState<'permanent' | 'one-view'>('permanent');
+  const [notifEnabled, setNotifEnabled] = useState(false);
+  const [notifSaving, setNotifSaving] = useState(false);
+
+  // Загружаем текущее глобальное уведомление
+  const loadNotification = async () => {
+    try {
+      const data = await getGlobalNotification();
+      const n = data?.notification;
+      if (n && typeof n.text === 'string') {
+        setNotifText(n.text);
+        setNotifType(n.type === 'one-view' ? 'one-view' : 'permanent');
+        setNotifEnabled(!!n.enabled);
+      }
+    } catch (err) {
+      // Игнорируем ошибку загрузки уведомления
+    }
+  };
+
   useEffect(() => {
-    setTitleInput(siteTitle);
-    setBadgeInput(hero.hero_badge);
-    setTitleHeroInput(hero.hero_title);
-    setDescInput(hero.hero_description);
-    setBtnTextInput(hero.hero_button_text);
-    setBtnTextAuthInput(hero.hero_button_text_auth);
-  }, [siteTitle, hero]);
+    loadNotification();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,6 +65,27 @@ export const AdminHomePage: React.FC = () => {
       showToast(errorText, 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveNotification = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!notifText.trim()) {
+      showToast('Введите текст уведомления', 'error');
+      return;
+    }
+    setNotifSaving(true);
+    try {
+      await saveGlobalNotification({
+        text: notifText,
+        type: notifType,
+        enabled: notifEnabled,
+      });
+      showToast('Глобальное уведомление сохранено', 'success');
+    } catch (err: any) {
+      showToast('Ошибка сохранения: ' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+      setNotifSaving(false);
     }
   };
 
@@ -167,6 +205,66 @@ export const AdminHomePage: React.FC = () => {
             {saving ? 'Сохранение...' : 'Сохранить все настройки'}
           </button>
         </form>
+
+        {/* Глобальное уведомление */}
+        <div style={{ marginTop: '28px', paddingTop: '20px', borderTop: '1px solid #e2e8f0' }}>
+          <h4 style={{ marginBottom: '8px', color: '#1e293b' }}>📢 Глобальное уведомление</h4>
+          <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
+            Уведомление будет показываться всем пользователям в верхней части сайта. Фронтенд проверяет базу каждые 5 секунд.
+          </p>
+
+          <form onSubmit={handleSaveNotification}>
+            <div className="input-group">
+              <label>Текст уведомления</label>
+              <textarea
+                value={notifText}
+                onChange={(e) => setNotifText(e.target.value)}
+                rows={3}
+                disabled={notifSaving}
+                placeholder="Например: Уважаемые участники, регистрация на форум открыта!"
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  fontFamily: 'inherit',
+                  resize: 'vertical',
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', marginBottom: '14px', alignItems: 'center' }}>
+              <div className="input-group" style={{ marginBottom: 0 }}>
+                <label>Тип уведомления</label>
+                <select
+                  value={notifType}
+                  onChange={(e) => setNotifType(e.target.value as any)}
+                  disabled={notifSaving}
+                  style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', minWidth: '180px' }}
+                >
+                  <option value="permanent">Permanent — показывать всегда</option>
+                  <option value="one-view">One-view — показать один раз</option>
+                </select>
+              </div>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', cursor: 'pointer', fontWeight: 500 }}>
+                <input
+                  type="checkbox"
+                  checked={notifEnabled}
+                  onChange={(e) => setNotifEnabled(e.target.checked)}
+                  disabled={notifSaving}
+                  style={{ width: '18px', height: '18px' }}
+                />
+                Уведомление включено
+              </label>
+            </div>
+
+            <button type="submit" className="btn btn-primary" disabled={notifSaving}>
+              {notifSaving ? 'Сохранение...' : 'Сохранить уведомление'}
+            </button>
+          </form>
+        </div>
       </div>
     </AdminLayout>
   );
