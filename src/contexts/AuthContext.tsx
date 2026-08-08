@@ -9,12 +9,6 @@ interface User {
   first_name?: string;
   last_name?: string;
   phone?: string;
-  about?: string;
-  social_vk?: string;
-  social_max?: string;
-  social_telegram?: string;
-  social_instagram?: string;
-  team_id?: number | null;
 }
 
 interface AuthContextType {
