@@ -35,10 +35,12 @@ export const HomePage: React.FC = () => {
   useEffect(() => {
     getPublicBuildings()
       .then((data) => {
-        setBuildings(data);
-        if (data.length > 0) {
-          setSelectedBuildingId(data[0].id);
-          setSelectedBuildingName(data[0].name);
+        // API может вернуть массив или объект с полем buildings
+        const buildingsList = Array.isArray(data) ? data : (data?.buildings || []);
+        setBuildings(buildingsList);
+        if (buildingsList.length > 0) {
+          setSelectedBuildingId(buildingsList[0].id);
+          setSelectedBuildingName(buildingsList[0].name);
         }
       })
       .catch((err) => console.error(err))
