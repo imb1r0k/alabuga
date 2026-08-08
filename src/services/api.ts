@@ -59,6 +59,11 @@ export const getMyBooking = async () => {
   return response.data;
 };
 
+export const cancelMyBooking = async () => {
+  const response = await api.post('/my-booking/cancel');
+  return response.data;
+};
+
 export const getPublicBuildings = async () => {
   const response = await api.get('/public/buildings');
   return response.data;

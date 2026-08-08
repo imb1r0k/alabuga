@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { getMyBookingsHistory, getMyTeam } from '../services/api';
 import { UserProfileCard } from '../components/dashboard/UserProfileCard';
@@ -13,31 +13,30 @@ export const DashboardPage = () => {
   const [teamData, setTeamData] = useState<{ team: any; members: any[] }>({ team: null, members: [] });
   const [loadingData, setLoadingData] = useState(true);
 
-  // Принудительно поднимаем страницу вверх при загрузке /dashboard
   useEffect(() => {
     window.scrollTo(0, 0);
   }, []);
 
-  useEffect(() => {
-    if (isAuthenticated) {
-      const loadData = async () => {
-        setLoadingData(true);
-        try {
-          const [bookingsData, team] = await Promise.all([
-            getMyBookingsHistory(),
-            getMyTeam(),
-          ]);
-          setBookings(bookingsData);
-          setTeamData(team);
-        } catch (err) {
-          console.error(err);
-        } finally {
-          setLoadingData(false);
-        }
-      };
-      loadData();
+  const loadData = useCallback(async () => {
+    if (!isAuthenticated) return;
+    setLoadingData(true);
+    try {
+      const [bookingsData, team] = await Promise.all([
+        getMyBookingsHistory(),
+        getMyTeam(),
+      ]);
+      setBookings(bookingsData);
+      setTeamData(team);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingData(false);
     }
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   if (!isAuthenticated) {
     return (
@@ -59,7 +58,7 @@ export const DashboardPage = () => {
   }
 
   const handleProfileUpdate = () => {
-    refreshUser(); // обновляем данные в контексте
+    refreshUser();
   };
 
   const hasTeam = !!teamData.team;
@@ -70,16 +69,12 @@ export const DashboardPage = () => {
         Личный кабинет
       </h1>
 
-      {/* Профиль */}
       <UserProfileCard user={user} onUpdate={handleProfileUpdate} />
 
-      {/* История бронирований */}
-      <BookingHistory bookings={bookings} />
+      <BookingHistory bookings={bookings} onRefresh={loadData} />
 
-      {/* Команда */}
       <TeamSection team={teamData.team} members={teamData.members} />
 
-      {/* Чат и календарь доступны только если есть команда */}
       {hasTeam && (
         <>
           <TeamChat teamId={teamData.team.id} />

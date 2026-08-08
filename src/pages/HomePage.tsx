@@ -1,25 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ArrowRight, Building2, MapPin, Clock, XCircle, CheckCircle2, AlertCircle, UserPlus } from 'lucide-react';
+import { ArrowRight, Building2, MapPin, Clock, XCircle, CheckCircle2, AlertCircle, UserPlus, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
-import { getPublicBuildings, getMyBooking } from '../services/api';
+import { getPublicBuildings, getMyBooking, cancelMyBooking } from '../services/api';
 import { PublicFloorMap } from '../components/PublicFloorMap';
 import { BookingModal } from '../components/BookingModal';
+import { useToast } from '../components/Toast';
 
 export const HomePage: React.FC = () => {
   const { isAuthenticated } = useAuth();
   const { hero } = useSettings();
+  const { showToast } = useToast();
 
-  // Бронирование
   const [buildings, setBuildings] = useState<any[]>([]);
   const [selectedBuildingId, setSelectedBuildingId] = useState<number | null>(null);
   const [selectedRoom, setSelectedRoom] = useState<any>(null);
   const [selectedBuildingName, setSelectedBuildingName] = useState('');
   const [selectedFloorNumber, setSelectedFloorNumber] = useState(0);
   const [loadingBuildings, setLoadingBuildings] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
-  // Актуальная бронь пользователя
   const [myBooking, setMyBooking] = useState<any>(null);
   const bookingSectionRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
@@ -27,7 +28,6 @@ export const HomePage: React.FC = () => {
   useEffect(() => {
     if (location.state?.scrollToBooking) {
       bookingSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
-      // Очищаем state, чтобы не прокручивать при обычных переходах
       window.history.replaceState({}, document.title);
     }
   }, [location.state]);
@@ -45,28 +45,46 @@ export const HomePage: React.FC = () => {
       .finally(() => setLoadingBuildings(false));
   }, []);
 
+  const fetchBooking = async () => {
+    if (!isAuthenticated) {
+      setMyBooking(null);
+      return;
+    }
+    try {
+      const data = await getMyBooking();
+      if (data?.booking && !['archived', 'recalled'].includes(data.booking.status)) {
+        setMyBooking(data.booking);
+      } else {
+        setMyBooking(null);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   useEffect(() => {
     if (isAuthenticated) {
-      const fetchBooking = async () => {
-        try {
-          const data = await getMyBooking();
-          // Игнорируем архивные брони
-          if (data?.booking && data.booking.status !== 'archived') {
-            setMyBooking(data.booking);
-          } else {
-            setMyBooking(null);
-          }
-        } catch (err) {
-          console.error(err);
-        }
-      };
       fetchBooking();
-      const interval = setInterval(fetchBooking, 10000); // каждые 10 секунд
+      const interval = setInterval(fetchBooking, 10000);
       return () => clearInterval(interval);
     } else {
       setMyBooking(null);
     }
   }, [isAuthenticated]);
+
+  const handleCancelBooking = async () => {
+    if (!window.confirm('Вы действительно хотите отозвать вашу заявку на заселение?')) return;
+    setCancelling(true);
+    try {
+      await cancelMyBooking();
+      showToast('Заявка успешно отозвана', 'info');
+      await fetchBooking();
+    } catch (err: any) {
+      showToast('Ошибка при отзыве заявки: ' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   const handleBuildingSelect = (building: any) => {
     setSelectedBuildingId(building.id);
@@ -96,9 +114,10 @@ export const HomePage: React.FC = () => {
     return { bg: '#f3e8ff', border: '#8b5cf6', text: '#6b21a8' };
   };
 
+  const isBookingActive = myBooking && ['pending', 'approved', 'approved_bot'].includes(myBooking.status);
+
   return (
     <div style={{ padding: '32px 24px', width: '100%' }}>
-      {/* Hero секция */}
       <div style={{
         background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0369a1 100%)',
         color: '#ffffff',
@@ -154,7 +173,6 @@ export const HomePage: React.FC = () => {
               </Link>
             )}
 
-            {/* Большая кнопка для линейной системы заселения */}
             <Link
               to="/auto-booking"
               className="btn btn-secondary"
@@ -178,7 +196,6 @@ export const HomePage: React.FC = () => {
         </div>
       </div>
 
-      {/* Карточка статуса бронирования */}
       {isAuthenticated && myBooking && (
         <div style={{
           position: 'fixed',
@@ -200,7 +217,7 @@ export const HomePage: React.FC = () => {
               <CheckCircle2 size={20} color="#0284c7" />
             ) : myBooking.status === 'rejected' ? (
               <XCircle size={20} color="#ef4444" />
-            ) : myBooking.status === 'archived' ? (
+            ) : ['archived', 'recalled'].includes(myBooking.status) ? (
               <AlertCircle size={20} color="#6b7280" />
             ) : (
               <Clock size={20} color="#f59e0b" />
@@ -224,11 +241,13 @@ export const HomePage: React.FC = () => {
                 backgroundColor: myBooking.status === 'approved' ? '#16a34a' :
                                 myBooking.status === 'approved_bot' ? '#0284c7' :
                                 myBooking.status === 'rejected' ? '#ef4444' :
+                                myBooking.status === 'recalled' ? '#6b7280' :
                                 myBooking.status === 'archived' ? '#6b7280' : '#f59e0b',
               }}>
                 {myBooking.status === 'approved' ? 'Одобрено' :
                  myBooking.status === 'approved_bot' ? 'Одобрено ботом' :
                  myBooking.status === 'rejected' ? 'Отклонено' :
+                 myBooking.status === 'recalled' ? 'Отозвано' :
                  myBooking.status === 'archived' ? 'В архиве' : 'Ожидает подтверждения'}
               </span>
             </div>
@@ -240,7 +259,19 @@ export const HomePage: React.FC = () => {
             </div>
           )}
 
-          {(myBooking.status === 'rejected' || myBooking.status === 'archived') && (
+          {isBookingActive && (
+            <button
+              className="btn btn-danger"
+              style={{ width: '100%', fontSize: '13px', padding: '8px 12px', gap: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              onClick={handleCancelBooking}
+              disabled={cancelling}
+            >
+              <Trash2 size={14} />
+              {cancelling ? 'Отзыв...' : 'Отозвать заявку'}
+            </button>
+          )}
+
+          {['rejected', 'archived', 'recalled'].includes(myBooking.status) && (
             <button
               className="btn btn-primary"
               style={{ width: '100%', fontSize: '13px', padding: '8px 12px' }}
@@ -252,7 +283,6 @@ export const HomePage: React.FC = () => {
         </div>
       )}
 
-      {/* Блок бронирования комнаты */}
       <div ref={bookingSectionRef} className="card" style={{ marginBottom: '48px' }}>
         <div style={{ marginBottom: '24px' }}>
           <h2 style={{ fontSize: '24px', fontWeight: 'bold', color: '#0f172a', marginBottom: '8px' }}>Выберите комнату</h2>
@@ -265,7 +295,6 @@ export const HomePage: React.FC = () => {
           <p style={{ color: '#94a3b8' }}>Корпуса ещё не созданы. Загляните позже.</p>
         ) : (
           <>
-            {/* Плитки выбора корпуса */}
             <div style={{ marginBottom: '20px' }}>
               <label style={{ fontSize: '14px', fontWeight: 600, color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
                 <Building2 size={18} color="#0284c7" />
@@ -312,7 +341,6 @@ export const HomePage: React.FC = () => {
         )}
       </div>
 
-      {/* Модальное окно бронирования */}
       {selectedRoom && (
         <BookingModal
           room={selectedRoom}

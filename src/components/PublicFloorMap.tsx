@@ -4,7 +4,6 @@ import { Skeleton } from './Skeleton';
 import { getPublicLayout } from '../services/api';
 import { useOrientation } from '../hooks/useOrientation';
 
-// Кастомная иконка лестницы (как в админке)
 const StairsIcon: React.FC = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M3 21L9 15V9L15 3H21" />
@@ -71,7 +70,6 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
   const [selectedFloor, setSelectedFloor] = useState<Floor | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Автоопределение ориентации устройства
   const isPortrait = useOrientation();
   const showVertical = isPortrait;
 
@@ -92,7 +90,6 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
   const floor = selectedFloor;
   const floorWidth = floor?.width || 8;
 
-  // Расчёт номера комнаты (по аналогии с админкой)
   const getCellIndex = (x: number, y: number, width: number, orderType: string = 'clockwise') => {
     if (orderType === 'column_wise') {
       return y === 0 ? x * 2 + 1 : x * 2 + 2;
@@ -125,16 +122,19 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
   const renderCellTile = (x: number, y: number) => {
     const room = floor?.rooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === y);
     const calcRoomNum = getCalculatedRoomNumber(x, y);
+    const bookedCount = room?.occupied || 0;
+    const isFull = room && room.room_type === 'room' && bookedCount >= (room.capacity || 0);
+
     const tmpl = room ? (
       room.room_type === 'elevator' ? { icon: ArrowUpDown, bg: '#cff4fc', borderColor: '#9eeaf9', textColor: '#055160' } :
       room.room_type === 'stairs' ? { icon: StairsIcon, bg: '#fff3cd', borderColor: '#ffe69c', textColor: '#664d03' } :
       room.room_type === 'tech' ? { icon: Wrench, bg: '#e2e3e5', borderColor: '#c4c8cb', textColor: '#41464b' } :
+      isFull ? { icon: Bed, bg: '#fee2e2', borderColor: '#fca5a5', textColor: '#991b1b' } :
       { icon: Bed, bg: '#d1e7dd', borderColor: '#a3cfbb', textColor: '#0f5132' }
     ) : null;
-    const IconComp = tmpl?.icon || Bed;
-    const bookedCount = room?.occupied || 0;
 
-    const clickable = room && room.room_type === 'room';
+    const IconComp = tmpl?.icon || Bed;
+    const clickable = room && room.room_type === 'room' && !isFull;
 
     return (
       <div
@@ -144,6 +144,7 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
             onRoomSelect(room, layout.building, floor);
           }
         }}
+        title={isFull ? 'Комната полностью заполнена' : undefined}
         style={{
           height: '110px',
           width: '100%',
@@ -155,13 +156,12 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          cursor: clickable ? 'pointer' : 'default',
+          cursor: clickable ? 'pointer' : 'not-allowed',
           fontSize: '13px',
           padding: '4px',
           textAlign: 'center',
           position: 'relative',
           transition: 'all 0.15s ease',
-          opacity: room && room.room_type === 'room' && bookedCount >= (room.capacity || 0) ? 0.6 : 1,
         }}
       >
         {room && room.room_type === 'room' && (
@@ -176,8 +176,8 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
             <strong>{room.room_number || room.name}</strong>
 
             {room.room_type === 'room' && (
-              <span style={{ fontSize: '12px', marginTop: '2px', fontWeight: 600, color: bookedCount >= room.capacity ? '#dc2626' : '#16a34a' }}>
-                {bookedCount} / {room.capacity}
+              <span style={{ fontSize: '12px', marginTop: '2px', fontWeight: 600, color: isFull ? '#991b1b' : '#16a34a' }}>
+                {isFull ? `Заполнено (${bookedCount}/${room.capacity})` : `${bookedCount} / ${room.capacity}`}
               </span>
             )}
           </div>
@@ -207,7 +207,6 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
 
   return (
     <div>
-      {/* Выбор этажа */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
         {layout.floors.map((f) => (
           <button
@@ -229,7 +228,6 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
         ))}
       </div>
 
-      {/* Сетка (адаптивная: на смартфоне повёрнута на 90° влево) */}
       <div className="w-full overflow-auto py-2">
         {showVertical ? (
           <div style={{
@@ -247,10 +245,8 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
               transform: 'translate(-50%, -50%) rotate(-90deg)',
             }}>
               <div style={{ display: 'grid', gridTemplateColumns: `repeat(${floorWidth}, ${cellSize}px)`, gap: gridGap, justifyContent: 'start' }}>
-                {/* Верхний ряд (y=0) */}
                 {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 0))}
 
-                {/* Коридор (y=1) */}
                 <div style={{
                   gridColumn: `1 / span ${floorWidth}`,
                   height: corridorHeight,
@@ -268,17 +264,14 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
                   <span style={{ transform: 'rotate(90deg)', whiteSpace: 'nowrap' }}>КОРИДОР</span>
                 </div>
 
-                {/* Нижний ряд (y=2) */}
                 {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 2))}
               </div>
             </div>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: `repeat(${floorWidth}, ${cellSize}px)`, gap: gridGap, justifyContent: 'start' }}>
-            {/* Верхний ряд (y=0) */}
             {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 0))}
 
-            {/* Коридор (y=1) */}
             <div style={{
               gridColumn: `1 / span ${floorWidth}`,
               height: corridorHeight,
@@ -296,7 +289,6 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
               КОРИДОР
             </div>
 
-            {/* Нижний ряд (y=2) */}
             {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 2))}
           </div>
         )}
