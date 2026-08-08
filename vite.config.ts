@@ -11,7 +11,7 @@ export default defineConfig({
         target: 'http://imb1r0kya2.temp.swtest.ru',
         changeOrigin: true,
         secure: false,
-        rewrite: (path) => path.replace(/^\/api/, ''),
+        rewrite: (path) => path.replace(/^\/api/, '/api'),
       },
     },
   },
