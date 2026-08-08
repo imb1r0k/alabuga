@@ -9,7 +9,7 @@ export const HomePage: React.FC = () => {
   const { hero } = useSettings();
 
   return (
-    <div style={{ padding: '32px 16px', maxWidth: '1280px', margin: '0 auto' }}>
+    <div style={{ padding: '32px 24px', width: '100%' }}>
       {/* Hero секция */}
       <div style={{
         background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0369a1 100%)',

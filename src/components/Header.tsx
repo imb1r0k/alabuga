@@ -60,9 +60,8 @@ export const Header: React.FC = () => {
       boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
     }}>
       <div style={{
-                    maxWidth: '1280px',
-                    margin: '0 auto',
-                    padding: '0 8px',
+                    width: '100%',
+                    padding: '0 24px',
                     height: '64px',
                     display: 'flex',
                     alignItems: 'center',
