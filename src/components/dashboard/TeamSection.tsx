@@ -1,5 +1,6 @@
 import React from 'react';
 import { Users } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 interface Member {
   id: number;
@@ -37,8 +38,9 @@ export const TeamSection: React.FC<{ team: Team | null; members: Member[] }> = (
       <h4 style={{ fontSize: '15px', marginBottom: '10px', color: '#334155' }}>Участники ({members.length})</h4>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {members.map((m) => (
-          <div
+          <Link
             key={m.id}
+            to={`/public_profile/${m.login}`}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -47,7 +49,12 @@ export const TeamSection: React.FC<{ team: Team | null; members: Member[] }> = (
               borderRadius: '8px',
               backgroundColor: m.role === 'captain' ? '#f0f9ff' : '#f8fafc',
               border: m.role === 'captain' ? '1px solid #bae6fd' : '1px solid #e2e8f0',
+              textDecoration: 'none',
+              color: 'inherit',
+              transition: 'background 0.2s',
             }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#e2e8f0')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = m.role === 'captain' ? '#f0f9ff' : '#f8fafc')}
           >
             <div
               style={{
@@ -76,10 +83,8 @@ export const TeamSection: React.FC<{ team: Team | null; members: Member[] }> = (
               </div>
               <div style={{ fontSize: '12px', color: '#64748b' }}>@{m.login}</div>
             </div>
-            {m.role !== 'captain' && (
-              <span style={{ fontSize: '12px', color: '#94a3b8' }}>Участник</span>
-            )}
-          </div>
+            <span style={{ fontSize: '12px', color: '#94a3b8' }}>Открыть профиль →</span>
+          </Link>
         ))}
       </div>
     </div>

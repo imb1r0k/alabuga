@@ -11,6 +11,7 @@ import { AuthPage } from './pages/AuthPage';
 import { DashboardPage } from './pages/DashboardPage';
 
 import { AutoBookingPage } from './pages/AutoBookingPage';
+import PublicProfilePage from './pages/PublicProfilePage';
 import { AdminHomePage } from './pages/admin/AdminHomePage';
 import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 import { AdminBuildingsPage } from './pages/admin/AdminBuildingsPage';
@@ -40,6 +41,7 @@ function App() {
                   />
                   
                   <Route path="/auto-booking" element={<AutoBookingPage />} />
+                  <Route path="/public_profile/:login" element={<PublicProfilePage />} />
 
                   {/* Маршруты админ-панели */}
                   <Route

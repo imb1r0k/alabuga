@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Pencil, Save, X, User, Camera, Send, Globe, MessageCircle } from 'lucide-react';
+import { Pencil, Save, X, User, Camera, Send, Globe, MessageCircle, ExternalLink } from 'lucide-react';
 import { useToast } from '../Toast';
 import { updateMyProfile } from '../../services/api';
+import { Link } from 'react-router-dom';
 
 interface Props {
   user: any;
@@ -42,6 +43,9 @@ export const UserProfileCard: React.FC<Props> = ({ user, onUpdate }) => {
     }
   };
 
+  const publicProfileUrl = `${window.location.origin}/public_profile/${user?.login}`;
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(publicProfileUrl)}`;
+
   return (
     <div className="card" style={{ marginBottom: '24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
@@ -77,6 +81,17 @@ export const UserProfileCard: React.FC<Props> = ({ user, onUpdate }) => {
                   <Icon size={16} /> {label}: {socials[key] || '—'}
                 </span>
               ))}
+            </div>
+          </div>
+
+          {/* QR-код и ссылка на публичный профиль */}
+          <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+            <img src={qrCodeUrl} alt="QR-код публичного профиля" style={{ width: '80px', height: '80px', borderRadius: '8px', border: '1px solid #e2e8f0' }} />
+            <div>
+              <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '4px' }}>Ваша публичная страница:</div>
+              <Link to={`/public_profile/${user?.login}`} style={{ color: '#0284c7', textDecoration: 'none', fontSize: '14px', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <ExternalLink size={14} /> /public_profile/{user?.login}
+              </Link>
             </div>
           </div>
         </div>

@@ -14,6 +14,11 @@ export const DashboardPage = () => {
   const [loadingData, setLoadingData] = useState(true);
 
   useEffect(() => {
+    // Сбрасываем прокрутку страницы вверх при загрузке страницы
+    window.scrollTo(0, 0);
+  }, []);
+
+  useEffect(() => {
     if (isAuthenticated) {
       const loadData = async () => {
         setLoadingData(true);
@@ -57,7 +62,6 @@ export const DashboardPage = () => {
     refreshUser(); // обновляем данные в контексте
   };
 
-  // Если нет команды, скрываем чат и календарь
   const hasTeam = !!teamData.team;
 
   return (

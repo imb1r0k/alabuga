@@ -1389,6 +1389,47 @@ try {
         jsonError('Метод не поддерживается', 405);
     }
 
+    // ─── Публичный профиль пользователя ─────────────────────────────────────
+
+    if ($uri === 'public/profile') {
+        $login = trim($_GET['login'] ?? '');
+        if (!$login) jsonError('Логин не указан', 400);
+        $stmt = $pdo->prepare("SELECT * FROM users WHERE login = ? AND status = 'active'");
+        $stmt->execute([$login]);
+        $user = $stmt->fetch();
+        if (!$user) jsonError('Пользователь не найден', 404);
+
+        // Удаляем пароль
+        unset($user['password']);
+
+        // Получаем команду
+        $team = null;
+        $members = [];
+        if ($user['team_id']) {
+            $teamId = (int)$user['team_id'];
+            $teamStmt = $pdo->prepare("SELECT * FROM teams WHERE id = ?");
+            $teamStmt->execute([$teamId]);
+            $team = $teamStmt->fetch();
+
+            $membersStmt = $pdo->prepare("
+                SELECT u.id, u.first_name, u.last_name, u.name, u.login,
+                       COALESCE(tm.role, 'member') as role
+                FROM users u
+                LEFT JOIN team_members tm ON tm.user_id = u.id AND tm.team_id = ?
+                WHERE u.team_id = ?
+                ORDER BY u.last_name ASC
+            ");
+            $membersStmt->execute([$teamId, $teamId]);
+            $members = $membersStmt->fetchAll();
+        }
+
+        jsonResponse([
+            'user' => $user,
+            'team' => $team,
+            'members' => $members
+        ]);
+    }
+
     // ─── Маршруты Админ-панели ──────────────────────────────────────────────
 
     if (strpos($uri, 'admin/') === 0) {

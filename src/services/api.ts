@@ -294,3 +294,10 @@ export const getMyTeamCalendar = async () => {
   const response = await api.get('/my-team/calendar');
   return response.data;
 };
+
+// ─── Публичный профиль ───────────────────────────────────────────────────────
+
+export const getPublicProfile = async (login: string) => {
+  const response = await api.get(`/public/profile?login=${encodeURIComponent(login)}`);
+  return response.data;
+};

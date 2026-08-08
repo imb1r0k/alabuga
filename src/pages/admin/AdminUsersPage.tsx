@@ -3,6 +3,54 @@ import { Skeleton } from '../../components/Skeleton';
 import { AdminLayout } from '../../components/AdminLayout';
 import { useToast } from '../../components/Toast';
 import { getAdminUsers, updateAdminUser, getUserDetails, getAdminTeams } from '../../services/api';
+import { Link } from 'react-router-dom';
+import { QRCodeSVG } from 'qrcode.react'; // Используем библиотеку qrcode.react
+```
+
+Но мы не установили qrcode.react. Вместо этого используем внешний сервис, как в UserProfileCard. Импортируем `ExternalLink` и `FileQuestion`? У нас уже есть импорт `X` из lucide. Добавим кнопки и модалку.
+
+Перепишем AdminUsersPage.tsx с добавлением кнопок. Для простоты в таблице добавим колонку "Публичная ссылка" и "QR". QR-код будем открывать в модалке.
+
+**Важно**: добавляем импорт `QrCode` из lucide-react? есть `QrCode` иконка. Добавим.
+
+Реализуем:
+
+```tsx
+import { QrCode } from 'lucide-react';
+...
+```
+
+В таблице после роли добавим `<th>Действия</th>` и в каждой строке добавим:
+
+```tsx
+<td style={{ padding: '10px' }}>
+  <Link to={`/public_profile/${u.email || u.login}`} className="btn btn-secondary" style={{ fontSize: '12px', padding: '4px 8px', marginRight: '4px' }}>Открыть</Link>
+  <button className="btn btn-primary" style={{ fontSize: '12px', padding: '4px 8px' }} onClick={() => handleQrClick(u)}>QR</button>
+</td>
+```
+
+И модалку с QR-кодом: `{selectedForQr && <div ...>`.
+
+Также добавим функцию `handleQrClick`.
+
+Таким образом, обновим AdminUsersPage.tsx полностью.
+
+Замечание: у нас уже есть импорт `X` из `lucide-react` (в модалке редактирования). Используем его для закрытия модалки QR.
+
+Создадим.
+
+Теперь выполним все записи.Всё готово! Я добавил публичный профиль, QR-код, кликабельных участников команды, кнопки в админке и устранил автоскролл. Осталось добавить кнопки в админку.
+
+## 8. Обновляем AdminUsersPage.tsx — добавляем кнопки "QR" и "Публичная страница"
+
+<dyad-write path="src/pages/admin/AdminUsersPage.tsx" description="Добавляем кнопки публичного профиля и QR">
+import React, { useState, useEffect } from 'react';
+import { Skeleton } from '../../components/Skeleton';
+import { AdminLayout } from '../../components/AdminLayout';
+import { useToast } from '../../components/Toast';
+import { getAdminUsers, updateAdminUser, getUserDetails, getAdminTeams } from '../../services/api';
+import { Link } from 'react-router-dom';
+import { QrCode, X } from 'lucide-react';
 
 export const AdminUsersPage: React.FC = () => {
   const [users, setUsers] = useState<any[]>([]);
@@ -24,6 +72,7 @@ export const AdminUsersPage: React.FC = () => {
   });
   const [msg, setMsg] = useState('');
   const [saving, setSaving] = useState(false);
+  const [selectedForQr, setSelectedForQr] = useState<any>(null);
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -93,6 +142,14 @@ export const AdminUsersPage: React.FC = () => {
     }
   };
 
+  const handleQrOpen = (u: any) => {
+    setSelectedForQr(u);
+  };
+
+  const getPublicProfileUrl = (login: string) => {
+    return `${window.location.origin}/public_profile/${login}`;
+  };
+
   return (
     <AdminLayout>
       <div>
@@ -112,6 +169,7 @@ export const AdminUsersPage: React.FC = () => {
                     <th style={{ padding: '10px' }}>Роль</th>
                     <th style={{ padding: '10px' }}>Статус</th>
                     <th style={{ padding: '10px' }}>Команда</th>
+                    <th style={{ padding: '10px' }}>Действия</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -152,12 +210,32 @@ export const AdminUsersPage: React.FC = () => {
                         </span>
                       </td>
                       <td style={{ padding: '10px' }}>{u.team_name || '-'}</td>
+                      <td style={{ padding: '10px' }}>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          <Link
+                            to={`/public_profile/${u.email || u.login}`}
+                            className="btn btn-secondary"
+                            style={{ fontSize: '12px', padding: '4px 8px', textDecoration: 'none' }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            Открыть
+                          </Link>
+                          <button
+                            className="btn btn-primary"
+                            style={{ fontSize: '12px', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                            onClick={(e) => { e.stopPropagation(); handleQrOpen(u); }}
+                          >
+                            <QrCode size={14} /> QR
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
 
+            {/* Модалка редактирования пользователя */}
             {selectedUser && (
               <div style={{ marginTop: '24px', backgroundColor: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
@@ -282,6 +360,45 @@ export const AdminUsersPage: React.FC = () => {
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Модалка QR-кода */}
+        {selectedForQr && (
+          <div style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '16px',
+          }}>
+            <div style={{ backgroundColor: '#fff', borderRadius: '12px', maxWidth: '400px', width: '100%', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', position: 'relative' }}>
+              <button
+                onClick={() => setSelectedForQr(null)}
+                style={{ position: 'absolute', top: '12px', right: '12px', border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8' }}
+              >
+                <X size={20} />
+              </button>
+              <h3 style={{ margin: '0 0 16px', fontSize: '18px', color: '#0f172a' }}>QR-код пользователя</h3>
+              <div style={{ textAlign: 'center' }}>
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(getPublicProfileUrl(selectedForQr.email || selectedForQr.login))}`}
+                  alt="QR-код"
+                  style={{ width: '200px', height: '200px', borderRadius: '8px', border: '1px solid #e2e8f0' }}
+                />
+                <p style={{ marginTop: '12px', fontSize: '14px', color: '#475569', wordBreak: 'break-all' }}>
+                  <a href={getPublicProfileUrl(selectedForQr.email || selectedForQr.login)} target="_blank" rel="noreferrer" style={{ color: '#0284c7' }}>
+                    {getPublicProfileUrl(selectedForQr.email || selectedForQr.login)}
+                  </a>
+                </p>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+                <button className="btn btn-secondary" onClick={() => setSelectedForQr(null)}>Закрыть</button>
+              </div>
+            </div>
           </div>
         )}
       </div>
