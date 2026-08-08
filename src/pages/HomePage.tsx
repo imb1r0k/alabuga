@@ -51,7 +51,12 @@ export const HomePage: React.FC = () => {
       const fetchBooking = async () => {
         try {
           const data = await getMyBooking();
-          setMyBooking(data?.booking || null);
+          // Игнорируем архивные брони
+          if (data?.booking && data.booking.status !== 'archived') {
+            setMyBooking(data.booking);
+          } else {
+            setMyBooking(null);
+          }
         } catch (err) {
           console.error(err);
         } finally {
