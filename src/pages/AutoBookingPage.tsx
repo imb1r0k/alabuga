@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { UserPlus, ArrowLeft, CheckCircle, KeyRound, UserCheck } from 'lucide-react';
+import { UserPlus, ArrowLeft, CheckCircle, UserCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/Toast';
 import { autoBook } from '../services/api';
 
 type Gender = 'M' | 'F' | null;
-type Method = 'manual' | 'auto' | null;
 type AuthStep = 'auth' | 'login' | 'register' | 'result';
 
 const formatPhone = (value: string) => {
@@ -32,7 +31,7 @@ export const AutoBookingPage: React.FC = () => {
   const navigate = useNavigate();
 
   const [gender, setGender] = useState<Gender>(null);
-  const [method, setMethod] = useState<Method>(null);
+  const [autoMode, setAutoMode] = useState(false); // выбран ли автоматический метод
   const [authStep, setAuthStep] = useState<AuthStep>(isAuthenticated ? 'result' : 'auth');
 
   // Данные формы
@@ -68,16 +67,7 @@ export const AutoBookingPage: React.FC = () => {
       let newUser = false;
 
       if (isAuthenticated) {
-        // Авторизованный пользователь – используем его данные
-        payload = {
-          ...payload,
-          mode: 'existing',
-          first_name: firstName,
-          last_name: lastName,
-          phone,
-          login: regLogin || user?.login,
-        };
-        // Выполняем запрос с токеном
+        payload = { ...payload, mode: 'existing' };
         const response = await autoBook(payload);
         token = response.token;
         userData = response.user;
@@ -95,8 +85,7 @@ export const AutoBookingPage: React.FC = () => {
         userData = response.user;
         booking = response.booking;
         newUser = response.new_user;
-      } else {
-        // Регистрация
+      } else if (authStep === 'register') {
         if (!lastName.trim() || !firstName.trim()) {
           setError('Фамилия и Имя обязательны');
           setLoading(false);
@@ -148,7 +137,6 @@ export const AutoBookingPage: React.FC = () => {
     }
   };
 
-  // Если выбрано "Выбрать комнату самому" – вернёмся на главную с прокруткой
   const handleManualMethod = () => {
     navigate('/', { state: { scrollToBooking: true } });
   };
@@ -167,9 +155,10 @@ export const AutoBookingPage: React.FC = () => {
         <p style={{ color: '#64748b', fontSize: '15px' }}>Выберите ваш пол и способ заселения</p>
       </div>
 
-      {authStep === 'auth' && (
+      {/* Всегда показываем шаги, кроме результата */}
+      {authStep !== 'result' && (
         <div>
-          {/* Шаг 1: выбор пола */}
+          {/* Шаг 1: пол */}
           <div style={{ marginBottom: '24px' }}>
             <h2 style={{ fontSize: '18px', fontWeight: '600', color: '#1e293b', marginBottom: '12px' }}>Ваш пол</h2>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
@@ -208,8 +197,8 @@ export const AutoBookingPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Шаг 2: выбор способа */}
-          <div>
+          {/* Шаг 2: метод */}
+          <div style={{ marginBottom: '24px' }}>
             <h2 style={{ fontSize: '18px', fontWeight: '600', color: '#1e293b', marginBottom: '12px' }}>Как хотите заселиться?</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <button
@@ -233,7 +222,7 @@ export const AutoBookingPage: React.FC = () => {
                 <ArrowLeft size={18} />
               </button>
               <button
-                onClick={() => setMethod('auto')}
+                onClick={() => { setAutoMode(true); setAuthStep(isAuthenticated ? 'result' : 'auth'); }}
                 disabled={!gender}
                 style={{
                   padding: '16px',
@@ -255,9 +244,9 @@ export const AutoBookingPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Шаг 3: форма авторизации, если выбран автоматический метод */}
-          {method === 'auto' && (
-            <div style={{ marginTop: '24px', borderTop: '1px solid #e2e8f0', paddingTop: '24px' }}>
+          {/* Шаг 3: форма для авто-метода */}
+          {autoMode && (
+            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '24px' }}>
               {isAuthenticated ? (
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px', backgroundColor: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', marginBottom: '16px' }}>
@@ -266,12 +255,6 @@ export const AutoBookingPage: React.FC = () => {
                       Вы вошли как {user?.last_name} {user?.first_name}
                     </span>
                   </div>
-                  <div style={{ backgroundColor: '#f8fafc', borderRadius: '8px', padding: '16px', border: '1px solid #e2e8f0', fontSize: '14px', lineHeight: 1.8, marginBottom: '12px' }}>
-                    <p><strong>Фамилия:</strong> {lastName}</p>
-                    <p><strong>Имя:</strong> {firstName}</p>
-                    <p><strong>Телефон:</strong> {phone}</p>
-                    <p><strong>Логин:</strong> {regLogin || user?.login}</p>
-                  </div>
                   {error && <div style={{ padding: '10px', borderRadius: '6px', marginBottom: '12px', backgroundColor: '#f8d7da', color: '#721c24', fontSize: '13px' }}>{error}</div>}
                   <button onClick={handleSubmit} className="btn btn-primary" style={{ width: '100%', padding: '12px' }} disabled={loading}>
                     {loading ? 'Поиск комнаты...' : 'Подтвердить и заселить автоматически'}
@@ -279,11 +262,13 @@ export const AutoBookingPage: React.FC = () => {
                 </div>
               ) : (
                 <div>
-                  <p style={{ fontSize: '15px', color: '#0f172a', marginBottom: '16px' }}>Вам потребуется аккаунт для бронирования.</p>
                   {authStep === 'auth' ? (
-                    <div style={{ display: 'flex', gap: '12px', flexDirection: 'column' }}>
-                      <button className="btn btn-primary" onClick={() => setAuthStep('login')} style={{ padding: '12px', fontSize: '15px' }}>У меня есть аккаунт</button>
-                      <button className="btn btn-secondary" onClick={() => setAuthStep('register')} style={{ padding: '12px', fontSize: '15px' }}>Зарегистрироваться</button>
+                    <div>
+                      <p style={{ fontSize: '15px', color: '#0f172a', marginBottom: '16px' }}>Вам потребуется аккаунт для бронирования.</p>
+                      <div style={{ display: 'flex', gap: '12px', flexDirection: 'column' }}>
+                        <button className="btn btn-primary" onClick={() => setAuthStep('login')} style={{ padding: '12px', fontSize: '15px' }}>У меня есть аккаунт</button>
+                        <button className="btn btn-secondary" onClick={() => setAuthStep('register')} style={{ padding: '12px', fontSize: '15px' }}>Зарегистрироваться</button>
+                      </div>
                     </div>
                   ) : (
                     <form onSubmit={handleSubmit}>

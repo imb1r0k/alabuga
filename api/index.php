@@ -211,6 +211,18 @@ ensureTablesExist($pdo);
 
 // ─── Вспомогательные функции ─────────────────────────────────────────────────
 
+// Определяет пол по окончанию фамилии (простое правило)
+function detectGenderByLastName($lastName) {
+    $lastName = trim((string)$lastName);
+    if ($lastName === '') return null;
+    $lastChar = mb_substr($lastName, -1, 1, 'UTF-8');
+    // Женские окончания: "а", "я", "ия", "ева", "ова" и т.д. – упростим до а, я, ая, яя
+    if (in_array($lastChar, ['а', 'я'], true) || mb_substr($lastName, -2, 2, 'UTF-8') === 'ая' || mb_substr($lastName, -2, 2, 'UTF-8') === 'яя') {
+        return 'F';
+    }
+    return 'M';
+}
+
 function getBearerToken() {
     $headers = null;
     if (isset($_SERVER['Authorization'])) {
@@ -1032,7 +1044,42 @@ try {
         $stmt = $pdo->prepare("INSERT INTO tokens (user_id, token, expires_at) VALUES (?, ?, ?)");
         $stmt->execute([$user['id'], $token, $expiresAt]);
 
-        // (код book остаётся без изменений, но уже содержит проверку активной брони)
+        // Если комната смешанного типа (DEFAULT или MIXED) – определяем пол по фамилии и устанавливаем его
+        if ($room['gender'] == 'DEFAULT' || $room['gender'] == 'MIXED') {
+            $detectedGender = detectGenderByLastName($user['last_name'] ?? $user['name'] ?? '');
+            if ($detectedGender) {
+                $stmt = $pdo->prepare("UPDATE rooms SET gender = ? WHERE id = ?");
+                $stmt->execute([$detectedGender, $room['id']]);
+                $room['gender'] = $detectedGender;
+            }
+        }
+
+        // Проверяем наличие активного бронирования (не отклонённого и не архивного)
+        $stmt = $pdo->prepare("
+            SELECT b.id, b.status, b.comment, r.room_number, bu.name as building_name, f.floor_number
+            FROM bookings b
+            JOIN rooms r ON b.room_id = r.id
+            JOIN buildings bu ON r.building_id = bu.id
+            JOIN floors f ON r.floor_id = f.id
+            WHERE b.user_id = ?
+            AND b.status NOT IN ('rejected', 'archived')
+            ORDER BY b.id DESC LIMIT 1
+        ");
+        $stmt->execute([$user['id']]);
+        $activeBooking = $stmt->fetch();
+
+        if ($activeBooking) {
+            jsonError(
+                "У вас уже есть активное бронирование: статус \""
+                . $activeBooking['status']
+                . "\", комната №" . $activeBooking['room_number']
+                . " в корпусе \"" . $activeBooking['building_name']
+                . "\", этаж " . $activeBooking['floor_number']
+                . " (ID: " . $activeBooking['id'] . ")",
+                400
+            );
+        }
+
         // Создаём бронь
         $stmt = $pdo->prepare("INSERT INTO bookings (user_id, room_id, status) VALUES (?, ?, 'pending')");
         $stmt->execute([$user['id'], $roomId]);
@@ -1177,7 +1224,8 @@ try {
                     foreach ($rooms as $room) {
                         // эффективный пол комнаты
                         $roomEffGender = $room['gender'] != 'DEFAULT' ? $room['gender'] : $floorEffGender;
-                        if ($roomEffGender != $gender) continue;
+                        // Если эффективный пол MIXED – комната подходит для любого пола
+                        if ($roomEffGender !== 'MIXED' && $roomEffGender != $gender) continue;
                         // проверка на активные брони
                         $stmt = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE room_id = ? AND status NOT IN ('rejected','archived')");
                         $stmt->execute([$room['id']]);
@@ -1203,6 +1251,17 @@ try {
         $stmt->execute([$user['id'], $token, $expiresAt]);
 
         $room = $available['room'];
+
+        // Если комната смешанного типа – устанавливаем пол по фамилии
+        if ($room['gender'] == 'DEFAULT' || $room['gender'] == 'MIXED') {
+            $detectedGender = detectGenderByLastName($user['last_name'] ?? $user['name'] ?? '');
+            if ($detectedGender) {
+                $stmt = $pdo->prepare("UPDATE rooms SET gender = ? WHERE id = ?");
+                $stmt->execute([$detectedGender, $room['id']]);
+                $room['gender'] = $detectedGender;
+            }
+        }
+
         $stmt = $pdo->prepare("INSERT INTO bookings (user_id, room_id, status) VALUES (?, ?, 'pending')");
         $stmt->execute([$user['id'], $room['id']]);
         $bookingId = (int)$pdo->lastInsertId();
