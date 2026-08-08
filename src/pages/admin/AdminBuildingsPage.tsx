@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Skeleton } from '../../components/Skeleton';
 import { AdminLayout } from '../../components/AdminLayout';
+import { useOrientation } from '../../hooks/useOrientation';
 import {
   getAdminBuildings,
   saveAdminBuilding,
@@ -101,8 +102,12 @@ export const AdminBuildingsPage: React.FC = () => {
 
   // Режим редактирования
   const [isEditLayout, setIsEditLayout] = useState(false);
-  // Переключение вида (автоматически включаем вертикальный для маленьких экранов)
-  const [forceVerticalView, setForceVerticalView] = useState(false);
+  // Автоопределение ориентации устройства (портрет/ландшафт)
+  const isPortrait = useOrientation();
+  // Предпочтение пользователя: auto | landscape | portrait
+  const [viewOverride, setViewOverride] = useState<'auto' | 'landscape' | 'portrait'>('auto');
+  // Показываем вертикальный (повёрнутый) макет на портретных устройствах или по выбору пользователя
+  const showVertical = viewOverride === 'portrait' || (viewOverride === 'auto' && isPortrait);
 
   const [buildingsLoading, setBuildingsLoading] = useState(false);
   const [savingBuilding, setSavingBuilding] = useState(false);
@@ -739,6 +744,13 @@ export const AdminBuildingsPage: React.FC = () => {
 
   const floorWidth = Number(selectedFloor?.width) || 8;
 
+  // Размеры горизонтальной сетки этажа (нужны для корректного поворота на 90° для смартфонов)
+  const cellSize = 95;
+  const corridorHeight = 32;
+  const gridGap = 8;
+  const gridHeight = 90 * 2 + corridorHeight + gridGap * 2; // 228 — высота сетки по вертикали
+  const gridWidth = floorWidth * cellSize + (floorWidth - 1) * gridGap; // ширина сетки
+
   return (
     <AdminLayout>
       <div style={{ padding: '0 10px' }}>
@@ -915,13 +927,13 @@ export const AdminBuildingsPage: React.FC = () => {
 
                       {/* Кнопка ручного переключения Вертикального/Горизонтального макета */}
                       <button
-                        onClick={() => setForceVerticalView(!forceVerticalView)}
+                        onClick={() => setViewOverride(showVertical ? 'landscape' : 'portrait')}
                         className="btn btn-secondary"
                         style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
-                        title="Переключить вид карточек этажа"
+                        title="Переключить ориентацию макета этажа"
                       >
-                        {forceVerticalView ? <Monitor size={16} /> : <Smartphone size={16} />}
-                        <span className="hidden md:inline">{forceVerticalView ? 'Горизонтально' : 'Вертикально (Смартфон)'}</span>
+                        {showVertical ? <Monitor size={16} /> : <Smartphone size={16} />}
+                        <span className="hidden md:inline">{showVertical ? 'Горизонтально' : 'Вертикально'}</span>
                       </button>
 
                       {isEditLayout && (
@@ -1139,26 +1151,65 @@ export const AdminBuildingsPage: React.FC = () => {
                         </div>
                       )}
 
-                      {/* СЕТКА ЭТАЖА (АДАПТИВНАЯ: НА ПК ГОРИЗОНТАЛЬНАЯ, НА МОБИЛЬНЫХ ВЕРТИКАЛЬНАЯ) */}
-                      <div className="w-full overflow-x-auto py-2">
-                        
-                        {/* 1. Горизонтальный макет (для широких экранов ПК) */}
-                        <div className={`${forceVerticalView ? 'hidden' : 'hidden md:block'}`}>
-                          <div
-                            style={{
-                              display: 'grid',
-                              gridTemplateColumns: `repeat(${floorWidth}, 95px)`,
-                              gap: '8px',
-                              justifyContent: 'start',
-                            }}
-                          >
+                      {/* СЕТКА ЭТАЖА (АДАПТИВНАЯ: ориентация определяется автоматически; на смартфоне макет повёрнут на 90° влево) */}
+                      <div className="w-full overflow-auto py-2">
+                        <div className="text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1.5">
+                          {showVertical ? <Monitor size={14} /> : <Smartphone size={14} />}
+                          {showVertical ? 'Вертикальный вид (смартфон, макет повёрнут на 90° влево):' : 'Горизонтальный вид (ПК):'}
+                        </div>
+
+                        {/* Горизонтальный макет: общий для ПК и смартфона (на смартфоне просто повёрнут) */}
+                        {showVertical ? (
+                          <div style={{
+                            width: gridHeight,
+                            height: gridWidth,
+                            position: 'relative',
+                            margin: '0 auto',
+                          }}>
+                            <div style={{
+                              position: 'absolute',
+                              top: '50%',
+                              left: '50%',
+                              width: gridWidth,
+                              height: gridHeight,
+                              transform: 'translate(-50%, -50%) rotate(-90deg)',
+                            }}>
+                              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${floorWidth}, ${cellSize}px)`, gap: gridGap, justifyContent: 'start' }}>
+                                {/* Верхний ряд (y=0) */}
+                                {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 0))}
+
+                                {/* Коридор (y=1) */}
+                                <div style={{
+                                  gridColumn: `1 / span ${floorWidth}`,
+                                  height: corridorHeight,
+                                  backgroundColor: '#e2e8f0',
+                                  border: '1px solid #cbd5e1',
+                                  borderRadius: '6px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  color: '#475569',
+                                  fontWeight: 'bold',
+                                  fontSize: '11px',
+                                  letterSpacing: '2px',
+                                }}>
+                                  ═══ КОРИДОР ═══
+                                </div>
+
+                                {/* Нижний ряд (y=2) */}
+                                {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 2))}
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${floorWidth}, ${cellSize}px)`, gap: gridGap, justifyContent: 'start' }}>
                             {/* Верхний ряд (y=0) */}
                             {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 0))}
 
                             {/* Коридор (y=1) */}
                             <div style={{
                               gridColumn: `1 / span ${floorWidth}`,
-                              height: '32px',
+                              height: corridorHeight,
                               backgroundColor: '#e2e8f0',
                               border: '1px solid #cbd5e1',
                               borderRadius: '6px',
@@ -1176,38 +1227,7 @@ export const AdminBuildingsPage: React.FC = () => {
                             {/* Нижний ряд (y=2) */}
                             {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 2))}
                           </div>
-                        </div>
-
-                        {/* 2. Вертикальный макет (для Смартфонов и маленьких экранов):
-                            Слева комнаты y=0, посередине вертикальный коридор, справа комнаты y=2 */}
-                        <div className={`${forceVerticalView ? 'block' : 'block md:hidden'}`}>
-                          <div className="text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1.5">
-                            <Smartphone size={14} /> Вертикальный вид корпуса для смартфона:
-                          </div>
-
-                          <div className="grid grid-cols-[1fr_28px_1fr] gap-2 max-w-sm mx-auto">
-                            {/* По заголовку для колонок */}
-                            <div className="text-center text-xs font-bold text-slate-600 bg-slate-100 p-1 rounded">Левое крыло</div>
-                            <div className="text-center text-xs font-bold text-slate-400 p-1">║</div>
-                            <div className="text-center text-xs font-bold text-slate-600 bg-slate-100 p-1 rounded">Правое крыло</div>
-
-                            {Array.from({ length: floorWidth }).map((_, x) => (
-                              <React.Fragment key={`vert-row-${x}`}>
-                                {/* Левая комната (y=0) */}
-                                <div>{renderCellTile(x, 0)}</div>
-
-                                {/* Вертикальный сегмент коридора */}
-                                <div className="bg-slate-200 border border-slate-300 rounded flex items-center justify-center text-[10px] font-bold text-slate-500 writing-mode-vertical">
-                                  ║
-                                </div>
-
-                                {/* Правая комната (y=2) */}
-                                <div>{renderCellTile(x, 2)}</div>
-                              </React.Fragment>
-                            ))}
-                          </div>
-                        </div>
-
+                        )}
                       </div>
 
                       {/* МОДАЛЬНОЕ ОКНО ДЕТАЛЕЙ КОМНАТЫ И БРОНИРОВАНИЙ */}
