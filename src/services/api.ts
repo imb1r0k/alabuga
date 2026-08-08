@@ -48,6 +48,37 @@ export const saveGlobalNotification = async (payload: {
   return response.data;
 };
 
+// ─── Статистика (Админка) ─────────────────────────────────────────────────────
+
+export const getAdminStats = async () => {
+  const response = await api.get('/admin/stats');
+  return response.data;
+};
+
+// ─── Экспорт (Админка) ───────────────────────────────────────────────────────
+
+export const getExportBookings = async () => {
+  const response = await api.get('/admin/export/bookings');
+  return response.data;
+};
+
+export const getExportLayouts = async () => {
+  const response = await api.get('/admin/export/layouts');
+  return response.data;
+};
+
+// ─── Очистка (Админка) ───────────────────────────────────────────────────────
+
+export const archiveAllBookings = async () => {
+  const response = await api.post('/admin/archive-bookings');
+  return response.data;
+};
+
+export const archiveAllUsers = async () => {
+  const response = await api.post('/admin/archive-users');
+  return response.data;
+};
+
 // ─── Пользователи (Админка) ───────────────────────────────────────────────────
 
 export const getAdminUsers = async () => {

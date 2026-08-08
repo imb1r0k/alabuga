@@ -69,6 +69,7 @@ function initFreshDatabase($pdo) {
           `phone` VARCHAR(50) NULL,
           `password` VARCHAR(255) NOT NULL,
           `role` VARCHAR(50) NOT NULL DEFAULT 'user',
+          `status` ENUM('active','archived') NOT NULL DEFAULT 'active',
           `team_name` VARCHAR(100) NULL,
           `team_id` INT NULL DEFAULT NULL,
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -164,7 +165,7 @@ function initFreshDatabase($pdo) {
           `id` INT AUTO_INCREMENT PRIMARY KEY,
           `user_id` INT NOT NULL,
           `room_id` INT NOT NULL,
-          `status` ENUM('pending', 'rejected', 'approved', 'approved_bot') NOT NULL DEFAULT 'pending',
+          `status` ENUM('pending', 'rejected', 'approved', 'approved_bot', 'archived') NOT NULL DEFAULT 'pending',
           `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
@@ -175,15 +176,28 @@ function initFreshDatabase($pdo) {
     $pdo->exec($sql);
 
     $adminHash = password_hash('admin123', PASSWORD_DEFAULT);
-    $stmt = $pdo->prepare("INSERT INTO `users` (`first_name`, `last_name`, `name`, `login`, `phone`, `password`, `role`, `team_name`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt = $pdo->prepare("INSERT INTO `users` (`first_name`, `last_name`, `name`, `login`, `phone`, `password`, `role`, `status`, `team_name`) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)");
     $stmt->execute(['Админ', 'Главный', 'Администратор', 'admin', '+79990000000', $adminHash, 'admin', 'Оргкомитет']);
 }
 
 function ensureTablesExist($pdo) {
     try {
-        $pdo->query("SELECT 1 FROM `users` LIMIT 1");
+        $pdo->query("SELECT `status` FROM `users` LIMIT 1");
+        $pdo->query("SELECT `status` FROM `bookings` LIMIT 1");
     } catch (Exception $e) {
-        initFreshDatabase($pdo);
+        // Проверяем, существует ли таблица users вообще
+        try {
+            $pdo->query("SELECT 1 FROM `users` LIMIT 1");
+            // Таблица есть, но нет колонки status — добавляем миграцию
+            try {
+                $pdo->exec("ALTER TABLE `users` ADD COLUMN `status` ENUM('active','archived') NOT NULL DEFAULT 'active' AFTER `role`");
+            } catch (Exception $e2) {}
+            try {
+                $pdo->exec("ALTER TABLE `bookings` MODIFY COLUMN `status` ENUM('pending', 'rejected', 'approved', 'approved_bot', 'archived') NOT NULL DEFAULT 'pending'");
+            } catch (Exception $e3) {}
+        } catch (Exception $e1) {
+            initFreshDatabase($pdo);
+        }
     }
 }
 
@@ -263,6 +277,135 @@ try {
     if ($uri === 'init-db') {
         initFreshDatabase($pdo);
         jsonResponse(['success' => true, 'message' => 'База данных успешно инициализирована заново. Логин: admin / Пароль: admin123']);
+    }
+
+    // ─── Статистика для админ-панели ──────────────────────────────────────
+
+    if ($uri === 'admin/stats') {
+        $user = requireAdmin($pdo);
+
+        // Всего корпусов
+        $buildingsCount = (int)$pdo->query("SELECT COUNT(*) FROM buildings")->fetchColumn();
+
+        // Всего комнат (не технических)
+        $roomsCount = (int)$pdo->query("SELECT COUNT(*) FROM rooms WHERE is_technical = 0 AND room_type = 'room'")->fetchColumn();
+
+        // Всего мест (сумма вместимости)
+        $totalSeats = (int)$pdo->query("SELECT COALESCE(SUM(capacity), 0) FROM rooms WHERE is_technical = 0 AND room_type = 'room'")->fetchColumn();
+
+        // Всего занято мест (уникальные пользователи с одобренной бронью)
+        $occupiedStmt = $pdo->query("
+            SELECT COUNT(DISTINCT b.user_id)
+            FROM bookings b
+            WHERE b.status IN ('approved', 'approved_bot')
+        ");
+        $occupiedSeats = (int)$occupiedStmt->fetchColumn();
+
+        // Всего заявок (все, кроме archived)
+        $totalBookings = (int)$pdo->query("SELECT COUNT(*) FROM bookings WHERE status <> 'archived'")->fetchColumn();
+
+        // Сводка по статусам
+        $statusStmt = $pdo->query("
+            SELECT status, COUNT(*) as cnt
+            FROM bookings
+            WHERE status <> 'archived'
+            GROUP BY status
+        ");
+        $statusCounts = ['pending' => 0, 'approved' => 0, 'approved_bot' => 0, 'rejected' => 0];
+        foreach ($statusStmt->fetchAll() as $row) {
+            if (isset($statusCounts[$row['status']])) {
+                $statusCounts[$row['status']] = (int)$row['cnt'];
+            }
+        }
+
+        // Сколько активных пользователей
+        $activeUsers = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE status = 'active' AND role <> 'admin'")->fetchColumn();
+
+        jsonResponse([
+            'buildings' => $buildingsCount,
+            'rooms' => $roomsCount,
+            'total_seats' => $totalSeats,
+            'occupied_seats' => $occupiedSeats,
+            'total_bookings' => $totalBookings,
+            'status_counts' => $statusCounts,
+            'active_users' => $activeUsers,
+        ]);
+    }
+
+    // ─── Экспорт всех бронирований ────────────────────────────────────────
+
+    if ($uri === 'admin/export/bookings') {
+        $user = requireAdmin($pdo);
+        $stmt = $pdo->query("
+            SELECT b.id, b.status, b.created_at, b.updated_at,
+                   u.last_name, u.first_name, u.phone as user_phone, u.login,
+                   bu.name as building_name, f.floor_number, f.id as floor_id,
+                   r.room_number, r.capacity, r.gender
+            FROM bookings b
+            JOIN users u ON b.user_id = u.id
+            JOIN rooms r ON b.room_id = r.id
+            JOIN buildings bu ON r.building_id = bu.id
+            JOIN floors f ON r.floor_id = f.id
+            ORDER BY b.id DESC
+        ");
+        jsonResponse($stmt->fetchAll());
+    }
+
+    // ─── Экспорт макетов всех корпусов ────────────────────────────────────
+
+    if ($uri === 'admin/export/layouts') {
+        $user = requireAdmin($pdo);
+        $buildings = $pdo->query("SELECT * FROM buildings ORDER BY id ASC")->fetchAll();
+        $result = [];
+
+        foreach ($buildings as $building) {
+            $floors = $pdo->prepare("SELECT * FROM floors WHERE building_id = ? ORDER BY floor_number ASC");
+            $floors->execute([$building['id']]);
+            $floorsData = [];
+
+            foreach ($floors->fetchAll() as $floor) {
+                $rooms = $pdo->prepare("SELECT * FROM rooms WHERE floor_id = ? ORDER BY y_pos ASC, x_pos ASC");
+                $rooms->execute([$floor['id']]);
+                $floorsData[] = [
+                    'id' => (int)$floor['id'],
+                    'floor_number' => (int)$floor['floor_number'],
+                    'width' => (int)$floor['width'],
+                    'start_room_number' => $floor['start_room_number'],
+                    'room_order_type' => $floor['room_order_type'],
+                    'gender' => $floor['gender'],
+                    'rooms' => $rooms->fetchAll(),
+                ];
+            }
+
+            $result[] = [
+                'id' => (int)$building['id'],
+                'name' => $building['name'],
+                'gender' => $building['gender'],
+                'floors' => $floorsData,
+            ];
+        }
+
+        jsonResponse($result);
+    }
+
+    // ─── Очистка: перенести все брони в архив ────────────────────────────
+
+    if ($uri === 'admin/archive-bookings') {
+        $user = requireAdmin($pdo);
+        if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
+        $stmt = $pdo->prepare("UPDATE bookings SET status = 'archived' WHERE status <> 'archived'");
+        $stmt->execute();
+        jsonResponse(['success' => true, 'affected' => $stmt->rowCount()]);
+    }
+
+    // ─── Очистка: перенести всех пользователей (кроме админов) в архив ───
+
+    if ($uri === 'admin/archive-users') {
+        $user = requireAdmin($pdo);
+        if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
+        $stmt = $pdo->prepare("UPDATE users SET status = 'archived' WHERE role <> 'admin' AND status = 'active'");
+        $stmt->execute();
+        jsonResponse(['success' => true, 'affected' => $stmt->rowCount()]);
     }
 
     // ─── Настройки (публичные + админские) ─────────────────────────────────
@@ -437,7 +580,7 @@ try {
         $fullName = $lastName . ' ' . $firstName;
         $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
 
-        $stmt = $pdo->prepare("INSERT INTO users (first_name, last_name, name, login, phone, password, role) VALUES (?, ?, ?, ?, ?, ?, 'user')");
+        $stmt = $pdo->prepare("INSERT INTO users (first_name, last_name, name, login, phone, password, role, status) VALUES (?, ?, ?, ?, ?, ?, 'user', 'active')");
         $stmt->execute([$firstName, $lastName, $fullName, $finalLogin, $phone, $hashedPassword]);
         $userId = (int)$pdo->lastInsertId();
 
@@ -456,6 +599,7 @@ try {
             'login'      => $finalLogin,
             'phone'      => $phone,
             'role'       => 'user',
+            'status'     => 'active',
             'password'   => $password,
         ];
 
@@ -479,9 +623,10 @@ try {
 
         $stmt = $pdo->prepare("
             SELECT * FROM users
-            WHERE login = :input
+            WHERE (login = :input
                OR phone = :input
-               OR (CHAR_LENGTH(:digits) >= 10 AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, '+', ''), ' ', ''), '(', ''), ')', ''), '-', '') LIKE CONCAT('%', :digits2))
+               OR (CHAR_LENGTH(:digits) >= 10 AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, '+', ''), ' ', ''), '(', ''), ')', ''), '-', '') LIKE CONCAT('%', :digits2)))
+              AND status = 'active'
             LIMIT 1
         ");
         $stmt->execute([
@@ -698,7 +843,7 @@ try {
 
         if ($uri === 'admin/users') {
             if ($method === 'GET') {
-                $stmt = $pdo->query("SELECT id, first_name, last_name, name, login as email, phone, role, team_name, team_id, created_at FROM users ORDER BY id DESC");
+                $stmt = $pdo->query("SELECT id, first_name, last_name, name, login as email, phone, role, status, team_name, team_id, created_at FROM users ORDER BY id DESC");
                 jsonResponse($stmt->fetchAll());
             }
 
@@ -709,6 +854,7 @@ try {
                 $phone = trim($data['phone'] ?? '');
                 $login = trim($data['email'] ?? $data['login'] ?? '');
                 $role = trim($data['role'] ?? 'user');
+                $status = trim($data['status'] ?? 'active');
                 $teamName = trim($data['team_name'] ?? '');
                 $teamId = (int)($data['team_id'] ?? 0);
                 $password = trim($data['password'] ?? '');
@@ -723,11 +869,11 @@ try {
                     }
                     if ($password) {
                         $hash = password_hash($password, PASSWORD_DEFAULT);
-                        $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, name=?, phone=?, login=?, role=?, team_name=?, team_id=?, password=? WHERE id=?");
-                        $stmt->execute([$firstName, $lastName, $fullName, $phone, $login, $role, $teamNameResolved, $teamId ?: null, $hash, $id]);
+                        $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, name=?, phone=?, login=?, role=?, status=?, team_name=?, team_id=?, password=? WHERE id=?");
+                        $stmt->execute([$firstName, $lastName, $fullName, $phone, $login, $role, $status, $teamNameResolved, $teamId ?: null, $hash, $id]);
                     } else {
-                        $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, name=?, phone=?, login=?, role=?, team_name=?, team_id=? WHERE id=?");
-                        $stmt->execute([$firstName, $lastName, $fullName, $phone, $login, $role, $teamNameResolved, $teamId ?: null, $id]);
+                        $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, name=?, phone=?, login=?, role=?, status=?, team_name=?, team_id=? WHERE id=?");
+                        $stmt->execute([$firstName, $lastName, $fullName, $phone, $login, $role, $status, $teamNameResolved, $teamId ?: null, $id]);
                     }
 
                     // Синхронизируем team_members с назначенной командой

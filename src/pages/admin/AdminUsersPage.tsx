@@ -17,6 +17,7 @@ export const AdminUsersPage: React.FC = () => {
     phone: '',
     email: '',
     role: 'user',
+    status: 'active',
     team_name: '',
     team_id: 0,
     password: '',
@@ -61,6 +62,7 @@ export const AdminUsersPage: React.FC = () => {
       phone: u.phone || '',
       email: u.email || '',
       role: u.role || 'user',
+      status: u.status || 'active',
       team_name: u.team_name || '',
       team_id: u.team_id || 0,
       password: '',
@@ -108,6 +110,7 @@ export const AdminUsersPage: React.FC = () => {
                     <th style={{ padding: '10px' }}>Логин</th>
                     <th style={{ padding: '10px' }}>Телефон</th>
                     <th style={{ padding: '10px' }}>Роль</th>
+                    <th style={{ padding: '10px' }}>Статус</th>
                     <th style={{ padding: '10px' }}>Команда</th>
                   </tr>
                 </thead>
@@ -135,6 +138,17 @@ export const AdminUsersPage: React.FC = () => {
                           backgroundColor: u.role === 'admin' ? '#dc2626' : u.role === 'moderator' ? '#2563eb' : '#64748b'
                         }}>
                           {u.role}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px' }}>
+                        <span style={{
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          fontSize: '12px',
+                          color: '#fff',
+                          backgroundColor: u.status === 'archived' ? '#6b7280' : '#16a34a'
+                        }}>
+                          {u.status === 'archived' ? 'В архиве' : 'Активен'}
                         </span>
                       </td>
                       <td style={{ padding: '10px' }}>{u.team_name || '-'}</td>
@@ -192,6 +206,18 @@ export const AdminUsersPage: React.FC = () => {
                       value={userFormData.phone}
                       onChange={(e) => setUserFormData({ ...userFormData, phone: e.target.value })}
                     />
+                  </div>
+
+                  <div className="input-group">
+                    <label>Статус</label>
+                    <select
+                      value={userFormData.status}
+                      onChange={(e) => setUserFormData({ ...userFormData, status: e.target.value })}
+                      style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+                    >
+                      <option value="active">Активен</option>
+                      <option value="archived">В архиве</option>
+                    </select>
                   </div>
 
                   <div className="input-group">
