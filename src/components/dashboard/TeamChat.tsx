@@ -16,6 +16,7 @@ export const TeamChat: React.FC<{ teamId: number }> = ({ teamId }) => {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const firstRender = useRef(true);
 
   const loadMessages = async () => {
     try {
@@ -33,6 +34,11 @@ export const TeamChat: React.FC<{ teamId: number }> = ({ teamId }) => {
   }, [teamId]);
 
   useEffect(() => {
+    // Прокручиваем к последнему сообщению только при добавлении новых (после первого рендера)
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
