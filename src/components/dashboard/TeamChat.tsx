@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Send, ShieldCheck, MessageSquare } from 'lucide-react';
 import { getMyTeamChat, sendMyTeamMessage } from '../../services/api';
 
@@ -15,6 +15,7 @@ export const TeamChat: React.FC<{ teamId: number }> = ({ teamId }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const loadMessages = async () => {
     try {
@@ -30,6 +31,10 @@ export const TeamChat: React.FC<{ teamId: number }> = ({ teamId }) => {
     const interval = setInterval(loadMessages, 5000);
     return () => clearInterval(interval);
   }, [teamId]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,6 +84,7 @@ export const TeamChat: React.FC<{ teamId: number }> = ({ teamId }) => {
             );
           })
         )}
+        <div ref={messagesEndRef} />
       </div>
       <form onSubmit={handleSend} style={{ display: 'flex', gap: '8px' }}>
         <input
