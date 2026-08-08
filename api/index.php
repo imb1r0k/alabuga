@@ -1,4 +1,3 @@
-curator) с привязкой к командам">
 <?php
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
@@ -103,16 +102,13 @@ function requireAdmin($pdo) {
 }
 
 function getCuratorTeams($pdo, $userId) {
-    // Если пользователь admin — возвращаем null (все команды)
-    // Если curator — возвращаем массив id команд, к которым привязан
     $stmt = $pdo->prepare("SELECT role FROM users WHERE id = ?");
     $stmt->execute([$userId]);
     $user = $stmt->fetch();
     if (!$user) return [];
     $role = strtolower(trim($user['role']));
-    if ($role === 'admin') return null; // null означает "все команды"
+    if ($role === 'admin') return null;
     
-    // Получаем id команд из таблицы curator_teams
     $stmt = $pdo->prepare("SELECT team_id FROM curator_teams WHERE user_id = ?");
     $stmt->execute([$userId]);
     $teams = $stmt->fetchAll(PDO::FETCH_COLUMN);
@@ -121,7 +117,7 @@ function getCuratorTeams($pdo, $userId) {
 
 function checkCuratorAccessToUser($pdo, $curatorId, $targetUserId) {
     $curatorTeams = getCuratorTeams($pdo, $curatorId);
-    if ($curatorTeams === null) return true; // admin имеет доступ ко всем
+    if ($curatorTeams === null) return true;
     
     $stmt = $pdo->prepare("SELECT team_id FROM users WHERE id = ?");
     $stmt->execute([$targetUserId]);
@@ -150,6 +146,83 @@ $rawInput = file_get_contents('php://input');
 $data = json_decode($rawInput, true) ?: [];
 
 try {
+
+    // ─── Глобальные уведомления ──────────────────────────────────────────────
+
+    if ($uri === 'get-global-notification') {
+        $stmt = $pdo->prepare("SELECT `value` FROM settings WHERE `key` = 'global_notification'");
+        $stmt->execute();
+        $raw = $stmt->fetchColumn();
+        $notif = $raw ? json_decode($raw, true) : null;
+
+        if (!$notif || empty($notif['enabled'])) {
+            jsonResponse(['notification' => null]);
+        }
+
+        $type = $notif['type'] ?? 'permanent';
+        $viewers = $notif['viewers'] ?? [];
+        $user = getAuthUser($pdo);
+        $viewerKey = $user ? trim((string)$user['login']) : null;
+
+        if ($type === 'one-view' && $viewerKey && in_array($viewerKey, $viewers, true)) {
+            jsonResponse(['notification' => null]);
+        }
+
+        jsonResponse(['notification' => $notif]);
+    }
+
+    if ($uri === 'save-global-notification') {
+        if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
+        requireAdmin($pdo);
+
+        $text = trim($data['text'] ?? '');
+        $type = in_array($data['type'] ?? '', ['permanent', 'one-view'], true) ? $data['type'] : 'permanent';
+        $enabled = !empty($data['enabled']);
+
+        if (!$text) jsonError('Текст уведомления обязателен');
+
+        $stmt = $pdo->prepare("SELECT `value` FROM settings WHERE `key` = 'global_notification'");
+        $stmt->execute();
+        $raw = $stmt->fetchColumn();
+        $existing = $raw ? json_decode($raw, true) : null;
+        $viewers = $existing['viewers'] ?? [];
+
+        $payload = json_encode([
+            'text' => $text,
+            'type' => $type,
+            'enabled' => $enabled,
+            'viewers' => $viewers,
+        ], JSON_UNESCAPED_UNICODE);
+
+        $stmt = $pdo->prepare("INSERT INTO settings (`key`, `value`) VALUES ('global_notification', ?) ON DUPLICATE KEY UPDATE `value` = ?");
+        $stmt->execute([$payload, $payload]);
+
+        jsonResponse(['success' => true]);
+    }
+
+    if ($uri === 'mark-notification-viewed') {
+        if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
+        $user = requireAuth($pdo);
+        $login = trim((string)$user['login']);
+        if (!$login) jsonResponse(['success' => true]);
+
+        $stmt = $pdo->prepare("SELECT `value` FROM settings WHERE `key` = 'global_notification'");
+        $stmt->execute();
+        $raw = $stmt->fetchColumn();
+        $notif = $raw ? json_decode($raw, true) : null;
+        if (!$notif) jsonResponse(['success' => true]);
+
+        $viewers = $notif['viewers'] ?? [];
+        if (!in_array($login, $viewers, true)) {
+            $viewers[] = $login;
+            $notif['viewers'] = $viewers;
+            $payload = json_encode($notif, JSON_UNESCAPED_UNICODE);
+            $stmt = $pdo->prepare("INSERT INTO settings (`key`, `value`) VALUES ('global_notification', ?) ON DUPLICATE KEY UPDATE `value` = ?");
+            $stmt->execute([$payload, $payload]);
+        }
+
+        jsonResponse(['success' => true]);
+    }
 
     // ─── Статистика для админ-панели ──────────────────────────────────────
 
@@ -302,83 +375,6 @@ try {
         jsonError('Метод не поддерживается', 405);
     }
 
-    // ─── Глобальные уведомления ──────────────────────────────────────────────
-
-    if ($uri === 'get-global-notification') {
-        $stmt = $pdo->prepare("SELECT `value` FROM settings WHERE `key` = 'global_notification'");
-        $stmt->execute();
-        $raw = $stmt->fetchColumn();
-        $notif = $raw ? json_decode($raw, true) : null;
-
-        if (!$notif || empty($notif['enabled'])) {
-            jsonResponse(['notification' => null]);
-        }
-
-        $type = $notif['type'] ?? 'permanent';
-        $viewers = $notif['viewers'] ?? [];
-        $user = getAuthUser($pdo);
-        $viewerKey = $user ? trim((string)$user['login']) : null;
-
-        if ($type === 'one-view' && $viewerKey && in_array($viewerKey, $viewers, true)) {
-            jsonResponse(['notification' => null]);
-        }
-
-        jsonResponse(['notification' => $notif]);
-    }
-
-    if ($uri === 'save-global-notification') {
-        if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
-        requireAdmin($pdo);
-
-        $text = trim($data['text'] ?? '');
-        $type = in_array($data['type'] ?? '', ['permanent', 'one-view'], true) ? $data['type'] : 'permanent';
-        $enabled = !empty($data['enabled']);
-
-        if (!$text) jsonError('Текст уведомления обязателен');
-
-        $stmt = $pdo->prepare("SELECT `value` FROM settings WHERE `key` = 'global_notification'");
-        $stmt->execute();
-        $raw = $stmt->fetchColumn();
-        $existing = $raw ? json_decode($raw, true) : null;
-        $viewers = $existing['viewers'] ?? [];
-
-        $payload = json_encode([
-            'text' => $text,
-            'type' => $type,
-            'enabled' => $enabled,
-            'viewers' => $viewers,
-        ], JSON_UNESCAPED_UNICODE);
-
-        $stmt = $pdo->prepare("INSERT INTO settings (`key`, `value`) VALUES ('global_notification', ?) ON DUPLICATE KEY UPDATE `value` = ?");
-        $stmt->execute([$payload, $payload]);
-
-        jsonResponse(['success' => true]);
-    }
-
-    if ($uri === 'mark-notification-viewed') {
-        if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
-        $user = requireAuth($pdo);
-        $login = trim((string)$user['login']);
-        if (!$login) jsonResponse(['success' => true]);
-
-        $stmt = $pdo->prepare("SELECT `value` FROM settings WHERE `key` = 'global_notification'");
-        $stmt->execute();
-        $raw = $stmt->fetchColumn();
-        $notif = $raw ? json_decode($raw, true) : null;
-        if (!$notif) jsonResponse(['success' => true]);
-
-        $viewers = $notif['viewers'] ?? [];
-        if (!in_array($login, $viewers, true)) {
-            $viewers[] = $login;
-            $notif['viewers'] = $viewers;
-            $payload = json_encode($notif, JSON_UNESCAPED_UNICODE);
-            $stmt = $pdo->prepare("INSERT INTO settings (`key`, `value`) VALUES ('global_notification', ?) ON DUPLICATE KEY UPDATE `value` = ?");
-            $stmt->execute([$payload, $payload]);
-        }
-
-        jsonResponse(['success' => true]);
-    }
-
     // ─── Регистрация ────────────────────────────────────────────────────────
 
     if ($uri === 'register') {
@@ -437,7 +433,7 @@ try {
 
         $token = bin2hex(random_bytes(32));
         $expiresAt = date('Y-m-d H:i:s', strtotime('+30 days'));
-        $stmt = $pdo->prepare("INSERT INTO tokens ( token, expires_at) VALUES (?, ?, ?)");
+        $stmt = $pdo->prepare("INSERT INTO tokens (user_id, token, expires_at) VALUES (?, ?, ?)");
         $stmt->execute([$userId, $token, $expiresAt]);
 
         $userData = [
@@ -535,7 +531,7 @@ try {
         jsonResponse(['booking' => $booking]);
     }
 
-    // ─── Отозвать своё активное бронирование (одноуровневый маршрут!) ───────
+    // ─── Отозвать своё активное бронирование ────────────────────────────────
 
     if ($uri === 'cancel-booking') {
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
@@ -606,10 +602,9 @@ try {
         $user = requireAdmin($pdo);
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
         $teamId = (int)($data['team_id'] ?? 0);
-        $userId = (int)($data[' ?? 0);
+        $userId = (int)($data['user_id'] ?? 0);
         if ($teamId <= 0 || $userId <= 0) jsonError('Некорректные параметры');
 
-        // Проверяем доступ куратора к команде
         if (!checkCuratorAccessToTeam($pdo, $user['id'], $teamId)) {
             jsonError('У вас нет доступа к этой команде', 403);
         }
@@ -1228,7 +1223,7 @@ try {
         jsonError('Метод не поддерживается', 405);
     }
 
-    // ─── Мой командный календарь ────────────────────────────────────────────
+    // ─── Мой командный календарь ��───────────────────────────────────────────
 
     if ($uri === 'my-team/calendar') {
         $user = requireAuth($pdo);
@@ -1313,7 +1308,6 @@ try {
                 if ($isAdmin) {
                     $stmt = $pdo->query("SELECT id, first_name, last_name, patronymic, name, login as email, phone, role, status, team_name, team_id, created_at FROM users ORDER BY id DESC");
                 } else {
-                    // Куратор видит только пользователей своих команд
                     if (empty($curatorTeams)) {
                         jsonResponse([]);
                     }
@@ -1337,7 +1331,6 @@ try {
                 $teamId = (int)($data['team_id'] ?? 0);
                 $password = trim($data['password'] ?? '');
 
-                // Куратор может редактировать только пользователей своих команд
                 if (!$isAdmin && $teamId > 0 && !checkCuratorAccessToTeam($pdo, $curatorUser['id'], $teamId)) {
                     jsonError('У вас нет доступа к этой команде', 403);
                 }
