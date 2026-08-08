@@ -14,11 +14,6 @@ export const DashboardPage = () => {
   const [loadingData, setLoadingData] = useState(true);
 
   useEffect(() => {
-    // Сбрасываем прокрутку страницы вверх при загрузке страницы
-    window.scrollTo(0, 0);
-  }, []);
-
-  useEffect(() => {
     if (isAuthenticated) {
       const loadData = async () => {
         setLoadingData(true);

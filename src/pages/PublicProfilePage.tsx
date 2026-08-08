@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Users } from 'lucide-react';
+import { ArrowLeft, Users, MapPin, Clock, CheckCircle2 } from 'lucide-react';
 import { getPublicProfile } from '../services/api';
 
 export const PublicProfilePage: React.FC = () => {
@@ -22,7 +22,7 @@ export const PublicProfilePage: React.FC = () => {
   if (error) return <div style={{ textAlign: 'center', padding: '40px' }}><p style={{ color: '#ef4444' }}>{error}</p></div>;
   if (!profile) return null;
 
-  const { user, team, members } = profile;
+  const { user, team, members, booking } = profile;
 
   const socialFields = [
     { key: 'social_vk', label: 'VK' },
@@ -30,6 +30,12 @@ export const PublicProfilePage: React.FC = () => {
     { key: 'social_instagram', label: 'Instagram' },
     { key: 'social_max', label: 'Max' },
   ];
+
+  const bookingStatusConfig: Record<string, { label: string; color: string; bg: string }> = {
+    pending: { label: 'Ожидает подтверждения', color: '#92400e', bg: '#fef3c7' },
+    approved: { label: 'Проживание подтверждено', color: '#166534', bg: '#dcfce7' },
+    approved_bot: { label: 'Проживание подтверждено автоматически', color: '#075985', bg: '#e0f2fe' },
+  };
 
   return (
     <div style={{ padding: '24px', maxWidth: '700px', margin: '0 auto' }}>
@@ -74,6 +80,52 @@ export const PublicProfilePage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Активное бронирование (если есть) */}
+      {booking && (
+        <div className="card" style={{ marginBottom: '24px', borderColor: '#0284c7', borderLeftWidth: '4px' }}>
+          <h3 style={{ margin: '0 0 12px', fontSize: '18px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <MapPin size={20} color="#0284c7" /> Проживание
+          </h3>
+          <div style={{ fontSize: '14px', color: '#334155', marginBottom: '8px' }}>
+            <strong>Корпус:</strong> {booking.building_name}
+          </div>
+          <div style={{ fontSize: '14px', color: '#334155', marginBottom: '8px' }}>
+            <strong>Этаж:</strong> {booking.floor_number}
+          </div>
+          <div style={{ fontSize: '14px', color: '#334155', marginBottom: '12px' }}>
+            <strong>Комната:</strong> №{booking.room_number}
+          </div>
+          <div>
+            {(() => {
+              const cfg = bookingStatusConfig[booking.status];
+              if (!cfg) return null;
+              const Icon = booking.status === 'pending' ? Clock : CheckCircle2;
+              return (
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '4px 12px',
+                  borderRadius: '16px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  backgroundColor: cfg.bg,
+                  color: cfg.color,
+                }}>
+                  <Icon size={16} />
+                  {cfg.label}
+                </span>
+              );
+            })()}
+          </div>
+          {booking.comment && (
+            <div style={{ marginTop: '12px', padding: '8px', backgroundColor: '#f8fafc', borderRadius: '6px', fontSize: '13px', color: '#475569' }}>
+              <strong>Комментарий:</strong> {booking.comment}
+            </div>
+          )}
+        </div>
+      )}
 
       {team && (
         <div className="card">
