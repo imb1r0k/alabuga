@@ -135,7 +135,9 @@ export const BookingModal: React.FC<BookingModalProps> = ({ room, buildingName, 
       setStage('result');
       showToast('Бронирование отправлено!', 'success');
     } catch (err: any) {
-      setError(err.response?.data?.error || err.message || 'Произошла ошибка');
+      const errorMsg = err.response?.data?.error || err.message || 'Произошла ошибка';
+      setError(errorMsg);
+      showToast(errorMsg, 'error');
     } finally {
       setLoading(false);
     }

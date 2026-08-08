@@ -1115,7 +1115,11 @@ try {
         $isNewUser = false;
         $rawPassword = null;
 
-        if ($mode === 'register') {
+        if ($mode === 'existing') {
+            $existingUser = requireAuth($pdo);
+            $user = $existingUser;
+            $isNewUser = false;
+        } elseif ($mode === 'register') {
             $firstName = trim($data['first_name'] ?? '');
             $lastName  = trim($data['last_name'] ?? '');
             $phone     = trim($data['phone'] ?? '');
@@ -1245,10 +1249,14 @@ try {
         }
 
         // 4. Создание токена и брони
-        $token = bin2hex(random_bytes(32));
-        $expiresAt = date('Y-m-d H:i:s', strtotime('+30 days'));
-        $stmt = $pdo->prepare("INSERT INTO tokens (user_id, token, expires_at) VALUES (?, ?, ?)");
-        $stmt->execute([$user['id'], $token, $expiresAt]);
+        if ($mode !== 'existing') {
+            $token = bin2hex(random_bytes(32));
+            $expiresAt = date('Y-m-d H:i:s', strtotime('+30 days'));
+            $stmt = $pdo->prepare("INSERT INTO tokens (user_id, token, expires_at) VALUES (?, ?, ?)");
+            $stmt->execute([$user['id'], $token, $expiresAt]);
+        } else {
+            $token = getBearerToken();
+        }
 
         $room = $available['room'];
 
