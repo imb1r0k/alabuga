@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Users } from 'lucide-react';
+import { ArrowLeft, Users, MapPin } from 'lucide-react';
 import { getPublicProfile } from '../services/api';
 
 export const PublicProfilePage: React.FC = () => {
@@ -22,7 +22,7 @@ export const PublicProfilePage: React.FC = () => {
   if (error) return <div style={{ textAlign: 'center', padding: '40px' }}><p style={{ color: '#ef4444' }}>{error}</p></div>;
   if (!profile) return null;
 
-  const { user, team, members } = profile;
+  const { user, team, members, current_booking } = profile;
 
   const socialFields = [
     { key: 'social_vk', label: 'VK' },
@@ -30,6 +30,13 @@ export const PublicProfilePage: React.FC = () => {
     { key: 'social_instagram', label: 'Instagram' },
     { key: 'social_max', label: 'Max' },
   ];
+
+  const statusInfo = (status: string) => {
+    if (status === 'approved') return { label: 'Одобрено', color: '#16a34a' };
+    if (status === 'approved_bot') return { label: 'Одобрено ботом', color: '#0284c7' };
+    if (status === 'pending') return { label: 'Ожидает подтверждения', color: '#f59e0b' };
+    return { label: status, color: '#6b7280' };
+  };
 
   return (
     <div style={{ padding: '24px', maxWidth: '700px', margin: '0 auto' }}>
@@ -74,6 +81,21 @@ export const PublicProfilePage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {current_booking && (
+        <div className="card" style={{ marginBottom: '24px' }}>
+          <h3 style={{ margin: '0 0 12px', fontSize: '18px', color: '#0f172a' }}>Проживание</h3>
+          <p style={{ fontSize: '14px', color: '#475569', marginBottom: '12px' }}>
+            {current_booking.status === 'approved' || current_booking.status === 'approved_bot'
+              ? 'Проживает в:'
+              : 'Ожидает заселения в:'}{' '}
+            <MapPin size={14} style={{ verticalAlign: 'middle' }} /> Корпус <strong>{current_booking.building_name}</strong>, этаж <strong>{current_booking.floor_number}</strong>, комната <strong>№{current_booking.room_number}</strong>
+          </p>
+          <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 600, color: '#fff', backgroundColor: statusInfo(current_booking.status).color }}>
+            {statusInfo(current_booking.status).label}
+          </span>
+        </div>
+      )}
 
       {team && (
         <div className="card">

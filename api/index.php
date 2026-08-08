@@ -177,8 +177,8 @@ function initFreshDatabase($pdo) {
     $pdo->exec($sql);
 
     $adminHash = password_hash('admin123', PASSWORD_DEFAULT);
-    $stmt = $pdo->prepare("INSERT INTO `users` (`first_name`, `last_name`, `name`, `login`, `phone`, `password`, `role`, `status`, `team_name`) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)");
-    $stmt->execute(['Админ', 'Главный', 'Администратор', 'admin', '+79990000000', $adminHash, 'admin', 'Оргкомитет']);
+    $stmt = $pdo->prepare("INSERT INTO `users` (`first_name`, `last_name`, `name`, `login`, `phone`, `password`, `role`, `status`, `team_name`) VALUES (?, ?, ?, ?, ?, ?, 'admin', 'active', ?)");
+    $stmt->execute(['Админ', 'Главный', 'Администратор', 'admin', '+79990000000', $adminHash, 'Оргкомитет']);
 }
 
 function ensureTablesExist($pdo) {
@@ -1423,10 +1423,25 @@ try {
             $members = $membersStmt->fetchAll();
         }
 
+        // Получаем активное бронирование (последнее не архивное)
+        $currentBooking = null;
+        $bookingStmt = $pdo->prepare("
+            SELECT b.id, b.status, r.room_number, bu.name as building_name, f.floor_number
+            FROM bookings b
+            JOIN rooms r ON b.room_id = r.id
+            JOIN buildings bu ON r.building_id = bu.id
+            JOIN floors f ON r.floor_id = f.id
+            WHERE b.user_id = ? AND b.status <> 'archived'
+            ORDER BY b.id DESC LIMIT 1
+        ");
+        $bookingStmt->execute([$user['id']]);
+        $currentBooking = $bookingStmt->fetch() ?: null;
+
         jsonResponse([
             'user' => $user,
             'team' => $team,
-            'members' => $members
+            'members' => $members,
+            'current_booking' => $currentBooking,
         ]);
     }
 
