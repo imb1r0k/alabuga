@@ -7,6 +7,7 @@ export const AuthPage = () => {
   const [lastName, setLastName] = useState('');
   const [firstName, setFirstName] = useState('');
   const [phone, setPhone] = useState('');
+  const [regLogin, setRegLogin] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [loginInput, setLoginInput] = useState('');
@@ -75,7 +76,7 @@ export const AuthPage = () => {
           setLoading(false);
           return;
         }
-        const userData = await register(lastName, firstName, phone, password);
+        const userData = await register(lastName, firstName, phone, password, regLogin);
         setRegSuccess(userData);
       }
     } catch (err: any) {
@@ -131,28 +132,32 @@ export const AuthPage = () => {
             </button>
           </div>
         ) : (
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} autoComplete="off">
             {isLogin ? (
               <>
                 <div className="input-group">
-                  <label htmlFor="loginInput">Логин или номер телефона</label>
+                  <label htmlFor="loginUsername">Логин или номер телефона</label>
                   <input
-                    id="loginInput"
+                    id="loginUsername"
+                    name="username"
                     type="text"
                     value={loginInput}
                     onChange={(e) => setLoginInput(e.target.value)}
+                    autoComplete="username"
                     disabled={loading}
                     placeholder="Введите логин или номер телефона"
                   />
                 </div>
 
                 <div className="input-group">
-                  <label htmlFor="password">Пароль</label>
+                  <label htmlFor="loginPassword">Пароль</label>
                   <input
-                    id="password"
+                    id="loginPassword"
+                    name="password"
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="current-password"
                     required
                     disabled={loading}
                   />
@@ -161,12 +166,28 @@ export const AuthPage = () => {
             ) : (
               <>
                 <div className="input-group">
+                  <label htmlFor="regUsername">Логин (необязательно, можно оставить пустым)</label>
+                  <input
+                    id="regUsername"
+                    name="username"
+                    type="text"
+                    value={regLogin}
+                    onChange={(e) => setRegLogin(e.target.value)}
+                    autoComplete="username"
+                    disabled={loading}
+                    placeholder="Например, ivanov (необязательно)"
+                  />
+                </div>
+
+                <div className="input-group">
                   <label htmlFor="lastName">Фамилия</label>
                   <input
                     id="lastName"
+                    name="familyName"
                     type="text"
                     value={lastName}
                     onChange={(e) => setLastName(e.target.value)}
+                    autoComplete="family-name"
                     required
                     disabled={loading}
                   />
@@ -176,9 +197,11 @@ export const AuthPage = () => {
                   <label htmlFor="firstName">Имя</label>
                   <input
                     id="firstName"
+                    name="givenName"
                     type="text"
                     value={firstName}
                     onChange={(e) => setFirstName(e.target.value)}
+                    autoComplete="given-name"
                     required
                     disabled={loading}
                   />
@@ -188,9 +211,11 @@ export const AuthPage = () => {
                   <label htmlFor="phone">Номер телефона</label>
                   <input
                     id="phone"
+                    name="tel"
                     type="tel"
                     value={phone}
                     onChange={handlePhoneChange}
+                    autoComplete="tel"
                     placeholder="+7 (___) ___-__-__"
                     required
                     disabled={loading}
@@ -198,12 +223,14 @@ export const AuthPage = () => {
                 </div>
 
                 <div className="input-group">
-                  <label htmlFor="password">Пароль (минимум 6 символов)</label>
+                  <label htmlFor="regPassword">Пароль (минимум 6 символов)</label>
                   <input
-                    id="password"
+                    id="regPassword"
+                    name="new-password"
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="new-password"
                     required
                     minLength={6}
                     disabled={loading}
@@ -211,12 +238,14 @@ export const AuthPage = () => {
                 </div>
 
                 <div className="input-group">
-                  <label htmlFor="passwordConfirm">Повторите пароль</label>
+                  <label htmlFor="regPasswordConfirm">Повторите пароль</label>
                   <input
-                    id="passwordConfirm"
+                    id="regPasswordConfirm"
+                    name="new-password-confirm"
                     type="password"
                     value={passwordConfirm}
                     onChange={(e) => setPasswordConfirm(e.target.value)}
+                    autoComplete="new-password"
                     required
                     minLength={6}
                     disabled={loading}

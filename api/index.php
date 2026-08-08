@@ -308,6 +308,7 @@ try {
         $lastName  = trim($data['last_name'] ?? '');
         $phone     = trim($data['phone'] ?? '');
         $password  = trim($data['password'] ?? '');
+        $customLogin = trim($data['login'] ?? '');
 
         // Валидация
         $errors = [];
@@ -321,12 +322,21 @@ try {
 
         if ($errors) jsonError(implode('. ', $errors), 400);
 
-        // Генерация логина
-        $autoLogin = 'u' . substr($phoneDigits, -8);
-        $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE login = ?");
-        $stmt->execute([$autoLogin]);
-        if ($stmt->fetchColumn() > 0) {
-            $autoLogin = 'u' . $phoneDigits . rand(10, 99);
+        // Определяем логин: используем указанный или генерируем
+        if ($customLogin) {
+            $finalLogin = $customLogin;
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE login = ?");
+            $stmt->execute([$finalLogin]);
+            if ($stmt->fetchColumn() > 0) {
+                jsonError('Логин уже занят, укажите другой', 400);
+            }
+        } else {
+            $finalLogin = 'u' . substr($phoneDigits, -8);
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE login = ?");
+            $stmt->execute([$finalLogin]);
+            if ($stmt->fetchColumn() > 0) {
+                $finalLogin = 'u' . $phoneDigits . rand(10, 99);
+            }
         }
 
         // Проверка на дубликат телефона
@@ -340,7 +350,7 @@ try {
         $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
 
         $stmt = $pdo->prepare("INSERT INTO users (first_name, last_name, name, login, phone, password, role) VALUES (?, ?, ?, ?, ?, ?, 'user')");
-        $stmt->execute([$firstName, $lastName, $fullName, $autoLogin, $phone, $hashedPassword]);
+        $stmt->execute([$firstName, $lastName, $fullName, $finalLogin, $phone, $hashedPassword]);
         $userId = (int)$pdo->lastInsertId();
 
         // Создаём токен
@@ -355,7 +365,7 @@ try {
             'first_name' => $firstName,
             'last_name'  => $lastName,
             'name'       => $fullName,
-            'login'      => $autoLogin,
+            'login'      => $finalLogin,
             'phone'      => $phone,
             'role'       => 'user',
             'password'   => $password,
