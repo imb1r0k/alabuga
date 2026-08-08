@@ -3,7 +3,6 @@ import { X, CheckCircle, KeyRound } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from './Toast';
 import { bookRoom } from '../services/api';
-import { formatPhone } from '../utils/phone';
 
 interface BookingModalProps {
   room: any;
@@ -15,7 +14,7 @@ interface BookingModalProps {
 type Stage = 'auth' | 'login' | 'register' | 'result';
 
 export const BookingModal: React.FC<BookingModalProps> = ({ room, buildingName, floorNumber, onClose }) => {
-  const { isAuthenticated, login, register, refreshUser } = useAuth();
+  const { isAuthenticated, refreshUser } = useAuth();
   const { showToast } = useToast();
 
   const [stage, setStage] = useState<Stage>(isAuthenticated ? 'result' : 'auth');

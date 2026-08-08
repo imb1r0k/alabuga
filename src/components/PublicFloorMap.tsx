@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Bed, ArrowUpDown, Wrench, Stairs } from 'lucide-react';
+import { Bed, ArrowUpDown, Wrench } from 'lucide-react';
 import { Skeleton } from './Skeleton';
 import { getPublicLayout } from '../services/api';
 
@@ -128,7 +128,6 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
     ) : null;
     const IconComp = tmpl?.icon || Bed;
     const bookedCount = room?.occupied || 0;
-    const canBook = room && room.room_type === 'room' && room.is_technical === 0 && bookedCount < (room.capacity || 0);
 
     return (
       <div
