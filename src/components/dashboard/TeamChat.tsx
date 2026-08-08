@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, ShieldCheck, MessageSquare } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
 import { getMyTeamChat, sendMyTeamMessage } from '../../services/api';
 
 interface Message {
@@ -13,7 +12,6 @@ interface Message {
 }
 
 export const TeamChat: React.FC<{ teamId: number }> = ({ teamId }) => {
-  const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
