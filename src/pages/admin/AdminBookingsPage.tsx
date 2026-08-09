@@ -62,20 +62,22 @@ export const AdminBookingsPage: React.FC = () => {
     }
   };
 
-  // ─── Определение дубликатов ────────────────────────────────────────────────
-  // Считаем заявку дубликатом, если есть другая заявка с той же фамилией и отчеством (или именем при отсутствии отчества)
+  // ─── Определение дубликатов (только среди АКТИВНЫХ заявок) ─────────────────
   const duplicateIds = useMemo(() => {
     const counts = new Map<string, number>();
     const dupes = new Set<number>();
 
-    bookings.forEach((b) => {
+    // Учитываем только заявки со статусами pending, approved, approved_bot
+    const activeBookings = bookings.filter((b) => ['pending', 'approved', 'approved_bot'].includes(b.status));
+
+    activeBookings.forEach((b) => {
       const key = `${(b.last_name || '').trim().toLowerCase()}_${(b.patronymic || b.first_name || '').trim().toLowerCase()}`;
       if (key !== '_') {
         counts.set(key, (counts.get(key) || 0) + 1);
       }
     });
 
-    bookings.forEach((b) => {
+    activeBookings.forEach((b) => {
       const key = `${(b.last_name || '').trim().toLowerCase()}_${(b.patronymic || b.first_name || '').trim().toLowerCase()}`;
       if (key !== '_' && (counts.get(key) || 0) > 1) {
         dupes.add(b.id);

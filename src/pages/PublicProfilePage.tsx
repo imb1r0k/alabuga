@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Users, MapPin } from 'lucide-react';
+import { ArrowLeft, Users, MapPin, ShieldCheck } from 'lucide-react';
 import { getPublicProfile } from '../services/api';
 
 export const PublicProfilePage: React.FC = () => {
@@ -35,6 +35,8 @@ export const PublicProfilePage: React.FC = () => {
     if (status === 'approved') return { label: 'Одобрено', color: '#16a34a' };
     if (status === 'approved_bot') return { label: 'Одобрено ботом', color: '#0284c7' };
     if (status === 'pending') return { label: 'Ожидает подтверждения', color: '#f59e0b' };
+    if (status === 'recalled') return { label: 'Отозвано', color: '#6b7280' };
+    if (status === 'rejected') return { label: 'Отклонено', color: '#ef4444' };
     return { label: status, color: '#6b7280' };
   };
 
@@ -88,7 +90,7 @@ export const PublicProfilePage: React.FC = () => {
           <p style={{ fontSize: '14px', color: '#475569', marginBottom: '12px' }}>
             {current_booking.status === 'approved' || current_booking.status === 'approved_bot'
               ? 'Проживает в:'
-              : 'Ожидает заселения в:'}{' '}
+              : 'Заявка в:'}{' '}
             <MapPin size={14} style={{ verticalAlign: 'middle' }} /> Корпус <strong>{current_booking.building_name}</strong>, этаж <strong>{current_booking.floor_number}</strong>, комната <strong>№{current_booking.room_number}</strong>
           </p>
           <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 600, color: '#fff', backgroundColor: statusInfo(current_booking.status).color }}>
@@ -104,20 +106,29 @@ export const PublicProfilePage: React.FC = () => {
           </h3>
           <h4 style={{ fontSize: '15px', marginBottom: '10px', color: '#334155' }}>Участники ({members.length})</h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {members.map((m: any) => (
-              <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 12px', borderRadius: '8px', backgroundColor: m.role === 'captain' ? '#f0f9ff' : '#f8fafc', border: m.role === 'captain' ? '1px solid #bae6fd' : '1px solid #e2e8f0' }}>
-                <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: m.role === 'captain' ? '#0284c7' : '#cbd5e1', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '14px' }}>
-                  {(m.last_name?.[0] || m.name?.[0] || '?').toUpperCase()}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: '14px', color: '#0f172a' }}>
-                    {m.last_name} {m.first_name || m.name}
-                    {m.role === 'captain' && <span style={{ marginLeft: '8px', fontSize: '11px', backgroundColor: '#0284c7', color: '#fff', padding: '2px 6px', borderRadius: '4px' }}>Капитан</span>}
+            {members.map((m: any) => {
+              const isCurator = m.role === 'curator' || m.user_role === 'curator' || m.user_role === 'moderator';
+
+              return (
+                <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 12px', borderRadius: '8px', backgroundColor: isCurator ? '#eff6ff' : m.role === 'captain' ? '#f0f9ff' : '#f8fafc', border: isCurator ? '1px solid #bfdbfe' : m.role === 'captain' ? '1px solid #bae6fd' : '1px solid #e2e8f0' }}>
+                  <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: isCurator ? '#2563eb' : m.role === 'captain' ? '#0284c7' : '#cbd5e1', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '14px' }}>
+                    {(m.last_name?.[0] || m.name?.[0] || '?').toUpperCase()}
                   </div>
-                  <div style={{ fontSize: '12px', color: '#64748b' }}>@{m.login}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: '14px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>{m.last_name} {m.first_name || m.name}</span>
+                      {isCurator && (
+                        <span style={{ fontSize: '11px', backgroundColor: '#2563eb', color: '#fff', padding: '2px 6px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                          <ShieldCheck size={12} /> Куратор
+                        </span>
+                      )}
+                      {m.role === 'captain' && !isCurator && <span style={{ fontSize: '11px', backgroundColor: '#0284c7', color: '#fff', padding: '2px 6px', borderRadius: '4px' }}>Капитан</span>}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#64748b' }}>@{m.login}</div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

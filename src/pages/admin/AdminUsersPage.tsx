@@ -107,6 +107,9 @@ export const AdminUsersPage: React.FC = () => {
       let currentIds: number[] = prev.curator_team_ids || [];
       
       if (teamId === 0) {
+        if (currentIds.includes(0)) {
+          return { ...prev, curator_team_ids: [] };
+        }
         return { ...prev, curator_team_ids: [0] };
       }
 
@@ -165,60 +168,73 @@ export const AdminUsersPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((u) => (
-                    <tr
-                      key={u.id}
-                      onClick={() => handleSelectUser(u)}
-                      style={{
-                        borderBottom: '1px solid #eee',
-                        cursor: 'pointer',
-                        backgroundColor: selectedUser?.id === u.id ? '#e0f2fe' : 'transparent',
-                      }}
-                    >
-                      <td style={{ padding: '10px' }}>#{u.id}</td>
-                      <td style={{ padding: '10px', fontWeight: 600 }}>{u.last_name} {u.first_name || u.name}</td>
-                      <td style={{ padding: '10px' }}>{u.email || u.login}</td>
-                      <td style={{ padding: '10px' }}>{u.phone || '-'}</td>
-                      <td style={{ padding: '10px' }}>{getRoleBadge(u.role)}</td>
-                      <td style={{ padding: '10px' }}>
-                        <span style={{
-                          padding: '2px 8px',
-                          borderRadius: '4px',
-                          fontSize: '12px',
-                          color: '#fff',
-                          backgroundColor: u.status === 'archived' ? '#6b7280' : '#16a34a'
-                        }}>
-                          {u.status === 'archived' ? 'В архиве' : 'Активен'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px' }}>
-                        {u.role === 'curator' ? (
-                          u.curator_team_ids?.includes(0) ? 'Куратор всех команд' : 'Куратор команд'
-                        ) : (
-                          u.team_name || '-'
-                        )}
-                      </td>
-                      <td style={{ padding: '10px' }}>
-                        <div style={{ display: 'flex', gap: '4px' }}>
-                          <Link
-                            to={`/public_profile/${u.email || u.login}`}
-                            className="btn btn-secondary"
-                            style={{ fontSize: '12px', padding: '4px 8px', textDecoration: 'none' }}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            Открыть
-                          </Link>
-                          <button
-                            className="btn btn-primary"
-                            style={{ fontSize: '12px', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                            onClick={(e) => { e.stopPropagation(); handleQrOpen(u); }}
-                          >
-                            <QrCode size={14} /> QR
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {users.map((u) => {
+                    const isCuratorRole = u.role === 'curator' || u.role === 'moderator';
+
+                    return (
+                      <tr
+                        key={u.id}
+                        onClick={() => handleSelectUser(u)}
+                        style={{
+                          borderBottom: '1px solid #eee',
+                          cursor: 'pointer',
+                          backgroundColor: selectedUser?.id === u.id ? '#e0f2fe' : 'transparent',
+                        }}
+                      >
+                        <td style={{ padding: '10px' }}>#{u.id}</td>
+                        <td style={{ padding: '10px', fontWeight: 600 }}>{u.last_name} {u.first_name || u.name}</td>
+                        <td style={{ padding: '10px' }}>{u.email || u.login}</td>
+                        <td style={{ padding: '10px' }}>{u.phone || '-'}</td>
+                        <td style={{ padding: '10px' }}>{getRoleBadge(u.role)}</td>
+                        <td style={{ padding: '10px' }}>
+                          <span style={{
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            fontSize: '12px',
+                            color: '#fff',
+                            backgroundColor: u.status === 'archived' ? '#6b7280' : '#16a34a'
+                          }}>
+                            {u.status === 'archived' ? 'В архиве' : 'Активен'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px' }}>
+                          {isCuratorRole ? (
+                            u.curator_team_ids?.includes(0) ? (
+                              <span style={{ fontWeight: 600, color: '#0284c7' }}>any</span>
+                            ) : u.curator_team_ids?.length > 0 ? (
+                              teams
+                                .filter((t) => u.curator_team_ids.includes(t.id))
+                                .map((t) => t.name)
+                                .join(', ') || '-'
+                            ) : (
+                              '-'
+                            )
+                          ) : (
+                            u.team_name || '-'
+                          )}
+                        </td>
+                        <td style={{ padding: '10px' }}>
+                          <div style={{ display: 'flex', gap: '4px' }}>
+                            <Link
+                              to={`/public_profile/${u.email || u.login}`}
+                              className="btn btn-secondary"
+                              style={{ fontSize: '12px', padding: '4px 8px', textDecoration: 'none' }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              Открыть
+                            </Link>
+                            <button
+                              className="btn btn-primary"
+                              style={{ fontSize: '12px', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                              onClick={(e) => { e.stopPropagation(); handleQrOpen(u); }}
+                            >
+                              <QrCode size={14} /> QR
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -351,7 +367,7 @@ export const AdminUsersPage: React.FC = () => {
                           }}
                         >
                           {userFormData.curator_team_ids?.includes(0) ? <CheckSquare size={18} color="#0284c7" /> : <Square size={18} color="#94a3b8" />}
-                          <span style={{ fontSize: '13px' }}>🌐 Все команды (доступ ко всем командам)</span>
+                          <span style={{ fontSize: '13px' }}>🌐 Все команды (any)</span>
                         </div>
 
                         {!userFormData.curator_team_ids?.includes(0) && (

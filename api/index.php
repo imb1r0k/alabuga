@@ -701,14 +701,17 @@ try {
         }
 
         $stmt = $pdo->prepare("
-            SELECT u.id, u.first_name, u.last_name, u.name, u.login,
-                   COALESCE(tm.role, 'member') as role
+            SELECT u.id, u.first_name, u.last_name, u.name, u.login, u.role as user_role,
+                   COALESCE(tm.role, CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 'curator' ELSE 'member' END) as role
             FROM users u
             LEFT JOIN team_members tm ON tm.user_id = u.id AND tm.team_id = ?
             WHERE u.team_id = ?
-            ORDER BY u.last_name ASC
+               OR (LOWER(TRIM(u.role)) IN ('curator', 'moderator') AND u.id IN (
+                   SELECT user_id FROM curator_teams WHERE team_id = ? OR team_id = 0
+               ))
+            ORDER BY CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 0 ELSE 1 END, u.last_name ASC
         ");
-        $stmt->execute([$teamId, $teamId]);
+        $stmt->execute([$teamId, $teamId, $teamId]);
         jsonResponse($stmt->fetchAll());
     }
 
@@ -1263,14 +1266,17 @@ try {
             jsonResponse(['team' => null, 'members' => []]);
         }
         $membersStmt = $pdo->prepare("
-            SELECT u.id, u.first_name, u.last_name, u.name, u.login,
-                   COALESCE(tm.role, 'member') as role
+            SELECT u.id, u.first_name, u.last_name, u.name, u.login, u.role as user_role,
+                   COALESCE(tm.role, CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 'curator' ELSE 'member' END) as role
             FROM users u
             LEFT JOIN team_members tm ON tm.user_id = u.id AND tm.team_id = ?
             WHERE u.team_id = ?
-            ORDER BY u.last_name ASC
+               OR (LOWER(TRIM(u.role)) IN ('curator', 'moderator') AND u.id IN (
+                   SELECT user_id FROM curator_teams WHERE team_id = ? OR team_id = 0
+               ))
+            ORDER BY CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 0 ELSE 1 END, u.last_name ASC
         ");
-        $membersStmt->execute([$teamId, $teamId]);
+        $membersStmt->execute([$teamId, $teamId, $teamId]);
         $members = $membersStmt->fetchAll();
         jsonResponse([
             'team' => $team,
@@ -1349,14 +1355,17 @@ try {
             $team = $teamStmt->fetch();
 
             $membersStmt = $pdo->prepare("
-                SELECT u.id, u.first_name, u.last_name, u.name, u.login,
-                       COALESCE(tm.role, 'member') as role
+                SELECT u.id, u.first_name, u.last_name, u.name, u.login, u.role as user_role,
+                       COALESCE(tm.role, CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 'curator' ELSE 'member' END) as role
                 FROM users u
                 LEFT JOIN team_members tm ON tm.user_id = u.id AND tm.team_id = ?
                 WHERE u.team_id = ?
-                ORDER BY u.last_name ASC
+                   OR (LOWER(TRIM(u.role)) IN ('curator', 'moderator') AND u.id IN (
+                       SELECT user_id FROM curator_teams WHERE team_id = ? OR team_id = 0
+                   ))
+                ORDER BY CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 0 ELSE 1 END, u.last_name ASC
             ");
-            $membersStmt->execute([$teamId, $teamId]);
+            $membersStmt->execute([$teamId, $teamId, $teamId]);
             $members = $membersStmt->fetchAll();
         }
 

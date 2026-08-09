@@ -18,7 +18,7 @@ import {
   addAdminTeamEvent,
   deleteAdminTeamEvent,
 } from '../../services/api';
-import { Users, MessageSquare, Calendar, Trash2, Plus, Save, UserPlus, UserMinus, Eraser } from 'lucide-react';
+import { Users, MessageSquare, Calendar, Trash2, Plus, Save, UserPlus, UserMinus, Eraser, ShieldCheck } from 'lucide-react';
 
 export const AdminTeamsPage: React.FC = () => {
   const [teams, setTeams] = useState<any[]>([]);
@@ -381,24 +381,38 @@ export const AdminTeamsPage: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {teamMembers.map((m) => (
-                          <tr key={m.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                            <td style={{ padding: '8px' }}>{m.last_name} {m.first_name || m.name}</td>
-                            <td style={{ padding: '8px' }}>{m.login}</td>
-                            <td style={{ padding: '8px' }}>{m.role === 'captain' ? 'Капитан' : 'Участник'}</td>
-                            <td style={{ padding: '8px' }}>
-                              {m.role !== 'captain' && (
-                                <button
-                                  onClick={() => handleRemoveMember(m.id, `${m.last_name} ${m.first_name || m.name}`)}
-                                  title="Удалить из команды"
-                                  style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#ef4444', display: 'flex' }}
-                                >
-                                  <UserMinus size={16} />
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
+                        {teamMembers.map((m) => {
+                          const isCurator = m.role === 'curator' || m.user_role === 'curator' || m.user_role === 'moderator';
+
+                          return (
+                            <tr key={m.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '8px', fontWeight: 600 }}>{m.last_name} {m.first_name || m.name}</td>
+                              <td style={{ padding: '8px' }}>{m.login}</td>
+                              <td style={{ padding: '8px' }}>
+                                {isCurator ? (
+                                  <span style={{ fontSize: '11px', backgroundColor: '#2563eb', color: '#fff', padding: '2px 6px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                    <ShieldCheck size={12} /> Куратор
+                                  </span>
+                                ) : m.role === 'captain' ? (
+                                  'Капитан'
+                                ) : (
+                                  'Участник'
+                                )}
+                              </td>
+                              <td style={{ padding: '8px' }}>
+                                {!isCurator && m.role !== 'captain' && (
+                                  <button
+                                    onClick={() => handleRemoveMember(m.id, `${m.last_name} ${m.first_name || m.name}`)}
+                                    title="Удалить из команды"
+                                    style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#ef4444', display: 'flex' }}
+                                  >
+                                    <UserMinus size={16} />
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
