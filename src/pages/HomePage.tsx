@@ -52,7 +52,7 @@ export const HomePage: React.FC = () => {
     }
     try {
       const data = await getMyBooking();
-      if (data?.booking && !['archived', 'recalled'].includes(data.booking.status)) {
+      if (data?.booking && data.booking.status !== 'archived') {
         setMyBooking(data.booking);
       } else {
         setMyBooking(null);
@@ -217,7 +217,7 @@ export const HomePage: React.FC = () => {
               <CheckCircle2 size={20} color="#0284c7" />
             ) : myBooking.status === 'rejected' ? (
               <XCircle size={20} color="#ef4444" />
-            ) : ['archived', 'recalled'].includes(myBooking.status) ? (
+            ) : myBooking.status === 'recalled' ? (
               <AlertCircle size={20} color="#6b7280" />
             ) : (
               <Clock size={20} color="#f59e0b" />
@@ -241,14 +241,12 @@ export const HomePage: React.FC = () => {
                 backgroundColor: myBooking.status === 'approved' ? '#16a34a' :
                                 myBooking.status === 'approved_bot' ? '#0284c7' :
                                 myBooking.status === 'rejected' ? '#ef4444' :
-                                myBooking.status === 'recalled' ? '#6b7280' :
-                                myBooking.status === 'archived' ? '#6b7280' : '#f59e0b',
+                                myBooking.status === 'recalled' ? '#6b7280' : '#f59e0b',
               }}>
                 {myBooking.status === 'approved' ? 'Одобрено' :
                  myBooking.status === 'approved_bot' ? 'Одобрено ботом' :
                  myBooking.status === 'rejected' ? 'Отклонено' :
-                 myBooking.status === 'recalled' ? 'Отозвано' :
-                 myBooking.status === 'archived' ? 'В архиве' : 'Ожидает подтверждения'}
+                 myBooking.status === 'recalled' ? 'Отозвано' : 'Ожидает подтверждения'}
               </span>
             </div>
           </div>

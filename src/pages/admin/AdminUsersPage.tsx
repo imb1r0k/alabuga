@@ -4,7 +4,24 @@ import { AdminLayout } from '../../components/AdminLayout';
 import { useToast } from '../../components/Toast';
 import { getAdminUsers, updateAdminUser, getUserDetails, getAdminTeams } from '../../services/api';
 import { Link } from 'react-router-dom';
-import { QrCode, X, Shield, CheckSquare, Square, Search } from 'lucide-react';
+import { QrCode, X, Shield, CheckSquare, Square, Search, Filter, RotateCcw } from 'lucide-react';
+
+function setCookie(name: string, value: string, days = 30) {
+  const d = new Date();
+  d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
+  document.cookie = `${name}=${value};expires=${d.toUTCString()};path=/`;
+}
+
+function getCookie(name: string): string | null {
+  const nameEQ = name + '=';
+  const ca = document.cookie.split(';');
+  for (let i = 0; i < ca.length; i++) {
+    let c = ca[i];
+    while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+    if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
+  }
+  return null;
+}
 
 export const AdminUsersPage: React.FC = () => {
   const [users, setUsers] = useState<any[]>([]);
@@ -13,6 +30,15 @@ export const AdminUsersPage: React.FC = () => {
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [userDetails, setUserDetails] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Фильтры
+  const [showFiltersModal, setShowFiltersModal] = useState(false);
+  const [onlyActive, setOnlyActive] = useState<boolean>(() => {
+    const val = getCookie('users_show_active_only');
+    return val !== null ? val === 'true' : true; // По умолчанию TRUE
+  });
+  const [roleFilter, setRoleFilter] = useState<string>('all');
+  const [teamFilter, setTeamFilter] = useState<string>('all');
 
   const [userFormData, setUserFormData] = useState<any>({
     id: 0,
@@ -31,6 +57,10 @@ export const AdminUsersPage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [selectedForQr, setSelectedForQr] = useState<any>(null);
   const { showToast } = useToast();
+
+  useEffect(() => {
+    setCookie('users_show_active_only', String(onlyActive));
+  }, [onlyActive]);
 
   useEffect(() => {
     loadUsers();
@@ -59,24 +89,54 @@ export const AdminUsersPage: React.FC = () => {
   };
 
   const filteredUsers = useMemo(() => {
-    if (!searchTerm.trim()) return users;
-    const q = searchTerm.trim().toLowerCase();
-    return users.filter((u) => {
-      const fullName = `${u.last_name || ''} ${u.first_name || ''} ${u.patronymic || ''} ${u.name || ''}`.toLowerCase();
-      const login = (u.email || u.login || '').toLowerCase();
-      const phone = (u.phone || '').toLowerCase();
-      const role = (u.role || '').toLowerCase();
-      const team = (u.team_name || '').toLowerCase();
+    let result = [...users];
 
-      return (
-        fullName.includes(q) ||
-        login.includes(q) ||
-        phone.includes(q) ||
-        role.includes(q) ||
-        team.includes(q)
-      );
-    });
-  }, [users, searchTerm]);
+    // Фильтр по активным / архивным
+    if (onlyActive) {
+      result = result.filter((u) => u.status === 'active');
+    }
+
+    // Фильтр по роли
+    if (roleFilter !== 'all') {
+      result = result.filter((u) => {
+        const r = (u.role || '').toLowerCase();
+        if (roleFilter === 'curator') return r === 'curator' || r === 'moderator';
+        return r === roleFilter;
+      });
+    }
+
+    // Фильтр по команде
+    if (teamFilter !== 'all') {
+      if (teamFilter === 'none') {
+        result = result.filter((u) => !u.team_id || Number(u.team_id) === 0);
+      } else {
+        const targetTeamId = Number(teamFilter);
+        result = result.filter((u) => Number(u.team_id) === targetTeamId);
+      }
+    }
+
+    // Поиск по ФИО, логину, телефону
+    if (searchTerm.trim()) {
+      const q = searchTerm.trim().toLowerCase();
+      result = result.filter((u) => {
+        const fullName = `${u.last_name || ''} ${u.first_name || ''} ${u.patronymic || ''} ${u.name || ''}`.toLowerCase();
+        const login = (u.email || u.login || '').toLowerCase();
+        const phone = (u.phone || '').toLowerCase();
+        const role = (u.role || '').toLowerCase();
+        const team = (u.team_name || '').toLowerCase();
+
+        return (
+          fullName.includes(q) ||
+          login.includes(q) ||
+          phone.includes(q) ||
+          role.includes(q) ||
+          team.includes(q)
+        );
+      });
+    }
+
+    return result;
+  }, [users, onlyActive, roleFilter, teamFilter, searchTerm]);
 
   const handleSelectUser = async (u: any) => {
     setSelectedUser(u);
@@ -167,6 +227,8 @@ export const AdminUsersPage: React.FC = () => {
     return <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '12px', color: '#fff', backgroundColor: '#64748b' }}>Пользователь</span>;
   };
 
+  const isFiltered = !onlyActive || roleFilter !== 'all' || teamFilter !== 'all';
+
   return (
     <AdminLayout>
       <div>
@@ -174,36 +236,131 @@ export const AdminUsersPage: React.FC = () => {
           <div>
             <h2 style={{ margin: 0, fontSize: '20px', color: '#0f172a' }}>Управление пользователями</h2>
             <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#64748b' }}>
-              Всего пользователей: {filteredUsers.length}
+              Отображается {filteredUsers.length} из {users.length} пользователей
             </p>
           </div>
 
-          {/* Поиск пользователей */}
-          <div style={{ position: 'relative', width: '320px', maxWidth: '100%' }}>
-            <Search size={18} color="#94a3b8" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
-            <input
-              type="text"
-              placeholder="Поиск (ФИО, логин, телефон, команда)..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* Кнопка фильтров */}
+            <button
+              className="btn btn-secondary"
+              onClick={() => setShowFiltersModal(!showFiltersModal)}
               style={{
-                width: '100%',
-                padding: '8px 12px 8px 36px',
-                borderRadius: '8px',
-                border: '1px solid #cbd5e1',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
                 fontSize: '13px',
+                backgroundColor: isFiltered ? '#e0f2fe' : '#f1f5f9',
+                borderColor: isFiltered ? '#0284c7' : '#cbd5e1',
+                color: isFiltered ? '#0284c7' : '#334155',
+                fontWeight: 600,
               }}
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm('')}
-                style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8' }}
-              >
-                <X size={16} />
-              </button>
-            )}
+            >
+              <Filter size={16} />
+              <span>Фильтры</span>
+              {isFiltered && <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#0284c7' }} />}
+            </button>
+
+            {/* Поиск пользователей */}
+            <div style={{ position: 'relative', width: '280px', maxWidth: '100%' }}>
+              <Search size={18} color="#94a3b8" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
+              <input
+                type="text"
+                placeholder="Поиск..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px 8px 36px',
+                  borderRadius: '8px',
+                  border: '1px solid #cbd5e1',
+                  fontSize: '13px',
+                }}
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8' }}
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
           </div>
         </div>
+
+        {/* Раскрывающееся окно настройки фильтров */}
+        {showFiltersModal && (
+          <div style={{
+            backgroundColor: '#ffffff',
+            border: '1px solid #cbd5e1',
+            borderRadius: '10px',
+            padding: '16px 20px',
+            marginBottom: '16px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '16px',
+            alignItems: 'end',
+            fontSize: '13px'
+          }}>
+            <div>
+              <label style={{ fontWeight: 600, color: '#334155', display: 'block', marginBottom: '6px' }}>Отображать статус</label>
+              <select
+                value={onlyActive ? 'active' : 'all'}
+                onChange={(e) => setOnlyActive(e.target.value === 'active')}
+                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+              >
+                <option value="active">Только активных (архивные скрыты)</option>
+                <option value="all">Всех пользователей (включая архивных)</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontWeight: 600, color: '#334155', display: 'block', marginBottom: '6px' }}>Фильтр по роли</label>
+              <select
+                value={roleFilter}
+                onChange={(e) => setRoleFilter(e.target.value)}
+                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+              >
+                <option value="all">Все роли</option>
+                <option value="user">Пользователи</option>
+                <option value="curator">Кураторы</option>
+                <option value="admin">Администраторы</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontWeight: 600, color: '#334155', display: 'block', marginBottom: '6px' }}>Фильтр по команде</label>
+              <select
+                value={teamFilter}
+                onChange={(e) => setTeamFilter(e.target.value)}
+                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+              >
+                <option value="all">Все команды</option>
+                <option value="none">Без команды</option>
+                {teams.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <button
+                className="btn btn-secondary"
+                onClick={() => {
+                  setOnlyActive(true);
+                  setRoleFilter('all');
+                  setTeamFilter('all');
+                  setSearchTerm('');
+                }}
+                style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '8px' }}
+              >
+                <RotateCcw size={14} /> Сбросить фильтры
+              </button>
+            </div>
+          </div>
+        )}
 
         {loading ? (
           <Skeleton width="100%" height={250} />
@@ -379,7 +536,6 @@ export const AdminUsersPage: React.FC = () => {
                     </select>
                   </div>
 
-                  {/* Команда участника отображается только для обычных участников и админов */}
                   {userFormData.role !== 'curator' && (
                     <div className="input-group">
                       <label>Команда участника</label>
@@ -404,7 +560,6 @@ export const AdminUsersPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Если пользователь Куратор — блок выбора закреплённых за ним команд */}
                   {userFormData.role === 'curator' && (
                     <div style={{ gridColumn: '1 / -1', backgroundColor: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', padding: '16px' }}>
                       <h4 style={{ margin: '0 0 10px', fontSize: '14px', color: '#0369a1', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -415,7 +570,6 @@ export const AdminUsersPage: React.FC = () => {
                       </p>
 
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {/* Опция "Все команды" */}
                         <div
                           onClick={() => handleToggleCuratorTeam(0)}
                           style={{

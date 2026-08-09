@@ -586,7 +586,7 @@ try {
         jsonResponse(['success' => true]);
     }
 
-    // ─── Моё текущее бронирование ─────────────────────────────────────────
+    // ─── Моё текущее/последнее бронирование ─────────────────────────────────
 
     if ($uri === 'my-booking') {
         $user = requireAuth($pdo);
@@ -596,7 +596,7 @@ try {
             JOIN rooms r ON b.room_id = r.id
             JOIN buildings bu ON r.building_id = bu.id
             JOIN floors f ON r.floor_id = f.id
-            WHERE b.user_id = ? AND b.status NOT IN ('archived', 'recalled')
+            WHERE b.user_id = ? AND b.status NOT IN ('archived')
             ORDER BY b.id DESC LIMIT 1
         ");
         $stmt->execute([$user['id']]);
@@ -906,7 +906,7 @@ try {
         $floors->execute([$buildingId]);
         $floorsData = [];
 
-        foreach ($floors.fetchAll() as $floor) {
+        foreach ($floors->fetchAll() as $floor) {
             $rooms = $pdo->prepare("
                 SELECT r.*,
                        (SELECT COUNT(*) FROM bookings b

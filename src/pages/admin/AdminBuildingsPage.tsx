@@ -57,13 +57,13 @@ interface TileTemplate {
   textColor: string;
 }
 
-// Кастомная SVG-иконка лестницы (в lucide-react нет подходящей)
-const StairsIcon: React.FC = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 21L9 15V9L15 3H21" />
-    <path d="M3 21H9" />
-    <path d="M9 15H15" />
-    <path d="M15 9H21" />
+// Улучшенная, понятная и четкая иконка лестницы
+const StairsIcon: React.FC<{ size?: number }> = ({ size = 22 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 19h4v-4h4v-4h4V7h4" />
+    <path d="M4 19v-4" opacity="0.4" />
+    <path d="M8 15v-4" opacity="0.4" />
+    <path d="M12 11v-4" opacity="0.4" />
   </svg>
 );
 
@@ -110,10 +110,8 @@ export const AdminBuildingsPage: React.FC = () => {
 
   // Режим редактирования
   const [isEditLayout, setIsEditLayout] = useState(false);
-  // Автоопределение ориентации устройства (портрет/ландшафт)
   const isPortrait = useOrientation();
   const { showToast } = useToast();
-  // Вертикальный (повёрнутый) макет показываем автоматически на портретных устройствах
   const showVertical = isPortrait;
 
   const [buildingsLoading, setBuildingsLoading] = useState(false);
@@ -134,11 +132,13 @@ export const AdminBuildingsPage: React.FC = () => {
   // Подтверждение удаления
   const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<{ type: 'building' | 'floor' | 'room'; id: number; name: string } | null>(null);
 
-  // Генерация
+  // Генерация & инструментарий
   const [genMode, setGenMode] = useState(false);
   const [selectedTool, setSelectedTool] = useState<TileType>('room');
   const [selectedDir, setSelectedDir] = useState<Direction>('right');
-  const [draggedTile, setDraggedTile] = useState<{ type: TileType; dir: Direction } | null>(null);
+
+  // Drag & drop локальной плитки (для перетаскивания и обмена местами)
+  const [draggedItem, setDraggedItem] = useState<{ isExisting: boolean; type?: TileType; x?: number; y?: number } | null>(null);
 
   const [genFrom, setGenFrom] = useState(1);
   const [genTo, setGenTo] = useState(20);
@@ -444,24 +444,59 @@ export const AdminBuildingsPage: React.FC = () => {
     }
   };
 
-  const handleDragStart = (e: React.DragEvent, type: TileType) => {
+  // Старт перетаскивания (для заготовки или существующей плитки)
+  const handleDragStartTool = (e: React.DragEvent, type: TileType) => {
     if (!isEditLayout) return;
-    const item = { type, dir: selectedDir };
-    setDraggedTile(item);
+    setDraggedItem({ isExisting: false, type });
     try {
       e.dataTransfer.setData('text/plain', type);
       e.dataTransfer.effectAllowed = 'copy';
     } catch (_) {}
   };
 
-  const handleDrop = (e: React.DragEvent, x: number, y: number) => {
+  const handleDragStartExistingTile = (e: React.DragEvent, room: any) => {
+    if (!isEditLayout) return;
+    setDraggedItem({ isExisting: true, x: Number(room.x_pos), y: Number(room.y_pos) });
+    try {
+      e.dataTransfer.setData('text/plain', 'existing_tile');
+      e.dataTransfer.effectAllowed = 'move';
+    } catch (_) {}
+  };
+
+  // Обработка Дропа с поддержкой анимированного обмена местами!
+  const handleDrop = (e: React.DragEvent, dropX: number, dropY: number) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!isEditLayout || y === 1 || !selectedFloor) return;
+    if (!isEditLayout || dropY === 1 || !selectedFloor) return;
 
-    let typeToPlace = draggedTile?.type || selectedTool;
-    let dirToPlace = draggedTile?.dir || selectedDir;
+    if (draggedItem?.isExisting && draggedItem.x !== undefined && draggedItem.y !== undefined) {
+      const dragX = draggedItem.x;
+      const dragY = draggedItem.y;
 
+      if (dragX === dropX && dragY === dropY) return;
+
+      setLocalRooms((prevRooms) => {
+        const itemInDragPos = prevRooms.find((r) => Number(r.x_pos) === dragX && Number(r.y_pos) === dragY);
+        const itemInDropPos = prevRooms.find((r) => Number(r.x_pos) === dropX && Number(r.y_pos) === dropY);
+
+        return prevRooms.map((r) => {
+          if (Number(r.x_pos) === dragX && Number(r.y_pos) === dragY) {
+            return { ...r, x_pos: dropX, y_pos: dropY };
+          }
+          if (itemInDropPos && Number(r.x_pos) === dropX && Number(r.y_pos) === dropY) {
+            return { ...r, x_pos: dragX, y_pos: dragY };
+          }
+          return r;
+        });
+      });
+
+      setHasUnsavedChanges(true);
+      setDraggedItem(null);
+      return;
+    }
+
+    // Если перетаскивали новую заготовку
+    let typeToPlace = draggedItem?.type || selectedTool;
     try {
       const textData = e.dataTransfer.getData('text/plain') as TileType;
       if (textData && ['room', 'elevator', 'stairs', 'tech', 'gen-start', 'gen-turn', 'gen-end'].includes(textData)) {
@@ -469,8 +504,8 @@ export const AdminBuildingsPage: React.FC = () => {
       }
     } catch (_) {}
 
-    placeTileLocally(x, y, typeToPlace, dirToPlace);
-    setDraggedTile(null);
+    placeTileLocally(dropX, dropY, typeToPlace, selectedDir);
+    setDraggedItem(null);
   };
 
   const handleSetDirectionForCell = (e: React.MouseEvent, room: any, newDir: Direction) => {
@@ -487,12 +522,14 @@ export const AdminBuildingsPage: React.FC = () => {
     setHasUnsavedChanges(true);
   };
 
+  // АВТОГЕНЕРАЦИЯ С ПРОПУСКОМ ЗАНИТЫХ ЯЧЕЕК И АВТОМАТИЧЕСКИМ ВЫХОДОМ
   const handleRunGeneration = () => {
     if (!selectedFloor || !selectedBuilding) return;
     setGenStatusMsg('Генерация макета...');
 
     const startRoom = localRooms.find((r) => r.room_type === 'gen-start');
     if (!startRoom) {
+      showToast('Ошибка: Поместите маркер "Начало генерации" ▶ на сетку', 'error');
       setGenStatusMsg('Ошибка: Поместите маркер "Начало генерации" ▶ на сетку');
       return;
     }
@@ -522,30 +559,36 @@ export const AdminBuildingsPage: React.FC = () => {
       stepsLimit--;
 
       const roomNumStr = `${currentNum}`;
-      const existingIdx = newRoomsList.findIndex((r) => Number(r.x_pos) === rX && Number(r.y_pos) === rY);
+      const existingInCell = newRoomsList.find((r) => Number(r.x_pos) === rX && Number(r.y_pos) === rY);
 
-      const generatedRoom = {
-        id: existingIdx >= 0 ? newRoomsList[existingIdx].id : undefined,
-        floor_id: Number(selectedFloor.id),
-        building_id: Number(selectedBuilding.id),
-        room_number: roomNumStr,
-        name: `Комната ${roomNumStr}`,
-        capacity: genSeats,
-        is_technical: 0,
-        room_type: 'room',
-        gender: 'DEFAULT',
-        x_pos: rX,
-        y_pos: rY,
-      };
-
-      if (existingIdx >= 0) {
-        newRoomsList[existingIdx] = generatedRoom;
+      // Если в ячейке НЕ маркер генерации, а сушествующая лестница, лифт, тех. помещение или комната — ПРОПУСКАЕМ ячейку!
+      if (existingInCell && !['gen-start', 'gen-turn', 'gen-end'].includes(existingInCell.room_type)) {
+        // Пропускаем ячейку
       } else {
-        newRoomsList.push(generatedRoom);
-      }
+        const generatedRoom = {
+          id: existingInCell?.id,
+          floor_id: Number(selectedFloor.id),
+          building_id: Number(selectedBuilding.id),
+          room_number: roomNumStr,
+          name: `Комната ${roomNumStr}`,
+          capacity: genSeats,
+          is_technical: 0,
+          room_type: 'room',
+          gender: 'DEFAULT',
+          x_pos: rX,
+          y_pos: rY,
+        };
 
-      placedCount++;
-      currentNum++;
+        const existingIdx = newRoomsList.findIndex((r) => Number(r.x_pos) === rX && Number(r.y_pos) === rY);
+        if (existingIdx >= 0) {
+          newRoomsList[existingIdx] = generatedRoom;
+        } else {
+          newRoomsList.push(generatedRoom);
+        }
+
+        placedCount++;
+        currentNum++;
+      }
 
       const [dCols, dRows] = STEP[currentDir];
       let nextX = rX + dCols;
@@ -583,7 +626,8 @@ export const AdminBuildingsPage: React.FC = () => {
 
     setLocalRooms(newRoomsList);
     setHasUnsavedChanges(true);
-    setGenStatusMsg(`✅ Сгенерировано ${placedCount} комнат (${genFrom}–${genFrom + placedCount - 1}). Нажмите «Сохранить макет»`);
+    setGenMode(false); // Автоматически выходим из режима генерации!
+    showToast(`Успешно сгенерировано ${placedCount} комнат! Нажмите «Сохранить макет».`, 'success');
   };
 
   const handleSaveFullLayout = async () => {
@@ -647,7 +691,7 @@ export const AdminBuildingsPage: React.FC = () => {
     setSelectedRoom(null);
   };
 
-  // Компонент отрисовки отдельной ячейки
+  // Рендер ячейки
   const renderCellTile = (x: number, y: number) => {
     const room = localRooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === y);
     const calcRoomNum = getCalculatedRoomNumber(x, y);
@@ -659,6 +703,8 @@ export const AdminBuildingsPage: React.FC = () => {
     return (
       <div
         key={`cell-${x}-${y}`}
+        draggable={isEditLayout && !!room}
+        onDragStart={(e) => room && handleDragStartExistingTile(e, room)}
         onClick={() => handleCellClick(x, y)}
         onDragOver={(e) => isEditLayout && e.preventDefault()}
         onDrop={(e) => isEditLayout && handleDrop(e, x, y)}
@@ -673,12 +719,12 @@ export const AdminBuildingsPage: React.FC = () => {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          cursor: 'pointer',
+          cursor: isEditLayout ? (room ? 'grab' : 'pointer') : 'pointer',
           fontSize: '13px',
           padding: '4px',
           textAlign: 'center',
           position: 'relative',
-          transition: 'all 0.15s ease',
+          transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
         }}
       >
         {room && (
@@ -753,24 +799,23 @@ export const AdminBuildingsPage: React.FC = () => {
 
   const floorWidth = Number(selectedFloor?.width) || 8;
 
-  // Размеры горизонтальной сетки этажа (нужны для корректного поворота на 90° для смартфонов)
   const cellSize = 145;
   const corridorHeight = 40;
   const gridGap = 10;
-  const gridHeight = 110 * 2 + corridorHeight + gridGap * 2; // высота сетки по вертикали
-  const gridWidth = floorWidth * cellSize + (floorWidth - 1) * gridGap; // ширина сетки
+  const gridHeight = 110 * 2 + corridorHeight + gridGap * 2;
+  const gridWidth = floorWidth * cellSize + (floorWidth - 1) * gridGap;
 
   return (
     <AdminLayout>
-      <div>
+      <div style={{ width: '100%' }}>
         {buildingsLoading ? (
           <Skeleton width="100%" height={250} />
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: '230px 1fr', gap: '14px', gridTemplateAreas: '"sidebar main"' }} className="admin-buildings-grid">
+          <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start', flexWrap: 'nowrap', width: '100%' }}>
             
-            {/* Сайдбар выбора и создания корпуса */}
-            <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', gridArea: 'sidebar' }}>
-              <h4 style={{ fontSize: '16px', marginBottom: '14px', color: '#1e293b' }}>Список корпусов</h4>
+            {/* Сайдбар выбора корпуса */}
+            <div style={{ width: '250px', flexShrink: 0, backgroundColor: '#fff', padding: '16px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', border: '1px solid #e2e8f0' }}>
+              <h4 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '14px', color: '#1e293b' }}>Список корпусов</h4>
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
                 {buildings.map((b) => {
@@ -837,9 +882,8 @@ export const AdminBuildingsPage: React.FC = () => {
                 })}
               </div>
 
-              {/* Форма нового корпуса */}
               <form onSubmit={handleAddBuilding} style={{ borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
-                <h5 style={{ fontSize: '13px', marginBottom: '10px', color: '#64748b' }}>+ Добавить новый корпус</h5>
+                <h5 style={{ fontSize: '13px', marginBottom: '10px', color: '#64748b' }}>+ Новый корпус</h5>
                 <input
                   type="text"
                   placeholder="Название корпуса"
@@ -853,9 +897,9 @@ export const AdminBuildingsPage: React.FC = () => {
                   onChange={(e) => setNewBuildingGender(e.target.value as any)}
                   style={{ width: '100%', padding: '8px', marginBottom: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                 >
-                  <option value="MIXED">Смешанный корпус (С)</option>
-                  <option value="M">Мужской корпус (М)</option>
-                  <option value="F">Женский корпус (Ж)</option>
+                  <option value="MIXED">Смешанный (С)</option>
+                  <option value="M">Мужской (М)</option>
+                  <option value="F">Женский (Ж)</option>
                 </select>
                 <button type="submit" className="btn btn-primary" style={{ width: '100%', fontSize: '13px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px' }} disabled={savingBuilding}>
                   <Plus size={16} /> Создать корпус
@@ -864,14 +908,14 @@ export const AdminBuildingsPage: React.FC = () => {
             </div>
 
             {/* Основной редактор этажей */}
-            <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', gridArea: 'main' }}>
+            <div style={{ flex: 1, minWidth: 0, backgroundColor: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', border: '1px solid #e2e8f0' }}>
               {selectedBuilding ? (
-                <div>
-                  {/* Шапка корпуса */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                <div style={{ width: '100%' }}>
+                  {/* Стабильная шапка корпуса без смещений */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px', width: '100%' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <GenderBadge gender={selectedBuilding.gender} size={28} />
-                      <h2 style={{ fontSize: '20px', color: '#0f172a', margin: 0 }}>{selectedBuilding.name}</h2>
+                      <h2 style={{ fontSize: '20px', color: '#0f172a', margin: 0, fontWeight: 700 }}>{selectedBuilding.name}</h2>
                       {(() => {
                         const bStats = getBuildingStats(selectedBuilding.id);
                         return (
@@ -934,7 +978,6 @@ export const AdminBuildingsPage: React.FC = () => {
                         {isEditLayout ? 'Просмотр' : '✏️ Редактировать'}
                       </button>
 
-                      {/* Кнопка ручного переключения Вертикального/Горизонтального макета */}
                       {isEditLayout && (
                         <button
                           onClick={() => setGenMode(!genMode)}
@@ -1095,7 +1138,7 @@ export const AdminBuildingsPage: React.FC = () => {
                                 <div
                                   key={tmpl.type}
                                   draggable
-                                  onDragStart={(e) => handleDragStart(e, tmpl.type)}
+                                  onDragStart={(e) => handleDragStartTool(e, tmpl.type)}
                                   onClick={() => setSelectedTool(tmpl.type)}
                                   style={{
                                     display: 'flex',
@@ -1150,9 +1193,8 @@ export const AdminBuildingsPage: React.FC = () => {
                         </div>
                       )}
 
-                      {/* СЕТКА ЭТАЖА (АДАПТИВНАЯ: ориентация определяется автоматически; на смартфоне макет повёрнут на 90° влево) */}
+                      {/* СЕТКА ЭТАЖА */}
                       <div className="w-full overflow-auto py-2">
-                        {/* Горизонтальный макет: общий для ПК и смартфона (на смартфоне просто повёрнут) */}
                         {showVertical ? (
                           <div style={{
                             width: gridHeight,
@@ -1169,10 +1211,8 @@ export const AdminBuildingsPage: React.FC = () => {
                               transform: 'translate(-50%, -50%) rotate(-90deg)',
                             }}>
                               <div style={{ display: 'grid', gridTemplateColumns: `repeat(${floorWidth}, ${cellSize}px)`, gap: gridGap, justifyContent: 'start' }}>
-                                {/* Верхний ряд (y=0) */}
                                 {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 0))}
 
-                                {/* Коридор (y=1) */}
                                 <div style={{
                                   gridColumn: `1 / span ${floorWidth}`,
                                   height: corridorHeight,
@@ -1190,17 +1230,14 @@ export const AdminBuildingsPage: React.FC = () => {
                                   <span style={{ transform: 'rotate(90deg)', whiteSpace: 'nowrap' }}>КОРИДОР</span>
                                 </div>
 
-                                {/* Нижний ряд (y=2) */}
                                 {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 2))}
                               </div>
                             </div>
                           </div>
                         ) : (
                           <div style={{ display: 'grid', gridTemplateColumns: `repeat(${floorWidth}, ${cellSize}px)`, gap: gridGap, justifyContent: 'start' }}>
-                            {/* Верхний ряд (y=0) */}
                             {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 0))}
 
-                            {/* Коридор (y=1) */}
                             <div style={{
                               gridColumn: `1 / span ${floorWidth}`,
                               height: corridorHeight,
@@ -1218,7 +1255,6 @@ export const AdminBuildingsPage: React.FC = () => {
                               КОРИДОР
                             </div>
 
-                            {/* Нижний ряд (y=2) */}
                             {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 2))}
                           </div>
                         )}

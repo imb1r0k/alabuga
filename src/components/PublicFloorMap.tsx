@@ -4,12 +4,12 @@ import { Skeleton } from './Skeleton';
 import { getPublicLayout } from '../services/api';
 import { useOrientation } from '../hooks/useOrientation';
 
-const StairsIcon: React.FC = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 21L9 15V9L15 3H21" />
-    <path d="M3 21H9" />
-    <path d="M9 15H15" />
-    <path d="M15 9H21" />
+const StairsIcon: React.FC<{ size?: number }> = ({ size = 22 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 19h4v-4h4v-4h4V7h4" />
+    <path d="M4 19v-4" opacity="0.4" />
+    <path d="M8 15v-4" opacity="0.4" />
+    <path d="M12 11v-4" opacity="0.4" />
   </svg>
 );
 
