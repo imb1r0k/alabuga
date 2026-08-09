@@ -21,16 +21,13 @@ interface AuthContextType {
   refreshUser: () => Promise<void>;
   isAuthenticated: boolean;
   isAdmin: boolean;
+  isCurator: boolean;
   isModerator: boolean;
-}
-
-interface AuthProviderProps {
-  children: React.ReactNode;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -107,7 +104,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const roleNormalized = user?.role ? String(user.role).trim().toLowerCase() : '';
   const isAdmin = roleNormalized === 'admin';
-  const isModerator = roleNormalized === 'curator' || isAdmin;
+  const isCurator = roleNormalized === 'curator' || roleNormalized === 'moderator' || isAdmin;
 
   return (
     <AuthContext.Provider
@@ -120,7 +117,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         refreshUser: fetchUser,
         isAuthenticated: !!user,
         isAdmin,
-        isModerator,
+        isCurator,
+        isModerator: isCurator,
       }}
     >
       {children}

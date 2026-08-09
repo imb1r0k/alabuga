@@ -240,6 +240,16 @@ export const sendAdminTeamMessage = async (teamId: number, message: string) => {
   return response.data;
 };
 
+export const clearAdminTeamChat = async (teamId: number) => {
+  const response = await api.post('/admin/teams/clear-chat', { team_id: teamId });
+  return response.data;
+};
+
+export const deleteAdminTeamMessage = async (messageId: number) => {
+  const response = await api.post('/admin/teams/delete-message', { message_id: messageId });
+  return response.data;
+};
+
 export const getAdminTeamCalendar = async (teamId: number) => {
   const response = await api.get(`/admin/teams/calendar?team_id=${teamId}`);
   return response.data;

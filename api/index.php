@@ -22,6 +22,14 @@ try {
     $pdo = new PDO("mysql:host=$host;port=$port;dbname=$dbname;charset=utf8mb4", $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+
+    // Автоматическое создание таблицы привязки кураторов к командам при необходимости
+    $pdo->exec("CREATE TABLE IF NOT EXISTS curator_teams (
+        user_id INT NOT NULL,
+        team_id INT NOT NULL,
+        PRIMARY KEY (user_id, team_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
 } catch (PDOException $e) {
     http_response_code(500);
     echo json_encode(['error' => 'Ошибка подключения к базе данных: ' . $e->getMessage()]);
@@ -97,7 +105,14 @@ function requireAuth($pdo) {
 function requireAdmin($pdo) {
     $user = requireAuth($pdo);
     $role = strtolower(trim($user['role']));
-    if (!in_array($role, ['admin', 'curator'])) jsonError('Доступ запрещён', 403);
+    if (!in_array($role, ['admin', 'curator', 'moderator'])) jsonError('Доступ запрещён', 403);
+    return $user;
+}
+
+function requireStrictAdmin($pdo) {
+    $user = requireAuth($pdo);
+    $role = strtolower(trim($user['role']));
+    if ($role !== 'admin') jsonError('Доступ только для администраторов', 403);
     return $user;
 }
 
@@ -109,10 +124,16 @@ function getCuratorTeams($pdo, $userId) {
     $role = strtolower(trim($user['role']));
     if ($role === 'admin') return null; // null означает "все команды"
     
-    $stmt = $pdo->prepare("SELECT team_id FROM curator_teams WHERE user_id = ?");
-    $stmt->execute([$userId]);
-    $teams = $stmt->fetchAll(PDO::FETCH_COLUMN);
-    return $teams ?: [];
+    if ($role === 'curator' || $role === 'moderator') {
+        $stmt = $pdo->prepare("SELECT team_id FROM curator_teams WHERE user_id = ?");
+        $stmt->execute([$userId]);
+        $teams = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        if (in_array(0, $teams, true)) {
+            return null; // 0 означает "все команды"
+        }
+        return $teams;
+    }
+    return [];
 }
 
 function checkCuratorAccessToUser($pdo, $curatorId, $targetUserId) {
@@ -123,13 +144,13 @@ function checkCuratorAccessToUser($pdo, $curatorId, $targetUserId) {
     $stmt->execute([$targetUserId]);
     $userTeamId = (int)$stmt->fetchColumn();
     
-    return in_array($userTeamId, $curatorTeams);
+    return in_array($userTeamId, $curatorTeams, true);
 }
 
 function checkCuratorAccessToTeam($pdo, $curatorId, $teamId) {
     $curatorTeams = getCuratorTeams($pdo, $curatorId);
     if ($curatorTeams === null) return true;
-    return in_array((int)$teamId, $curatorTeams);
+    return in_array((int)$teamId, $curatorTeams, true);
 }
 
 // ─── Определение маршрута ────────────────────────────────────────────────────
@@ -194,7 +215,7 @@ try {
     // ─── Экспорт всех бронирований ────────────────────────────────────────
 
     if ($uri === 'admin/export/bookings') {
-        $user = requireAdmin($pdo);
+        $user = requireStrictAdmin($pdo);
         $stmt = $pdo->query("
             SELECT b.id, b.status, b.created_at, b.updated_at,
                    u.last_name, u.first_name, u.phone as user_phone, u.login,
@@ -213,7 +234,7 @@ try {
     // ─── Экспорт макетов всех корпусов ────────────────────────────────────
 
     if ($uri === 'admin/export/layouts') {
-        $user = requireAdmin($pdo);
+        $user = requireStrictAdmin($pdo);
         $buildings = $pdo->query("SELECT * FROM buildings ORDER BY id ASC")->fetchAll();
         $result = [];
 
@@ -250,7 +271,7 @@ try {
     // ─── Очистка: перенести все брони в архив ────────────────────────────
 
     if ($uri === 'admin/archive-bookings') {
-        $user = requireAdmin($pdo);
+        $user = requireStrictAdmin($pdo);
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
         $stmt = $pdo->prepare("UPDATE bookings SET status = 'archived' WHERE status NOT IN ('archived', 'recalled')");
         $stmt->execute();
@@ -260,7 +281,7 @@ try {
     // ─── Очистка: перенести всех пользователей (кроме админов) в архив ───
 
     if ($uri === 'admin/archive-users') {
-        $user = requireAdmin($pdo);
+        $user = requireStrictAdmin($pdo);
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
         $stmt = $pdo->prepare("UPDATE users SET status = 'archived' WHERE role <> 'admin' AND status = 'active'");
         $stmt->execute();
@@ -281,7 +302,7 @@ try {
         }
 
         if ($method === 'POST') {
-            $user = requireAdmin($pdo);
+            $user = requireStrictAdmin($pdo);
 
             foreach ($data as $key => $value) {
                 $allowed = ['site_title', 'hero_badge', 'hero_title', 'hero_description', 'hero_button_text', 'hero_button_text_auth'];
@@ -324,7 +345,7 @@ try {
 
     if ($uri === 'save-global-notification') {
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
-        requireAdmin($pdo);
+        requireStrictAdmin($pdo);
 
         $text = trim($data['text'] ?? '');
         $type = in_array($data['type'] ?? '', ['permanent', 'one-view'], true) ? $data['type'] : 'permanent';
@@ -583,6 +604,9 @@ try {
                 $stmt = $pdo->prepare("INSERT INTO teams (name, description) VALUES (?, ?)");
                 $stmt->execute([$name, $desc]);
             } elseif ($action === 'update' && $id > 0) {
+                if (!checkCuratorAccessToTeam($pdo, $user['id'], $id)) {
+                    jsonError('У вас нет доступа к редактированию этой команды', 403);
+                }
                 $stmt = $pdo->prepare("UPDATE teams SET name=?, description=? WHERE id=?");
                 $stmt->execute([$name, $desc, $id]);
             }
@@ -596,6 +620,9 @@ try {
         $user = requireAdmin($pdo);
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
         $id = (int)($data['id'] ?? 0);
+        if (!checkCuratorAccessToTeam($pdo, $user['id'], $id)) {
+            jsonError('У вас нет доступа к удалению этой команды', 403);
+        }
         $stmt = $pdo->prepare("DELETE FROM teams WHERE id = ?");
         $stmt->execute([$id]);
         jsonResponse(['success' => true]);
@@ -680,6 +707,9 @@ try {
 
         if ($method === 'GET') {
             $teamId = (int)($_GET['team_id'] ?? 0);
+            if (!checkCuratorAccessToTeam($pdo, $user['id'], $teamId)) {
+                jsonError('У вас нет доступа к этой команде', 403);
+            }
             $stmt = $pdo->prepare("
                 SELECT m.id, m.message, m.created_at, u.first_name, u.last_name
                 FROM team_chat_messages m
@@ -693,6 +723,9 @@ try {
 
         if ($method === 'POST') {
             $teamId = (int)($data['team_id'] ?? 0);
+            if (!checkCuratorAccessToTeam($pdo, $user['id'], $teamId)) {
+                jsonError('У вас нет доступа к этой команде', 403);
+            }
             $message = trim($data['message'] ?? '');
             if (!$message) jsonError('Сообщение не может быть пустым');
             $stmt = $pdo->prepare("INSERT INTO team_chat_messages (team_id, user_id, message) VALUES (?, ?, ?)");
@@ -703,11 +736,48 @@ try {
         jsonError('Метод не поддерживается', 405);
     }
 
+    // Очистка всех сообщений чата команды
+    if ($uri === 'admin/teams/clear-chat') {
+        $user = requireAdmin($pdo);
+        if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
+        $teamId = (int)($data['team_id'] ?? 0);
+        if ($teamId <= 0) jsonError('Команда не указана');
+        if (!checkCuratorAccessToTeam($pdo, $user['id'], $teamId)) {
+            jsonError('У вас нет доступа к этой команде', 403);
+        }
+        $stmt = $pdo->prepare("DELETE FROM team_chat_messages WHERE team_id = ?");
+        $stmt->execute([$teamId]);
+        jsonResponse(['success' => true]);
+    }
+
+    // Удаление конкретного сообщения в чате команды
+    if ($uri === 'admin/teams/delete-message') {
+        $user = requireAdmin($pdo);
+        if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
+        $messageId = (int)($data['message_id'] ?? 0);
+        if ($messageId <= 0) jsonError('Сообщение не указано');
+
+        $stmt = $pdo->prepare("SELECT team_id FROM team_chat_messages WHERE id = ?");
+        $stmt->execute([$messageId]);
+        $teamId = (int)$stmt->fetchColumn();
+        if (!$teamId) jsonError('Сообщение не найдено', 404);
+
+        if (!checkCuratorAccessToTeam($pdo, $user['id'], $teamId)) {
+            jsonError('У вас нет доступа к этой команде', 403);
+        }
+        $delStmt = $pdo->prepare("DELETE FROM team_chat_messages WHERE id = ?");
+        $delStmt->execute([$messageId]);
+        jsonResponse(['success' => true]);
+    }
+
     if ($uri === 'admin/teams/calendar') {
         $user = requireAdmin($pdo);
 
         if ($method === 'GET') {
             $teamId = (int)($_GET['team_id'] ?? 0);
+            if (!checkCuratorAccessToTeam($pdo, $user['id'], $teamId)) {
+                jsonError('У вас нет доступа к этой команде', 403);
+            }
             $stmt = $pdo->prepare("SELECT * FROM team_calendar_events WHERE team_id = ? ORDER BY event_date ASC");
             $stmt->execute([$teamId]);
             jsonResponse($stmt->fetchAll());
@@ -716,6 +786,10 @@ try {
         if ($method === 'POST') {
             $action = $data['action'] ?? 'create';
             $teamId = (int)($data['team_id'] ?? 0);
+
+            if (!checkCuratorAccessToTeam($pdo, $user['id'], $teamId)) {
+                jsonError('У вас нет доступа к этой команде', 403);
+            }
 
             if ($action === 'create') {
                 $title = trim($data['title'] ?? '');
@@ -1304,8 +1378,34 @@ try {
 
         if ($uri === 'admin/users') {
             if ($method === 'GET') {
-                $stmt = $pdo->query("SELECT id, first_name, last_name, patronymic, name, login as email, phone, role, status, team_name, team_id, created_at FROM users ORDER BY id DESC");
-                jsonResponse($stmt->fetchAll());
+                $curatorTeams = getCuratorTeams($pdo, $curatorUser['id']);
+                if ($curatorTeams === null) {
+                    $stmt = $pdo->query("SELECT id, first_name, last_name, patronymic, name, login as email, phone, role, status, team_name, team_id, created_at FROM users ORDER BY id DESC");
+                    $users = $stmt->fetchAll();
+                } else {
+                    if (empty($curatorTeams)) {
+                        $users = [];
+                    } else {
+                        $placeholders = implode(',', array_fill(0, count($curatorTeams), '?'));
+                        $stmt = $pdo->prepare("SELECT id, first_name, last_name, patronymic, name, login as email, phone, role, status, team_name, team_id, created_at FROM users WHERE team_id IN ($placeholders) OR id = ? ORDER BY id DESC");
+                        $params = array_merge($curatorTeams, [$curatorUser['id']]);
+                        $stmt->execute($params);
+                        $users = $stmt->fetchAll();
+                    }
+                }
+
+                foreach ($users as &$u) {
+                    $roleClean = strtolower(trim($u['role']));
+                    if ($roleClean === 'curator' || $roleClean === 'moderator') {
+                        $ctStmt = $pdo->prepare("SELECT team_id FROM curator_teams WHERE user_id = ?");
+                        $ctStmt->execute([$u['id']]);
+                        $u['curator_team_ids'] = array_map('intval', $ctStmt->fetchAll(PDO::FETCH_COLUMN));
+                    } else {
+                        $u['curator_team_ids'] = [];
+                    }
+                }
+
+                jsonResponse($users);
             }
 
             if ($method === 'POST') {
@@ -1316,12 +1416,17 @@ try {
                 $phone = trim($data['phone'] ?? '');
                 $login = trim($data['email'] ?? $data['login'] ?? '');
                 $role = trim($data['role'] ?? 'user');
+                if ($role === 'moderator') $role = 'curator';
                 $status = trim($data['status'] ?? 'active');
                 $teamName = trim($data['team_name'] ?? '');
                 $teamId = (int)($data['team_id'] ?? 0);
                 $password = trim($data['password'] ?? '');
 
                 if ($id > 0) {
+                    if ($curatorUser['role'] === 'curator' && !checkCuratorAccessToUser($pdo, $curatorUser['id'], $id) && $curatorUser['id'] != $id) {
+                        jsonError('У вас нет доступа к редактированию этого пользователя', 403);
+                    }
+
                     $fullName = $lastName . ' ' . $firstName . ($patronymic ? ' ' . $patronymic : '');
                     $teamNameResolved = $teamName;
                     if ($teamId > 0) {
@@ -1329,6 +1434,7 @@ try {
                         $stmt->execute([$teamId]);
                         $teamNameResolved = $stmt->fetchColumn() ?: $teamName;
                     }
+
                     if ($password) {
                         $hash = password_hash($password, PASSWORD_DEFAULT);
                         $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, patronymic=?, name=?, phone=?, login=?, role=?, status=?, team_name=?, team_id=?, password=? WHERE id=?");
@@ -1348,6 +1454,19 @@ try {
                     } else {
                         $stmt = $pdo->prepare("DELETE FROM team_members WHERE user_id = ?");
                         $stmt->execute([$id]);
+                    }
+
+                    // Сохранение привязанных к куратору команд
+                    if ($role === 'curator') {
+                        $curatorTeamIds = $data['curator_team_ids'] ?? [];
+                        if (is_array($curatorTeamIds)) {
+                            $delStmt = $pdo->prepare("DELETE FROM curator_teams WHERE user_id = ?");
+                            $delStmt->execute([$id]);
+                            $insStmt = $pdo->prepare("INSERT INTO curator_teams (user_id, team_id) VALUES (?, ?)");
+                            foreach ($curatorTeamIds as $tid) {
+                                $insStmt->execute([$id, (int)$tid]);
+                            }
+                        }
                     }
 
                     jsonResponse(['success' => true]);
@@ -1378,6 +1497,7 @@ try {
         }
 
         if ($uri === 'admin/bookings') {
+            requireStrictAdmin($pdo);
             if ($method === 'GET') {
                 $stmt = $pdo->query("
                     SELECT b.id, b.user_id, b.room_id, b.status, b.created_at,
@@ -1414,6 +1534,7 @@ try {
         }
 
         if ($uri === 'admin/buildings') {
+            requireStrictAdmin($pdo);
             if ($method === 'GET') {
                 $stmt = $pdo->query("SELECT * FROM buildings ORDER BY id ASC");
                 jsonResponse($stmt->fetchAll());
@@ -1444,6 +1565,7 @@ try {
         }
 
         if ($uri === 'admin/floors') {
+            requireStrictAdmin($pdo);
             if ($method === 'GET') {
                 $buildingId = (int)($_GET['building_id'] ?? 0);
                 $stmt = $pdo->prepare("SELECT * FROM floors WHERE building_id = ? ORDER BY floor_number ASC");
@@ -1480,6 +1602,7 @@ try {
         }
 
         if ($uri === 'admin/rooms') {
+            requireStrictAdmin($pdo);
             if ($method === 'GET') {
                 $floorId = (int)($_GET['floor_id'] ?? 0);
                 $stmt = $pdo->prepare("SELECT * FROM rooms WHERE floor_id = ? ORDER BY y_pos ASC, x_pos ASC");
@@ -1520,6 +1643,7 @@ try {
         }
 
         if ($uri === 'admin/all-rooms') {
+            requireStrictAdmin($pdo);
             $stmt = $pdo->query("
                 SELECT r.*, bu.name as building_name, f.floor_number
                 FROM rooms r
@@ -1531,6 +1655,7 @@ try {
         }
 
         if ($uri === 'admin/room-bookings') {
+            requireStrictAdmin($pdo);
             $roomId = (int)($_GET['room_id'] ?? 0);
             $stmt = $pdo->prepare("
                 SELECT b.*, u.first_name, u.last_name, u.name as user_name, u.phone as user_phone

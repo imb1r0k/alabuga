@@ -12,11 +12,13 @@ import {
   getAdminUsers,
   getAdminTeamChat,
   sendAdminTeamMessage,
+  clearAdminTeamChat,
+  deleteAdminTeamMessage,
   getAdminTeamCalendar,
   addAdminTeamEvent,
   deleteAdminTeamEvent,
 } from '../../services/api';
-import { Users, MessageSquare, Calendar, Trash2, Plus, Save, UserPlus, UserMinus } from 'lucide-react';
+import { Users, MessageSquare, Calendar, Trash2, Plus, Save, UserPlus, UserMinus, Eraser } from 'lucide-react';
 
 export const AdminTeamsPage: React.FC = () => {
   const [teams, setTeams] = useState<any[]>([]);
@@ -152,6 +154,29 @@ export const AdminTeamsPage: React.FC = () => {
       setChatMessages(newChat);
     } catch (err: any) {
       showToast('Ошибка при отправке сообщения: ' + (err.response?.data?.error || err.message), 'error');
+    }
+  };
+
+  const handleClearChat = async () => {
+    if (!selectedTeam) return;
+    if (!window.confirm(`Вы уверены, что хотите полностью очистить чат команды «${selectedTeam.name}»?`)) return;
+    try {
+      await clearAdminTeamChat(selectedTeam.id);
+      setChatMessages([]);
+      showToast('Чат команды очищен', 'success');
+    } catch (err: any) {
+      showToast('Ошибка очистки чата: ' + (err.response?.data?.error || err.message), 'error');
+    }
+  };
+
+  const handleDeleteChatMessage = async (msgId: number) => {
+    if (!selectedTeam || !msgId) return;
+    try {
+      await deleteAdminTeamMessage(msgId);
+      setChatMessages((prev) => prev.filter((m) => m.id !== msgId));
+      showToast('Сообщение удалено', 'success');
+    } catch (err: any) {
+      showToast('Ошибка удаления сообщения: ' + (err.response?.data?.error || err.message), 'error');
     }
   };
 
@@ -382,18 +407,39 @@ export const AdminTeamsPage: React.FC = () => {
 
               {/* Командный чат */}
               <div style={{ backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', padding: '16px', marginBottom: '16px' }}>
-                <h4 style={{ margin: '0 0 12px', fontSize: '14px', color: '#334155', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <MessageSquare size={16} /> Командный чат
-                </h4>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                  <h4 style={{ margin: 0, fontSize: '14px', color: '#334155', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <MessageSquare size={16} /> Командный чат
+                  </h4>
+                  {chatMessages.length > 0 && (
+                    <button
+                      onClick={handleClearChat}
+                      className="btn btn-danger"
+                      style={{ fontSize: '12px', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      <Eraser size={14} /> Очистить чат
+                    </button>
+                  )}
+                </div>
+
                 <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '12px', marginBottom: '12px' }}>
                   {chatMessages.length === 0 ? (
                     <p style={{ fontSize: '13px', color: '#94a3b8' }}>Сообщений пока нет</p>
                   ) : (
                     chatMessages.map((msg) => (
-                      <div key={msg.id} style={{ marginBottom: '10px' }}>
-                        <strong style={{ fontSize: '13px' }}>{msg.first_name} {msg.last_name}</strong>
-                        <span style={{ fontSize: '12px', color: '#64748b', marginLeft: '8px' }}>{new Date(msg.created_at).toLocaleString()}</span>
-                        <p style={{ margin: '4px 0 0', fontSize: '13px' }}>{msg.message}</p>
+                      <div key={msg.id} style={{ marginBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div>
+                          <strong style={{ fontSize: '13px' }}>{msg.first_name} {msg.last_name}</strong>
+                          <span style={{ fontSize: '12px', color: '#64748b', marginLeft: '8px' }}>{new Date(msg.created_at).toLocaleString()}</span>
+                          <p style={{ margin: '4px 0 0', fontSize: '13px' }}>{msg.message}</p>
+                        </div>
+                        <button
+                          onClick={() => handleDeleteChatMessage(msg.id)}
+                          style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#ef4444', padding: '2px' }}
+                          title="Удалить сообщение"
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       </div>
                     ))
                   )}

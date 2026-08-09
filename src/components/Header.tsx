@@ -22,7 +22,7 @@ const isImageUrl = (value: string) => {
 };
 
 export const Header: React.FC = () => {
-  const { user, isAuthenticated, logout, isAdmin, isModerator } = useAuth();
+  const { user, isAuthenticated, logout, isAdmin, isCurator } = useAuth();
   const { siteTitle, loading: settingsLoading } = useSettings();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -51,7 +51,7 @@ export const Header: React.FC = () => {
   const getRoleLabel = () => {
     const role = user?.role?.toLowerCase();
     if (role === 'admin') return 'Администратор';
-    if (role === 'curator') return 'Куратор';
+    if (role === 'curator' || role === 'moderator') return 'Куратор';
     return role || '';
   };
 
@@ -66,28 +66,28 @@ export const Header: React.FC = () => {
       boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
     }}>
       <div style={{
-                    width: '100%',
-                    padding: '0 24px',
-                    height: '64px',
-                    display: 'flex',
-                    alignItems: 'center',
-                  }}>
-              
-              <Link to="/" style={{ display: 'flex', alignItems: 'center', color: '#fff', textDecoration: 'none', fontWeight: 'bold', fontSize: '18px', marginRight: 'auto', flexShrink: 0 }}>
-                              {settingsLoading ? (
-                                <Skeleton width="200px" height="28px" rounded="6px" />
-                              ) : isImageUrl(siteTitle) ? (
-                                <img
-                                  src={siteTitle}
-                                  alt="Логотип сайта"
-                                  style={{ height: '36px', width: 'auto', maxWidth: '220px', objectFit: 'contain', display: 'block' }}
-                                />
-                              ) : (
-                                <span style={{ letterSpacing: '0.5px', whiteSpace: 'nowrap' }}>{siteTitle}</span>
-                              )}
-                            </Link>
-      
-              <nav className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', flexShrink: 0 }}>
+        width: '100%',
+        padding: '0 24px',
+        height: '64px',
+        display: 'flex',
+        alignItems: 'center',
+      }}>
+
+        <Link to="/" style={{ display: 'flex', alignItems: 'center', color: '#fff', textDecoration: 'none', fontWeight: 'bold', fontSize: '18px', marginRight: 'auto', flexShrink: 0 }}>
+          {settingsLoading ? (
+            <Skeleton width="200px" height="28px" rounded="6px" />
+          ) : isImageUrl(siteTitle) ? (
+            <img
+              src={siteTitle}
+              alt="Логотип сайта"
+              style={{ height: '36px', width: 'auto', maxWidth: '220px', objectFit: 'contain', display: 'block' }}
+            />
+          ) : (
+            <span style={{ letterSpacing: '0.5px', whiteSpace: 'nowrap' }}>{siteTitle}</span>
+          )}
+        </Link>
+
+        <nav className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', flexShrink: 0 }}>
           <NavLink to="/" end style={navLinkStyle}>
             <Home size={16} />
             <span>Главная</span>
@@ -100,7 +100,7 @@ export const Header: React.FC = () => {
             </NavLink>
           )}
 
-          {(isAdmin || isModerator) && (
+          {(isAdmin || isCurator) && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '6px', borderLeft: '1px solid #334155' }}>
               <NavLink to="/admin-panel" end style={navLinkStyle}>
                 <ShieldCheck size={16} />
@@ -112,15 +112,19 @@ export const Header: React.FC = () => {
                 <span>Пользователи</span>
               </NavLink>
 
-              <NavLink to="/admin-panel/buildings" style={navLinkStyle}>
-                <Building2 size={16} />
-                <span>Корпуса</span>
-              </NavLink>
+              {isAdmin && (
+                <>
+                  <NavLink to="/admin-panel/buildings" style={navLinkStyle}>
+                    <Building2 size={16} />
+                    <span>Корпуса</span>
+                  </NavLink>
 
-              <NavLink to="/admin-panel/bookings" style={navLinkStyle}>
-                <BookmarkCheck size={16} />
-                <span>Бронирования</span>
-              </NavLink>
+                  <NavLink to="/admin-panel/bookings" style={navLinkStyle}>
+                    <BookmarkCheck size={16} />
+                    <span>Бронирования</span>
+                  </NavLink>
+                </>
+              )}
 
               <NavLink to="/admin-panel/teams" style={navLinkStyle}>
                 <Users size={16} />
@@ -130,7 +134,7 @@ export const Header: React.FC = () => {
           )}
         </nav>
 
-                <div className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: '12px', marginLeft: '16px' }}>
+        <div className="desktop-only" style={{ display: 'flex', alignItems: 'center', gap: '12px', marginLeft: '16px' }}>
           {isAuthenticated ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', backgroundColor: '#1e293b', padding: '6px 12px', borderRadius: '20px', border: '1px solid #334155' }}>
               <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: '#0284c7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold' }}>
@@ -237,7 +241,7 @@ export const Header: React.FC = () => {
             </NavLink>
           )}
 
-          {(isAdmin || isModerator) && (
+          {(isAdmin || isCurator) && (
             <div style={{ paddingTop: '8px', borderTop: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <div style={{ padding: '4px 12px', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 Администрирование
@@ -284,45 +288,49 @@ export const Header: React.FC = () => {
                 <span>Пользователи</span>
               </NavLink>
 
-              <NavLink
-                to="/admin-panel/buildings"
-                onClick={() => setMobileMenuOpen(false)}
-                style={({ isActive }) => ({
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '10px 12px',
-                  borderRadius: '8px',
-                  color: isActive ? '#38bdf8' : '#cbd5e1',
-                  backgroundColor: isActive ? 'rgba(56, 189, 248, 0.1)' : 'transparent',
-                  textDecoration: 'none',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                })}
-              >
-                <Building2 size={18} />
-                <span>Управление корпусами</span>
-              </NavLink>
+              {isAdmin && (
+                <>
+                  <NavLink
+                    to="/admin-panel/buildings"
+                    onClick={() => setMobileMenuOpen(false)}
+                    style={({ isActive }) => ({
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      color: isActive ? '#38bdf8' : '#cbd5e1',
+                      backgroundColor: isActive ? 'rgba(56, 189, 248, 0.1)' : 'transparent',
+                      textDecoration: 'none',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                    })}
+                  >
+                    <Building2 size={18} />
+                    <span>Управление корпусами</span>
+                  </NavLink>
 
-              <NavLink
-                to="/admin-panel/bookings"
-                onClick={() => setMobileMenuOpen(false)}
-                style={({ isActive }) => ({
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '10px 12px',
-                  borderRadius: '8px',
-                  color: isActive ? '#38bdf8' : '#cbd5e1',
-                  backgroundColor: isActive ? 'rgba(56, 189, 248, 0.1)' : 'transparent',
-                  textDecoration: 'none',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                })}
-              >
-                <BookmarkCheck size={18} />
-                <span>Бронирования</span>
-              </NavLink>
+                  <NavLink
+                    to="/admin-panel/bookings"
+                    onClick={() => setMobileMenuOpen(false)}
+                    style={({ isActive }) => ({
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      color: isActive ? '#38bdf8' : '#cbd5e1',
+                      backgroundColor: isActive ? 'rgba(56, 189, 248, 0.1)' : 'transparent',
+                      textDecoration: 'none',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                    })}
+                  >
+                    <BookmarkCheck size={18} />
+                    <span>Бронирования</span>
+                  </NavLink>
+                </>
+              )}
 
               <NavLink
                 to="/admin-panel/teams"

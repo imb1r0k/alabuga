@@ -4,7 +4,7 @@ import { AdminLayout } from '../../components/AdminLayout';
 import { useToast } from '../../components/Toast';
 import { getAdminUsers, updateAdminUser, getUserDetails, getAdminTeams } from '../../services/api';
 import { Link } from 'react-router-dom';
-import { QrCode, X } from 'lucide-react';
+import { QrCode, X, Shield, CheckSquare, Square } from 'lucide-react';
 
 export const AdminUsersPage: React.FC = () => {
   const [users, setUsers] = useState<any[]>([]);
@@ -23,6 +23,7 @@ export const AdminUsersPage: React.FC = () => {
     team_name: '',
     team_id: 0,
     password: '',
+    curator_team_ids: [],
   });
   const [msg, setMsg] = useState('');
   const [saving, setSaving] = useState(false);
@@ -58,18 +59,23 @@ export const AdminUsersPage: React.FC = () => {
   const handleSelectUser = async (u: any) => {
     setSelectedUser(u);
     setMsg('');
+    const rawRole = (u.role || 'user').toLowerCase();
+    const normalizedRole = rawRole === 'moderator' ? 'curator' : rawRole;
+
     setUserFormData({
       id: u.id,
       first_name: u.first_name || '',
       last_name: u.last_name || '',
       phone: u.phone || '',
-      email: u.email || '',
-      role: u.role || 'user',
+      email: u.email || u.login || '',
+      role: normalizedRole,
       status: u.status || 'active',
       team_name: u.team_name || '',
       team_id: u.team_id || 0,
       password: '',
+      curator_team_ids: u.curator_team_ids || [],
     });
+
     try {
       const details = await getUserDetails(u.id);
       setUserDetails(details);
@@ -96,12 +102,45 @@ export const AdminUsersPage: React.FC = () => {
     }
   };
 
+  const handleToggleCuratorTeam = (teamId: number) => {
+    setUserFormData((prev: any) => {
+      let currentIds: number[] = prev.curator_team_ids || [];
+      // Если было выбрано "Все команды" (0), при выборе конкретной сбрасываем 0
+      if (currentIds.includes(0)) {
+        currentIds = [];
+      }
+
+      if (teamId === 0) {
+        // Режим "Все команды"
+        return { ...prev, curator_team_ids: [0] };
+      }
+
+      if (currentIds.includes(teamId)) {
+        currentIds = currentIds.filter((id) => id !== teamId);
+      } else {
+        currentIds = [...currentIds, teamId];
+      }
+      return { ...prev, curator_team_ids: currentIds };
+    });
+  };
+
   const handleQrOpen = (u: any) => {
     setSelectedForQr(u);
   };
 
   const getPublicProfileUrl = (login: string) => {
     return `${window.location.origin}/public_profile/${login}`;
+  };
+
+  const getRoleBadge = (role: string) => {
+    const r = (role || '').toLowerCase();
+    if (r === 'admin') {
+      return <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '12px', color: '#fff', backgroundColor: '#dc2626' }}>Администратор</span>;
+    }
+    if (r === 'curator' || r === 'moderator') {
+      return <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '12px', color: '#fff', backgroundColor: '#2563eb' }}>Куратор</span>;
+    }
+    return <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '12px', color: '#fff', backgroundColor: '#64748b' }}>Пользователь</span>;
   };
 
   return (
@@ -141,17 +180,7 @@ export const AdminUsersPage: React.FC = () => {
                       <td style={{ padding: '10px', fontWeight: 600 }}>{u.last_name} {u.first_name || u.name}</td>
                       <td style={{ padding: '10px' }}>{u.email || u.login}</td>
                       <td style={{ padding: '10px' }}>{u.phone || '-'}</td>
-                      <td style={{ padding: '10px' }}>
-                        <span style={{
-                          padding: '2px 8px',
-                          borderRadius: '4px',
-                          fontSize: '12px',
-                          color: '#fff',
-                          backgroundColor: u.role === 'admin' ? '#dc2626' : u.role === 'moderator' ? '#2563eb' : '#64748b'
-                        }}>
-                          {u.role}
-                        </span>
-                      </td>
+                      <td style={{ padding: '10px' }}>{getRoleBadge(u.role)}</td>
                       <td style={{ padding: '10px' }}>
                         <span style={{
                           padding: '2px 8px',
@@ -260,13 +289,13 @@ export const AdminUsersPage: React.FC = () => {
                       style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
                     >
                       <option value="user">Пользователь (user)</option>
-                      <option value="moderator">Модератор (moderator)</option>
+                      <option value="curator">Куратор (curator)</option>
                       <option value="admin">Администратор (admin)</option>
                     </select>
                   </div>
 
                   <div className="input-group">
-                    <label>Команда</label>
+                    <label>Команда участника</label>
                     <select
                       value={userFormData.team_id || 0}
                       onChange={(e) => {
@@ -286,6 +315,67 @@ export const AdminUsersPage: React.FC = () => {
                       ))}
                     </select>
                   </div>
+
+                  {/* Если пользователь Куратор — блок выбора закреплённых за ним команд */}
+                  {userFormData.role === 'curator' && (
+                    <div style={{ gridColumn: '1 / -1', backgroundColor: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', padding: '16px' }}>
+                      <h4 style={{ margin: '0 0 10px', fontSize: '14px', color: '#0369a1', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Shield size={16} /> Привязанные к куратору команды для управления:
+                      </h4>
+                      <p style={{ fontSize: '12px', color: '#0284c7', marginBottom: '12px' }}>
+                        Куратор сможет управлять только пользователями и сообщениями выбранных команд.
+                      </p>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {/* Опция "Все команды" */}
+                        <div
+                          onClick={() => handleToggleCuratorTeam(0)}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            cursor: 'pointer',
+                            padding: '6px 10px',
+                            borderRadius: '6px',
+                            backgroundColor: userFormData.curator_team_ids?.includes(0) ? '#e0f2fe' : '#fff',
+                            border: '1px solid #cbd5e1',
+                            fontWeight: userFormData.curator_team_ids?.includes(0) ? 600 : 400,
+                          }}
+                        >
+                          {userFormData.curator_team_ids?.includes(0) ? <CheckSquare size={18} color="#0284c7" /> : <Square size={18} color="#94a3b8" />}
+                          <span style={{ fontSize: '13px' }}>🌐 Все команды (полный доступ к командам)</span>
+                        </div>
+
+                        {!userFormData.curator_team_ids?.includes(0) && (
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '8px', marginTop: '4px' }}>
+                            {teams.map((t) => {
+                              const isChecked = userFormData.curator_team_ids?.includes(t.id);
+                              return (
+                                <div
+                                  key={t.id}
+                                  onClick={() => handleToggleCuratorTeam(t.id)}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '8px',
+                                    cursor: 'pointer',
+                                    padding: '6px 10px',
+                                    borderRadius: '6px',
+                                    backgroundColor: isChecked ? '#e0f2fe' : '#fff',
+                                    border: `1px solid ${isChecked ? '#0284c7' : '#cbd5e1'}`,
+                                    fontSize: '13px',
+                                  }}
+                                >
+                                  {isChecked ? <CheckSquare size={16} color="#0284c7" /> : <Square size={16} color="#94a3b8" />}
+                                  <span>{t.name}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="input-group" style={{ gridColumn: '1 / -1' }}>
                     <label>Новый пароль (оставьте пустым, чтобы не менять)</label>
