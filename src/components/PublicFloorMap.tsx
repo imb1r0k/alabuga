@@ -261,13 +261,7 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
                   fontSize: '11px',
                   letterSpacing: '2px',
                 }}>
-                  <span style={{ 
-                    transform: 'rotate(90deg)', 
-                    whiteSpace: 'nowrap',
-                    display: 'inline-block'
-                  }}>
-                    КОРИДОР
-                  </span>
+                  КОРИДОР
                 </div>
 
                 {Array.from({ length: floorWidth }).map((_, x) => renderCellTile(x, 2))}
