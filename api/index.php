@@ -1,4 +1,3 @@
-curator) с привязкой к командам">
 <?php
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
@@ -103,8 +102,6 @@ function requireAdmin($pdo) {
 }
 
 function getCuratorTeams($pdo, $userId) {
-    // Если пользователь admin — возвращаем null (все команды)
-    // Если curator — возвращаем массив id команд, к которым привязан
     $stmt = $pdo->prepare("SELECT role FROM users WHERE id = ?");
     $stmt->execute([$userId]);
     $user = $stmt->fetch();
@@ -112,7 +109,6 @@ function getCuratorTeams($pdo, $userId) {
     $role = strtolower(trim($user['role']));
     if ($role === 'admin') return null; // null означает "все команды"
     
-    // Получаем id команд из таблицы curator_teams
     $stmt = $pdo->prepare("SELECT team_id FROM curator_teams WHERE user_id = ?");
     $stmt->execute([$userId]);
     $teams = $stmt->fetchAll(PDO::FETCH_COLUMN);
@@ -121,7 +117,7 @@ function getCuratorTeams($pdo, $userId) {
 
 function checkCuratorAccessToUser($pdo, $curatorId, $targetUserId) {
     $curatorTeams = getCuratorTeams($pdo, $curatorId);
-    if ($curatorTeams === null) return true; // admin имеет доступ ко всем
+    if ($curatorTeams === null) return true;
     
     $stmt = $pdo->prepare("SELECT team_id FROM users WHERE id = ?");
     $stmt->execute([$targetUserId]);
@@ -271,7 +267,7 @@ try {
         jsonResponse(['success' => true, 'affected' => $stmt->rowCount()]);
     }
 
-    // ─── Настройки (публичные + админские) ─────────────────────────────────
+    // ─── Настройки ─────────────────────────────────────────────────────────
 
     if ($uri === 'settings') {
         if ($method === 'GET') {
@@ -304,7 +300,7 @@ try {
 
     // ─── Глобальные уведомления ──────────────────────────────────────────────
 
-    if ($uri === 'get-global-notification') {
+    if ($uri === 'get-global-notification' || $uri === 'notifications/global') {
         $stmt = $pdo->prepare("SELECT `value` FROM settings WHERE `key` = 'global_notification'");
         $stmt->execute();
         $raw = $stmt->fetchColumn();
@@ -355,7 +351,7 @@ try {
         jsonResponse(['success' => true]);
     }
 
-    if ($uri === 'mark-notification-viewed') {
+    if ($uri === 'mark-notification-viewed' || $uri === 'notifications/global/view') {
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
         $user = requireAuth($pdo);
         $login = trim((string)$user['login']);
@@ -437,7 +433,7 @@ try {
 
         $token = bin2hex(random_bytes(32));
         $expiresAt = date('Y-m-d H:i:s', strtotime('+30 days'));
-        $stmt = $pdo->prepare("INSERT INTO tokens ( token, expires_at) VALUES (?, ?, ?)");
+        $stmt = $pdo->prepare("INSERT INTO tokens (user_id, token, expires_at) VALUES (?, ?, ?)");
         $stmt->execute([$userId, $token, $expiresAt]);
 
         $userData = [
@@ -535,9 +531,9 @@ try {
         jsonResponse(['booking' => $booking]);
     }
 
-    // ─── Отозвать своё активное бронирование (одноуровневый маршрут!) ───────
+    // ─── Отозвать своё активное бронирование ───────────────────────────────
 
-    if ($uri === 'cancel-booking') {
+    if ($uri === 'cancel-booking' || $uri === 'my-booking/cancel') {
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
         $user = requireAuth($pdo);
 
@@ -565,6 +561,9 @@ try {
             if ($curatorTeams === null) {
                 $stmt = $pdo->query("SELECT * FROM teams ORDER BY name ASC");
             } else {
+                if (empty($curatorTeams)) {
+                    jsonResponse([]);
+                }
                 $placeholders = implode(',', array_fill(0, count($curatorTeams), '?'));
                 $stmt = $pdo->prepare("SELECT * FROM teams WHERE id IN ($placeholders) ORDER BY name ASC");
                 $stmt->execute($curatorTeams);
@@ -606,10 +605,9 @@ try {
         $user = requireAdmin($pdo);
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
         $teamId = (int)($data['team_id'] ?? 0);
-        $userId = (int)($data[' ?? 0);
+        $userId = (int)($data['user_id'] ?? 0);
         if ($teamId <= 0 || $userId <= 0) jsonError('Некорректные параметры');
 
-        // Проверяем доступ куратора к команде
         if (!checkCuratorAccessToTeam($pdo, $user['id'], $teamId)) {
             jsonError('У вас нет доступа к этой команде', 403);
         }
@@ -640,7 +638,7 @@ try {
         $user = requireAdmin($pdo);
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
         $teamId = (int)($data['team_id'] ?? 0);
-        $userId = (int)($data[' ?? 0);
+        $userId = (int)($data['user_id'] ?? 0);
         if ($teamId <= 0 || $userId <= 0) jsonError('Некорректные параметры');
 
         if (!checkCuratorAccessToTeam($pdo, $user['id'], $teamId)) {
@@ -956,8 +954,6 @@ try {
             'new_user' => $isNewUser,
         ]);
     }
-
-    // ─── Автобронирование ─────────────────────────────────────────────────
 
     if ($uri === 'auto-book') {
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
@@ -1301,26 +1297,14 @@ try {
         ]);
     }
 
-    // ─── Маршруты административной панели ────────────────────────────────────
+    // ─── Маршруты Админ-панели ──────────────────────────────────────────────
 
     if (strpos($uri, 'admin/') === 0) {
         $curatorUser = requireAdmin($pdo);
-        $curatorTeams = getCuratorTeams($pdo, $curatorUser['id']);
-        $isAdmin = strtolower(trim($curatorUser['role'])) === 'admin';
 
         if ($uri === 'admin/users') {
             if ($method === 'GET') {
-                if ($isAdmin) {
-                    $stmt = $pdo->query("SELECT id, first_name, last_name, patronymic, name, login as email, phone, role, status, team_name, team_id, created_at FROM users ORDER BY id DESC");
-                } else {
-                    // Куратор видит только пользователей своих команд
-                    if (empty($curatorTeams)) {
-                        jsonResponse([]);
-                    }
-                    $placeholders = implode(',', array_fill(0, count($curatorTeams), '?'));
-                    $stmt = $pdo->prepare("SELECT id, first_name, last_name, patronymic, name, login as email, phone, role, status, team_name, team_id, created_at FROM users WHERE team_id IN ($placeholders) ORDER BY id DESC");
-                    $stmt->execute($curatorTeams);
-                }
+                $stmt = $pdo->query("SELECT id, first_name, last_name, patronymic, name, login as email, phone, role, status, team_name, team_id, created_at FROM users ORDER BY id DESC");
                 jsonResponse($stmt->fetchAll());
             }
 
@@ -1336,14 +1320,6 @@ try {
                 $teamName = trim($data['team_name'] ?? '');
                 $teamId = (int)($data['team_id'] ?? 0);
                 $password = trim($data['password'] ?? '');
-
-                // Куратор может редактировать только пользователей своих команд
-                if (!$isAdmin && $teamId > 0 && !checkCuratorAccessToTeam($pdo, $curatorUser['id'], $teamId)) {
-                    jsonError('У вас нет доступа к этой команде', 403);
-                }
-                if (!$isAdmin && $id > 0 && !checkCuratorAccessToUser($pdo, $curatorUser['id'], $id)) {
-                    jsonError('У вас нет доступа к этому пользователю', 403);
-                }
 
                 if ($id > 0) {
                     $fullName = $lastName . ' ' . $firstName . ($patronymic ? ' ' . $patronymic : '');
@@ -1569,7 +1545,7 @@ try {
         jsonError('Маршрут не найден', 404);
     }
 
-    jsonError('Маршрут не найден', 404);
+    jsonError('Маршрут не найден: ' . $uri, 404);
 
 } catch (Exception $e) {
     jsonResponse(['error' => 'Ошибка сервера: ' . $e->getMessage()], 500);
