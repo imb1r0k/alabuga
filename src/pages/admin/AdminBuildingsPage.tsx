@@ -383,30 +383,48 @@ export const AdminBuildingsPage: React.FC = () => {
     const autoNum = `${getCalculatedRoomNumber(x, y)}`;
 
     let name = 'Комната';
+    let roomNumber = autoNum;
     let capacity = 2;
     let isTechnical = 0;
 
     if (type === 'elevator') {
-      name = 'Лифт'; capacity = 0;
+      name = 'Лифт';
+      roomNumber = 'Лифт';
+      capacity = 0;
     } else if (type === 'stairs') {
-      name = 'Лестница'; capacity = 0;
+      name = 'Лестница';
+      roomNumber = 'Лестница';
+      capacity = 0;
     } else if (type === 'tech') {
-      name = 'Техническое'; capacity = 0; isTechnical = 1;
+      name = 'Техническое';
+      roomNumber = autoNum;
+      capacity = 0;
+      isTechnical = 1;
     } else if (type === 'gen-start') {
-      name = `[Старт -> ${dir}]`; capacity = 0; isTechnical = 1;
+      name = `[Старт -> ${dir}]`;
+      roomNumber = autoNum;
+      capacity = 0;
+      isTechnical = 1;
     } else if (type === 'gen-turn') {
-      name = `[Поворот -> ${dir}]`; capacity = 0; isTechnical = 1;
+      name = `[Поворот -> ${dir}]`;
+      roomNumber = autoNum;
+      capacity = 0;
+      isTechnical = 1;
     } else if (type === 'gen-end') {
-      name = '[Конец]'; capacity = 0; isTechnical = 1;
+      name = '[Конец]';
+      roomNumber = autoNum;
+      capacity = 0;
+      isTechnical = 1;
     } else {
       name = `Комната ${autoNum}`;
+      roomNumber = existing?.room_number || autoNum;
     }
 
     const roomData = {
       id: existing?.id,
       floor_id: Number(selectedFloor.id),
       building_id: Number(selectedBuilding.id),
-      room_number: existing?.room_number || autoNum,
+      room_number: roomNumber,
       name,
       capacity,
       is_technical: isTechnical,
@@ -700,6 +718,15 @@ export const AdminBuildingsPage: React.FC = () => {
     const effectiveRoomGender = getEffectiveGender(room?.gender, selectedFloor?.gender);
     const bookedCount = room && room.room_type === 'room' && room.id ? getRoomOccupancy(room.id) : 0;
 
+    // Определяем, что показывать как номер/название
+    let displayNumber = room?.room_number || '';
+    let displayName = room?.name || '';
+    
+    // Для лестницы и лифта показываем название вместо номера
+    if (room?.room_type === 'stairs' || room?.room_type === 'elevator') {
+      displayNumber = room.name;
+    }
+
     return (
       <div
         key={`cell-${x}-${y}`}
@@ -749,7 +776,7 @@ export const AdminBuildingsPage: React.FC = () => {
         {room ? (
           <div style={{ transform: showVertical ? 'rotate(90deg)' : 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
             <IconComp size={24} style={{ marginBottom: '3px', marginTop: '4px' }} />
-            <strong>{room.room_number || room.name}</strong>
+            <strong>{displayNumber || displayName}</strong>
 
             {room.room_type === 'room' && (
               <span style={{ fontSize: '12px', marginTop: '2px', fontWeight: 600, color: bookedCount >= room.capacity ? '#dc2626' : '#16a34a' }}>
@@ -1274,7 +1301,9 @@ export const AdminBuildingsPage: React.FC = () => {
                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                               <GenderBadge gender={getEffectiveGender(selectedRoom.gender, selectedFloor.gender)} size={24} />
                               <h3 style={{ margin: 0, fontSize: '16px', color: '#1e293b' }}>
-                                Комната {selectedRoom.room_number || selectedRoom.name}
+                                {selectedRoom.room_type === 'stairs' || selectedRoom.room_type === 'elevator' 
+                                  ? selectedRoom.name 
+                                  : `Комната ${selectedRoom.room_number || selectedRoom.name}`}
                               </h3>
                             </div>
                             <button onClick={() => setSelectedRoom(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '18px' }}>✕</button>
@@ -1340,8 +1369,9 @@ export const AdminBuildingsPage: React.FC = () => {
                               <label style={{ fontSize: '12px', fontWeight: 600 }}>Номер</label>
                               <input
                                 type="text"
-                                value={selectedRoom.room_number}
+                                value={selectedRoom.room_number || ''}
                                 onChange={(e) => setSelectedRoom({ ...selectedRoom, room_number: e.target.value })}
+                                disabled={selectedRoom.room_type === 'stairs' || selectedRoom.room_type === 'elevator'}
                               />
                             </div>
 
@@ -1362,6 +1392,7 @@ export const AdminBuildingsPage: React.FC = () => {
                                 max={10}
                                 value={selectedRoom.capacity}
                                 onChange={(e) => setSelectedRoom({ ...selectedRoom, capacity: Number(e.target.value) })}
+                                disabled={selectedRoom.room_type === 'stairs' || selectedRoom.room_type === 'elevator'}
                               />
                             </div>
 
