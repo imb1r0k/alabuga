@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Skeleton } from '../../components/Skeleton';
 import { AdminLayout } from '../../components/AdminLayout';
 import { useToast } from '../../components/Toast';
 import { getAdminUsers, updateAdminUser, getUserDetails, getAdminTeams } from '../../services/api';
 import { Link } from 'react-router-dom';
-import { QrCode, X, Shield, CheckSquare, Square } from 'lucide-react';
+import { QrCode, X, Shield, CheckSquare, Square, Search } from 'lucide-react';
 
 export const AdminUsersPage: React.FC = () => {
   const [users, setUsers] = useState<any[]>([]);
@@ -12,6 +12,8 @@ export const AdminUsersPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [userDetails, setUserDetails] = useState<any>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+
   const [userFormData, setUserFormData] = useState<any>({
     id: 0,
     first_name: '',
@@ -55,6 +57,26 @@ export const AdminUsersPage: React.FC = () => {
       console.error(err);
     }
   };
+
+  const filteredUsers = useMemo(() => {
+    if (!searchTerm.trim()) return users;
+    const q = searchTerm.trim().toLowerCase();
+    return users.filter((u) => {
+      const fullName = `${u.last_name || ''} ${u.first_name || ''} ${u.patronymic || ''} ${u.name || ''}`.toLowerCase();
+      const login = (u.email || u.login || '').toLowerCase();
+      const phone = (u.phone || '').toLowerCase();
+      const role = (u.role || '').toLowerCase();
+      const team = (u.team_name || '').toLowerCase();
+
+      return (
+        fullName.includes(q) ||
+        login.includes(q) ||
+        phone.includes(q) ||
+        role.includes(q) ||
+        team.includes(q)
+      );
+    });
+  }, [users, searchTerm]);
 
   const handleSelectUser = async (u: any) => {
     setSelectedUser(u);
@@ -148,7 +170,41 @@ export const AdminUsersPage: React.FC = () => {
   return (
     <AdminLayout>
       <div>
-        <h2 style={{ marginBottom: '16px', fontSize: '20px', color: '#0f172a' }}>Управление пользователями</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: '20px', color: '#0f172a' }}>Управление пользователями</h2>
+            <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#64748b' }}>
+              Всего пользователей: {filteredUsers.length}
+            </p>
+          </div>
+
+          {/* Поиск пользователей */}
+          <div style={{ position: 'relative', width: '320px', maxWidth: '100%' }}>
+            <Search size={18} color="#94a3b8" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
+            <input
+              type="text"
+              placeholder="Поиск (ФИО, логин, телефон, команда)..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '8px 12px 8px 36px',
+                borderRadius: '8px',
+                border: '1px solid #cbd5e1',
+                fontSize: '13px',
+              }}
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8' }}
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
+        </div>
+
         {loading ? (
           <Skeleton width="100%" height={250} />
         ) : (
@@ -168,73 +224,81 @@ export const AdminUsersPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((u) => {
-                    const isCuratorRole = u.role === 'curator' || u.role === 'moderator';
+                  {filteredUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} style={{ padding: '24px', textAlign: 'center', color: '#94a3b8' }}>
+                        Пользователи не найдены
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredUsers.map((u) => {
+                      const isCuratorRole = u.role === 'curator' || u.role === 'moderator';
 
-                    return (
-                      <tr
-                        key={u.id}
-                        onClick={() => handleSelectUser(u)}
-                        style={{
-                          borderBottom: '1px solid #eee',
-                          cursor: 'pointer',
-                          backgroundColor: selectedUser?.id === u.id ? '#e0f2fe' : 'transparent',
-                        }}
-                      >
-                        <td style={{ padding: '10px' }}>#{u.id}</td>
-                        <td style={{ padding: '10px', fontWeight: 600 }}>{u.last_name} {u.first_name || u.name}</td>
-                        <td style={{ padding: '10px' }}>{u.email || u.login}</td>
-                        <td style={{ padding: '10px' }}>{u.phone || '-'}</td>
-                        <td style={{ padding: '10px' }}>{getRoleBadge(u.role)}</td>
-                        <td style={{ padding: '10px' }}>
-                          <span style={{
-                            padding: '2px 8px',
-                            borderRadius: '4px',
-                            fontSize: '12px',
-                            color: '#fff',
-                            backgroundColor: u.status === 'archived' ? '#6b7280' : '#16a34a'
-                          }}>
-                            {u.status === 'archived' ? 'В архиве' : 'Активен'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px' }}>
-                          {isCuratorRole ? (
-                            u.curator_team_ids?.includes(0) ? (
-                              <span style={{ fontWeight: 600, color: '#0284c7' }}>any</span>
-                            ) : u.curator_team_ids?.length > 0 ? (
-                              teams
-                                .filter((t) => u.curator_team_ids.includes(t.id))
-                                .map((t) => t.name)
-                                .join(', ') || '-'
+                      return (
+                        <tr
+                          key={u.id}
+                          onClick={() => handleSelectUser(u)}
+                          style={{
+                            borderBottom: '1px solid #eee',
+                            cursor: 'pointer',
+                            backgroundColor: selectedUser?.id === u.id ? '#e0f2fe' : 'transparent',
+                          }}
+                        >
+                          <td style={{ padding: '10px' }}>#{u.id}</td>
+                          <td style={{ padding: '10px', fontWeight: 600 }}>{u.last_name} {u.first_name || u.name}</td>
+                          <td style={{ padding: '10px' }}>{u.email || u.login}</td>
+                          <td style={{ padding: '10px' }}>{u.phone || '-'}</td>
+                          <td style={{ padding: '10px' }}>{getRoleBadge(u.role)}</td>
+                          <td style={{ padding: '10px' }}>
+                            <span style={{
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              fontSize: '12px',
+                              color: '#fff',
+                              backgroundColor: u.status === 'archived' ? '#6b7280' : '#16a34a'
+                            }}>
+                              {u.status === 'archived' ? 'В архиве' : 'Активен'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px' }}>
+                            {isCuratorRole ? (
+                              u.curator_team_ids?.includes(0) ? (
+                                <span style={{ fontWeight: 600, color: '#0284c7' }}>any</span>
+                              ) : u.curator_team_ids?.length > 0 ? (
+                                teams
+                                  .filter((t) => u.curator_team_ids.includes(t.id))
+                                  .map((t) => t.name)
+                                  .join(', ') || '-'
+                              ) : (
+                                '-'
+                              )
                             ) : (
-                              '-'
-                            )
-                          ) : (
-                            u.team_name || '-'
-                          )}
-                        </td>
-                        <td style={{ padding: '10px' }}>
-                          <div style={{ display: 'flex', gap: '4px' }}>
-                            <Link
-                              to={`/public_profile/${u.email || u.login}`}
-                              className="btn btn-secondary"
-                              style={{ fontSize: '12px', padding: '4px 8px', textDecoration: 'none' }}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              Открыть
-                            </Link>
-                            <button
-                              className="btn btn-primary"
-                              style={{ fontSize: '12px', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                              onClick={(e) => { e.stopPropagation(); handleQrOpen(u); }}
-                            >
-                              <QrCode size={14} /> QR
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                              u.team_name || '-'
+                            )}
+                          </td>
+                          <td style={{ padding: '10px' }}>
+                            <div style={{ display: 'flex', gap: '4px' }}>
+                              <Link
+                                to={`/public_profile/${u.email || u.login}`}
+                                className="btn btn-secondary"
+                                style={{ fontSize: '12px', padding: '4px 8px', textDecoration: 'none' }}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                Открыть
+                              </Link>
+                              <button
+                                className="btn btn-primary"
+                                style={{ fontSize: '12px', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                onClick={(e) => { e.stopPropagation(); handleQrOpen(u); }}
+                              >
+                                <QrCode size={14} /> QR
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>

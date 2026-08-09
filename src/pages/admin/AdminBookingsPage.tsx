@@ -2,8 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Skeleton } from '../../components/Skeleton';
 import { AdminLayout } from '../../components/AdminLayout';
 import { useToast } from '../../components/Toast';
-import { getAdminBookings, updateAdminBooking, getAllRooms } from '../../services/api';
-import { X, Search, CopyCheck, ChevronLeft, ChevronRight, SlidersHorizontal } from 'lucide-react';
+import { getAdminBookings, updateAdminBooking, getAllRooms, getSettings, updateSettings, runAutoApproveBookings } from '../../services/api';
+import { X, Search, CopyCheck, ChevronLeft, ChevronRight, SlidersHorizontal, Bot } from 'lucide-react';
 
 const ITEMS_PER_PAGE = 15;
 
@@ -15,6 +15,9 @@ export const AdminBookingsPage: React.FC = () => {
   const [savingBooking, setSavingBooking] = useState(false);
   const [bookingMsg, setBookingMsg] = useState('');
   const { showToast } = useToast();
+
+  // Автоодобрение ботом
+  const [autoApproveEnabled, setAutoApproveEnabled] = useState(false);
 
   // Поиск
   const [searchTerm, setSearchTerm] = useState('');
@@ -47,7 +50,17 @@ export const AdminBookingsPage: React.FC = () => {
 
   useEffect(() => {
     loadBookings();
+    loadAutoApproveSetting();
   }, []);
+
+  const loadAutoApproveSetting = async () => {
+    try {
+      const settings = await getSettings();
+      setAutoApproveEnabled(settings['auto-accept-bookings'] === '1' || settings['auto-accept-bookings'] === 'true');
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const loadBookings = async () => {
     setBookingsLoading(true);
@@ -62,12 +75,49 @@ export const AdminBookingsPage: React.FC = () => {
     }
   };
 
+  // Интервал автоодобрения ботом раз в 10 секунд если функция включена
+  useEffect(() => {
+    if (!autoApproveEnabled) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await runAutoApproveBookings();
+        if (res.approved_count > 0) {
+          showToast(`Бот автоматически одобрил заявок: ${res.approved_count}`, 'success');
+          loadBookings();
+        }
+      } catch (err) {
+        console.error('Ошибка фонового автоодобрения:', err);
+      }
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [autoApproveEnabled]);
+
+  const handleToggleAutoApprove = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.checked;
+    setAutoApproveEnabled(val);
+    try {
+      await updateSettings({ 'auto-accept-bookings': val ? '1' : '0' });
+      showToast(`Автоодобрение ботом ${val ? 'включено' : 'выключено'}`, 'info');
+      if (val) {
+        const res = await runAutoApproveBookings();
+        if (res.approved_count > 0) {
+          showToast(`Бот автоматически одобрил заявок: ${res.approved_count}`, 'success');
+          loadBookings();
+        }
+      }
+    } catch (err: any) {
+      showToast('Ошибка сохранения настройки: ' + (err.response?.data?.error || err.message), 'error');
+    }
+  };
+
   // ─── Определение дубликатов (только среди АКТИВНЫХ заявок) ─────────────────
   const duplicateIds = useMemo(() => {
     const counts = new Map<string, number>();
     const dupes = new Set<number>();
 
-    // Учитываем только заявки со статусами pending, approved, approved_bot
+    // Учитываем только заявки со статусами pending, approved, approved_bot (игнорируем recalled, rejected, archived)
     const activeBookings = bookings.filter((b) => ['pending', 'approved', 'approved_bot'].includes(b.status));
 
     activeBookings.forEach((b) => {
@@ -223,7 +273,7 @@ export const AdminBookingsPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Настройки отображения статусов */}
+        {/* Настройки отображения статусов и автоодобрения */}
         <div style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap', fontSize: '13px' }}>
           <span style={{ fontWeight: 600, color: '#334155', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <SlidersHorizontal size={16} color="#0284c7" />
@@ -259,6 +309,20 @@ export const AdminBookingsPage: React.FC = () => {
             />
             Показывать «В архиве»
           </label>
+
+          {/* Переключатель Автоодобрения ботом */}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: autoApproveEnabled ? '#ecfeff' : '#f8fafc', padding: '4px 10px', borderRadius: '20px', border: `1px solid ${autoApproveEnabled ? '#a5f3fc' : '#e2e8f0'}` }}>
+            <Bot size={18} color={autoApproveEnabled ? '#0891b2' : '#64748b'} />
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 600, color: autoApproveEnabled ? '#0e7490' : '#475569' }}>
+              <input
+                type="checkbox"
+                checked={autoApproveEnabled}
+                onChange={handleToggleAutoApprove}
+                style={{ width: '16px', height: '16px' }}
+              />
+              Автобронирование вкл.
+            </label>
+          </div>
         </div>
 
         {bookingsLoading ? (
@@ -309,7 +373,7 @@ export const AdminBookingsPage: React.FC = () => {
                               <span>{b.last_name} {b.first_name || b.user_name} {b.patronymic || ''}</span>
                               {isDuplicate && (
                                 <span
-                                  title="Обнаружен дубликат ФИО!"
+                                  title="Обнаружен дубликат ФИО среди активных заявок!"
                                   style={{
                                     display: 'inline-flex',
                                     alignItems: 'center',

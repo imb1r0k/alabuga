@@ -52,6 +52,11 @@ export const getAdminStats = async () => {
   return response.data;
 };
 
+export const runAutoApproveBookings = async () => {
+  const response = await api.post('/admin/auto-approve');
+  return response.data;
+};
+
 // ─── Публичные данные для бронирования ───────────────────────────────────────
 
 export const getMyBooking = async () => {

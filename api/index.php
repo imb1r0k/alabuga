@@ -153,6 +153,42 @@ function checkCuratorAccessToTeam($pdo, $curatorId, $teamId) {
     return in_array((int)$teamId, $curatorTeams, true);
 }
 
+function processAutoApproveBookings($pdo) {
+    $settingStmt = $pdo->prepare("SELECT `value` FROM settings WHERE `key` = 'auto-accept-bookings'");
+    $settingStmt->execute();
+    $enabledVal = $settingStmt->fetchColumn();
+    if ($enabledVal !== '1' && $enabledVal !== 'true') {
+        return ['executed' => false, 'message' => 'Автоодобрение отключено в настройках', 'approved_count' => 0];
+    }
+
+    $stmt = $pdo->query("
+        SELECT b.id, b.user_id, b.room_id, u.last_name, u.first_name, u.name,
+               r.gender as room_gender, f.gender as floor_gender, bu.gender as building_gender
+        FROM bookings b
+        JOIN users u ON b.user_id = u.id
+        JOIN rooms r ON b.room_id = r.id
+        JOIN floors f ON r.floor_id = f.id
+        JOIN buildings bu ON r.building_id = bu.id
+        WHERE b.status = 'pending' AND u.status = 'active'
+    ");
+    $pendingList = $stmt->fetchAll();
+
+    $approvedCount = 0;
+    $updateStmt = $pdo->prepare("UPDATE bookings SET status = 'approved_bot', comment = 'Одобрено автоматически ботом' WHERE id = ?");
+
+    foreach ($pendingList as $row) {
+        $roomEff = $row['room_gender'] !== 'DEFAULT' ? $row['room_gender'] : ($row['floor_gender'] !== 'DEFAULT' ? $row['floor_gender'] : $row['building_gender']);
+        $userGender = detectGenderByLastName($row['last_name'] ?: $row['name']);
+
+        if ($roomEff === 'MIXED' || $roomEff === 'DEFAULT' || $userGender === null || $roomEff === $userGender) {
+            $updateStmt->execute([$row['id']]);
+            $approvedCount++;
+        }
+    }
+
+    return ['executed' => true, 'approved_count' => $approvedCount];
+}
+
 // ─── Определение маршрута ────────────────────────────────────────────────────
 
 $uri = $_GET['route'] ?? '';
@@ -167,6 +203,13 @@ $rawInput = file_get_contents('php://input');
 $data = json_decode($rawInput, true) ?: [];
 
 try {
+
+    // ─── Автоодобрение бронирований ───────────────────────────────────────
+
+    if ($uri === 'admin/auto-approve' || $uri === 'auto-approve-bookings') {
+        $res = processAutoApproveBookings($pdo);
+        jsonResponse($res);
+    }
 
     // ─── Статистика для админ-панели ──────────────────────────────────────
 
@@ -315,10 +358,9 @@ try {
             $user = requireStrictAdmin($pdo);
 
             foreach ($data as $key => $value) {
-                $allowed = ['site_title', 'hero_badge', 'hero_title', 'hero_description', 'hero_button_text', 'hero_button_text_auth'];
+                $allowed = ['site_title', 'hero_badge', 'hero_title', 'hero_description', 'hero_button_text', 'hero_button_text_auth', 'auto-accept-bookings'];
                 if (!in_array($key, $allowed)) continue;
                 $val = trim((string)$value);
-                if ($val === '') continue;
                 $stmt = $pdo->prepare("INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = ?");
                 $stmt->execute([$key, $val, $val]);
             }
@@ -705,10 +747,11 @@ try {
                    COALESCE(tm.role, CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 'curator' ELSE 'member' END) as role
             FROM users u
             LEFT JOIN team_members tm ON tm.user_id = u.id AND tm.team_id = ?
-            WHERE u.team_id = ?
+            WHERE (u.team_id = ?
                OR (LOWER(TRIM(u.role)) IN ('curator', 'moderator') AND u.id IN (
                    SELECT user_id FROM curator_teams WHERE team_id = ? OR team_id = 0
-               ))
+               )))
+               AND u.status = 'active'
             ORDER BY CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 0 ELSE 1 END, u.last_name ASC
         ");
         $stmt->execute([$teamId, $teamId, $teamId]);
@@ -863,7 +906,7 @@ try {
         $floors->execute([$buildingId]);
         $floorsData = [];
 
-        foreach ($floors->fetchAll() as $floor) {
+        foreach ($floors.fetchAll() as $floor) {
             $rooms = $pdo->prepare("
                 SELECT r.*,
                        (SELECT COUNT(*) FROM bookings b
@@ -1270,10 +1313,11 @@ try {
                    COALESCE(tm.role, CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 'curator' ELSE 'member' END) as role
             FROM users u
             LEFT JOIN team_members tm ON tm.user_id = u.id AND tm.team_id = ?
-            WHERE u.team_id = ?
+            WHERE (u.team_id = ?
                OR (LOWER(TRIM(u.role)) IN ('curator', 'moderator') AND u.id IN (
                    SELECT user_id FROM curator_teams WHERE team_id = ? OR team_id = 0
-               ))
+               )))
+               AND u.status = 'active'
             ORDER BY CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 0 ELSE 1 END, u.last_name ASC
         ");
         $membersStmt->execute([$teamId, $teamId, $teamId]);
@@ -1359,10 +1403,11 @@ try {
                        COALESCE(tm.role, CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 'curator' ELSE 'member' END) as role
                 FROM users u
                 LEFT JOIN team_members tm ON tm.user_id = u.id AND tm.team_id = ?
-                WHERE u.team_id = ?
+                WHERE (u.team_id = ?
                    OR (LOWER(TRIM(u.role)) IN ('curator', 'moderator') AND u.id IN (
                        SELECT user_id FROM curator_teams WHERE team_id = ? OR team_id = 0
-                   ))
+                   )))
+                   AND u.status = 'active'
                 ORDER BY CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 0 ELSE 1 END, u.last_name ASC
             ");
             $membersStmt->execute([$teamId, $teamId, $teamId]);
