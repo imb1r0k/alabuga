@@ -494,7 +494,6 @@ export const AdminBuildingsPage: React.FC = () => {
       if (dragX === dropX && dragY === dropY) return;
 
       setLocalRooms((prevRooms) => {
-        const itemInDragPos = prevRooms.find((r) => Number(r.x_pos) === dragX && Number(r.y_pos) === dragY);
         const itemInDropPos = prevRooms.find((r) => Number(r.x_pos) === dropX && Number(r.y_pos) === dropY);
 
         return prevRooms.map((r) => {
