@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { FileDown, Archive, Users, Download, Trash2 } from 'lucide-react';
+import { FileDown, Archive, Users, Download, Trash2, MessageSquare } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useToast } from './Toast';
-import { getExportBookings, getExportLayouts, archiveAllBookings, archiveAllUsers } from '../services/api';
+import { getExportBookings, getExportLayouts, archiveAllBookings, archiveAllUsers, clearAllTeamChats } from '../services/api';
 
 export const AdminCleanupPanel: React.FC = () => {
   const { showToast } = useToast();
@@ -10,8 +10,11 @@ export const AdminCleanupPanel: React.FC = () => {
   const [exportingLayouts, setExportingLayouts] = useState(false);
   const [archivingBookings, setArchivingBookings] = useState(false);
   const [archivingUsers, setArchivingUsers] = useState(false);
+  const [clearingChats, setClearingChats] = useState(false);
+
   const [confirmArchiveBookings, setConfirmArchiveBookings] = useState(false);
   const [confirmArchiveUsers, setConfirmArchiveUsers] = useState(false);
+  const [confirmClearChats, setConfirmClearChats] = useState(false);
 
   // ─── Экспорт бронирований в Excel ────────────────────────────────────────
 
@@ -20,12 +23,12 @@ export const AdminCleanupPanel: React.FC = () => {
     try {
       const bookings = await getExportBookings();
 
-      // Маппинг статусов
       const statusMap: Record<string, string> = {
         pending: 'Ожидает',
         approved: 'Одобрено',
         approved_bot: 'Одобрено ботом',
         rejected: 'Отклонено',
+        recalled: 'Отозвано',
         archived: 'В архиве',
       };
 
@@ -35,8 +38,10 @@ export const AdminCleanupPanel: React.FC = () => {
         'Дата создания': b.created_at,
         'Фамилия': b.last_name || '',
         'Имя': b.first_name || '',
+        'Отчество': b.patronymic || '',
         'Телефон': b.user_phone || '',
         'Логин': b.login || '',
+        'Команда': b.team_name || '',
         'Корпус': b.building_name || '',
         'Этаж': b.floor_number || '',
         'Комната': b.room_number || '',
@@ -49,7 +54,6 @@ export const AdminCleanupPanel: React.FC = () => {
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Бронирования');
 
-      // Автоширина колонок
       const maxColWidth = 20;
       worksheet['!cols'] = Object.keys(rows[0] || {}).map((key) => ({
         wch: Math.min(Math.max(key.length * 2, 12), maxColWidth),
@@ -70,11 +74,8 @@ export const AdminCleanupPanel: React.FC = () => {
     setExportingLayouts(true);
     try {
       const buildings = await getExportLayouts();
-
-      // Создаём отдельный лист с описанием, и по листу на каждое здание
       const workbook = XLSX.utils.book_new();
 
-      // Лист-индекс
       const indexRows = buildings.map((b: any, bi: number) => ({
         '№': bi + 1,
         'ID': b.id,
@@ -106,7 +107,7 @@ export const AdminCleanupPanel: React.FC = () => {
         });
 
         const ws = XLSX.utils.json_to_sheet(rows);
-        const sheetName = (b.name || `Корпус ${b.id}`).slice(0, 31); // ограничение Excel
+        const sheetName = (b.name || `Корпус ${b.id}`).slice(0, 31);
         XLSX.utils.book_append_sheet(workbook, ws, sheetName);
         ws['!cols'] = [{ wch: 20 }, { wch: 8 }, { wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 6 }, { wch: 6 }];
       });
@@ -135,7 +136,7 @@ export const AdminCleanupPanel: React.FC = () => {
     }
   };
 
-  // ─── Архивация всех пользователей (кроме админов) ─────────────────────────
+  // ─── Архивация всех пользователей ─────────────────────────────────────────
 
   const handleArchiveUsers = async () => {
     setArchivingUsers(true);
@@ -147,6 +148,21 @@ export const AdminCleanupPanel: React.FC = () => {
       showToast('Ошибка архивации: ' + (err.response?.data?.error || err.message), 'error');
     } finally {
       setArchivingUsers(false);
+    }
+  };
+
+  // ─── Очистка сообщений всех командных чатов ─────────────────────────────
+
+  const handleClearAllChats = async () => {
+    setClearingChats(true);
+    try {
+      const result = await clearAllTeamChats();
+      showToast(`Все сообщения во всех командных чатах очищены (${result.affected} шт.)`, 'success');
+      setConfirmClearChats(false);
+    } catch (err: any) {
+      showToast('Ошибка очистки чатов: ' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+      setClearingChats(false);
     }
   };
 
@@ -191,8 +207,54 @@ export const AdminCleanupPanel: React.FC = () => {
           Очистка системы
         </h4>
         <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
-          Внимание! Эти действия необратимы и затронут большое количество данных.
+          Внимание! Эти действия затронут большое количество данных.
         </p>
+
+        {/* Очистка чатов всех команд */}
+        <div style={{ padding: '16px', borderRadius: '8px', backgroundColor: '#fff7ed', border: '1px solid #fed7aa', marginBottom: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+            <div>
+              <strong style={{ fontSize: '14px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <MessageSquare size={16} color="#ea580c" />
+                Очистка чатов всех команд
+              </strong>
+              <p style={{ fontSize: '12px', color: '#64748b', margin: '4px 0 0' }}>
+                Полное удаление всех отправленных сообщений во всех командных чатах портала.
+              </p>
+            </div>
+            {!confirmClearChats ? (
+              <button
+                className="btn btn-secondary"
+                onClick={() => setConfirmClearChats(true)}
+                disabled={clearingChats}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', padding: '8px 14px', backgroundColor: '#ea580c', color: '#fff', border: 'none' }}
+              >
+                <MessageSquare size={16} />
+                {clearingChats ? 'Очистка...' : 'Очистить чаты всех команд'}
+              </button>
+            ) : (
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#c2410c' }}>Точно очистить все чаты?</span>
+                <button
+                  className="btn btn-danger"
+                  onClick={handleClearAllChats}
+                  disabled={clearingChats}
+                  style={{ fontSize: '13px', padding: '8px 14px' }}
+                >
+                  Да, очистить
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setConfirmClearChats(false)}
+                  disabled={clearingChats}
+                  style={{ fontSize: '13px', padding: '8px 14px' }}
+                >
+                  Отмена
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* Архивация бронирований */}
         <div style={{ padding: '16px', borderRadius: '8px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', marginBottom: '12px' }}>
@@ -249,7 +311,7 @@ export const AdminCleanupPanel: React.FC = () => {
                 Архивация всех пользователей (кроме админов)
               </strong>
               <p style={{ fontSize: '12px', color: '#64748b', margin: '4px 0 0' }}>
-                Все обычные пользователи получат статус «archived» и не смогут входить в систему. Администраторы сохранят доступ.
+                Все обычные пользователи получат статус «archived» и не смогут входить в систему.
               </p>
             </div>
             {!confirmArchiveUsers ? (

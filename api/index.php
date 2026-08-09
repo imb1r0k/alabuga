@@ -218,7 +218,7 @@ try {
         $user = requireStrictAdmin($pdo);
         $stmt = $pdo->query("
             SELECT b.id, b.status, b.created_at, b.updated_at,
-                   u.last_name, u.first_name, u.phone as user_phone, u.login,
+                   u.last_name, u.first_name, u.patronymic, u.phone as user_phone, u.login, u.team_name,
                    bu.name as building_name, f.floor_number, f.id as floor_id,
                    r.room_number, r.capacity, r.gender
             FROM bookings b
@@ -284,6 +284,16 @@ try {
         $user = requireStrictAdmin($pdo);
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
         $stmt = $pdo->prepare("UPDATE users SET status = 'archived' WHERE role <> 'admin' AND status = 'active'");
+        $stmt->execute();
+        jsonResponse(['success' => true, 'affected' => $stmt->rowCount()]);
+    }
+
+    // ─── Очистка: чаты ВСЕХ команд ───────────────────────────────────────
+
+    if ($uri === 'admin/teams/clear-all-chats') {
+        $user = requireStrictAdmin($pdo);
+        if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
+        $stmt = $pdo->prepare("DELETE FROM team_chat_messages");
         $stmt->execute();
         jsonResponse(['success' => true, 'affected' => $stmt->rowCount()]);
     }
@@ -1429,31 +1439,38 @@ try {
 
                     $fullName = $lastName . ' ' . $firstName . ($patronymic ? ' ' . $patronymic : '');
                     $teamNameResolved = $teamName;
-                    if ($teamId > 0) {
+                    if ($teamId > 0 && $role !== 'curator') {
                         $stmt = $pdo->prepare("SELECT name FROM teams WHERE id = ?");
                         $stmt->execute([$teamId]);
                         $teamNameResolved = $stmt->fetchColumn() ?: $teamName;
                     }
 
+                    if ($role === 'curator') {
+                        $teamId = null;
+                        $teamNameResolved = null;
+                    }
+
                     if ($password) {
                         $hash = password_hash($password, PASSWORD_DEFAULT);
                         $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, patronymic=?, name=?, phone=?, login=?, role=?, status=?, team_name=?, team_id=?, password=? WHERE id=?");
-                        $stmt->execute([$firstName, $lastName, $patronymic, $fullName, $phone, $login, $role, $status, $teamNameResolved, $teamId ?: null, $hash, $id]);
+                        $stmt->execute([$firstName, $lastName, $patronymic, $fullName, $phone, $login, $role, $status, $teamNameResolved, $teamId, $hash, $id]);
                     } else {
                         $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, patronymic=?, name=?, phone=?, login=?, role=?, status=?, team_name=?, team_id=? WHERE id=?");
-                        $stmt->execute([$firstName, $lastName, $patronymic, $fullName, $phone, $login, $role, $status, $teamNameResolved, $teamId ?: null, $id]);
+                        $stmt->execute([$firstName, $lastName, $patronymic, $fullName, $phone, $login, $role, $status, $teamNameResolved, $teamId, $id]);
                     }
 
-                    if ($teamId > 0) {
-                        $stmt = $pdo->prepare("SELECT COUNT(*) FROM team_members WHERE team_id = ? AND user_id = ?");
-                        $stmt->execute([$teamId, $id]);
-                        if ($stmt->fetchColumn() == 0) {
-                            $stmt = $pdo->prepare("INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, 'member')");
+                    if ($role !== 'curator') {
+                        if ($teamId > 0) {
+                            $stmt = $pdo->prepare("SELECT COUNT(*) FROM team_members WHERE team_id = ? AND user_id = ?");
                             $stmt->execute([$teamId, $id]);
+                            if ($stmt->fetchColumn() == 0) {
+                                $stmt = $pdo->prepare("INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, 'member')");
+                                $stmt->execute([$teamId, $id]);
+                            }
+                        } else {
+                            $stmt = $pdo->prepare("DELETE FROM team_members WHERE user_id = ?");
+                            $stmt->execute([$id]);
                         }
-                    } else {
-                        $stmt = $pdo->prepare("DELETE FROM team_members WHERE user_id = ?");
-                        $stmt->execute([$id]);
                     }
 
                     // Сохранение привязанных к куратору команд
@@ -1467,6 +1484,9 @@ try {
                                 $insStmt->execute([$id, (int)$tid]);
                             }
                         }
+                    } else {
+                        $delStmt = $pdo->prepare("DELETE FROM curator_teams WHERE user_id = ?");
+                        $delStmt->execute([$id]);
                     }
 
                     jsonResponse(['success' => true]);
@@ -1500,8 +1520,8 @@ try {
             requireStrictAdmin($pdo);
             if ($method === 'GET') {
                 $stmt = $pdo->query("
-                    SELECT b.id, b.user_id, b.room_id, b.status, b.created_at,
-                           u.first_name, u.last_name, u.name as user_name, u.phone as user_phone, u.role,
+                    SELECT b.id, b.user_id, b.room_id, b.status, b.created_at, b.comment,
+                           u.first_name, u.last_name, u.patronymic, u.name as user_name, u.phone as user_phone, u.login, u.team_name, u.role,
                            r.room_number, r.gender, bu.name as building_name, f.floor_number
                     FROM bookings b
                     JOIN users u ON b.user_id = u.id

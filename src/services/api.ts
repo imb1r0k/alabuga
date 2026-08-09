@@ -108,6 +108,11 @@ export const archiveAllUsers = async () => {
   return response.data;
 };
 
+export const clearAllTeamChats = async () => {
+  const response = await api.post('/admin/teams/clear-all-chats');
+  return response.data;
+};
+
 // ─── Пользователи (Админка) ───────────────────────────────────────────────────
 
 export const getAdminUsers = async () => {

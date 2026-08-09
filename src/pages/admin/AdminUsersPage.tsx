@@ -105,14 +105,13 @@ export const AdminUsersPage: React.FC = () => {
   const handleToggleCuratorTeam = (teamId: number) => {
     setUserFormData((prev: any) => {
       let currentIds: number[] = prev.curator_team_ids || [];
-      // Если было выбрано "Все команды" (0), при выборе конкретной сбрасываем 0
-      if (currentIds.includes(0)) {
-        currentIds = [];
+      
+      if (teamId === 0) {
+        return { ...prev, curator_team_ids: [0] };
       }
 
-      if (teamId === 0) {
-        // Режим "Все команды"
-        return { ...prev, curator_team_ids: [0] };
+      if (currentIds.includes(0)) {
+        currentIds = [];
       }
 
       if (currentIds.includes(teamId)) {
@@ -192,7 +191,13 @@ export const AdminUsersPage: React.FC = () => {
                           {u.status === 'archived' ? 'В архиве' : 'Активен'}
                         </span>
                       </td>
-                      <td style={{ padding: '10px' }}>{u.team_name || '-'}</td>
+                      <td style={{ padding: '10px' }}>
+                        {u.role === 'curator' ? (
+                          u.curator_team_ids?.includes(0) ? 'Куратор всех команд' : 'Куратор команд'
+                        ) : (
+                          u.team_name || '-'
+                        )}
+                      </td>
                       <td style={{ padding: '10px' }}>
                         <div style={{ display: 'flex', gap: '4px' }}>
                           <Link
@@ -294,36 +299,39 @@ export const AdminUsersPage: React.FC = () => {
                     </select>
                   </div>
 
-                  <div className="input-group">
-                    <label>Команда участника</label>
-                    <select
-                      value={userFormData.team_id || 0}
-                      onChange={(e) => {
-                        const teamId = Number(e.target.value);
-                        const team = teams.find((t) => t.id === teamId);
-                        setUserFormData({
-                          ...userFormData,
-                          team_id: teamId,
-                          team_name: team ? team.name : '',
-                        });
-                      }}
-                      style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
-                    >
-                      <option value={0}>— Без команды —</option>
-                      {teams.map((team) => (
-                        <option key={team.id} value={team.id}>{team.name}</option>
-                      ))}
-                    </select>
-                  </div>
+                  {/* Команда участника отображается только для обычных участников и админов */}
+                  {userFormData.role !== 'curator' && (
+                    <div className="input-group">
+                      <label>Команда участника</label>
+                      <select
+                        value={userFormData.team_id || 0}
+                        onChange={(e) => {
+                          const teamId = Number(e.target.value);
+                          const team = teams.find((t) => t.id === teamId);
+                          setUserFormData({
+                            ...userFormData,
+                            team_id: teamId,
+                            team_name: team ? team.name : '',
+                          });
+                        }}
+                        style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+                      >
+                        <option value={0}>— Без команды —</option>
+                        {teams.map((team) => (
+                          <option key={team.id} value={team.id}>{team.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   {/* Если пользователь Куратор — блок выбора закреплённых за ним команд */}
                   {userFormData.role === 'curator' && (
                     <div style={{ gridColumn: '1 / -1', backgroundColor: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', padding: '16px' }}>
                       <h4 style={{ margin: '0 0 10px', fontSize: '14px', color: '#0369a1', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <Shield size={16} /> Привязанные к куратору команды для управления:
+                        <Shield size={16} /> Закрепленные за куратором команды:
                       </h4>
                       <p style={{ fontSize: '12px', color: '#0284c7', marginBottom: '12px' }}>
-                        Куратор сможет управлять только пользователями и сообщениями выбранных команд.
+                        Куратор сможет управлять участниками и чатом только выбранных команд.
                       </p>
 
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -335,19 +343,19 @@ export const AdminUsersPage: React.FC = () => {
                             alignItems: 'center',
                             gap: '8px',
                             cursor: 'pointer',
-                            padding: '6px 10px',
+                            padding: '8px 12px',
                             borderRadius: '6px',
                             backgroundColor: userFormData.curator_team_ids?.includes(0) ? '#e0f2fe' : '#fff',
-                            border: '1px solid #cbd5e1',
+                            border: `1px solid ${userFormData.curator_team_ids?.includes(0) ? '#0284c7' : '#cbd5e1'}`,
                             fontWeight: userFormData.curator_team_ids?.includes(0) ? 600 : 400,
                           }}
                         >
                           {userFormData.curator_team_ids?.includes(0) ? <CheckSquare size={18} color="#0284c7" /> : <Square size={18} color="#94a3b8" />}
-                          <span style={{ fontSize: '13px' }}>🌐 Все команды (полный доступ к командам)</span>
+                          <span style={{ fontSize: '13px' }}>🌐 Все команды (доступ ко всем командам)</span>
                         </div>
 
                         {!userFormData.curator_team_ids?.includes(0) && (
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '8px', marginTop: '4px' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '8px', marginTop: '6px' }}>
                             {teams.map((t) => {
                               const isChecked = userFormData.curator_team_ids?.includes(t.id);
                               return (
@@ -359,7 +367,7 @@ export const AdminUsersPage: React.FC = () => {
                                     alignItems: 'center',
                                     gap: '8px',
                                     cursor: 'pointer',
-                                    padding: '6px 10px',
+                                    padding: '8px 10px',
                                     borderRadius: '6px',
                                     backgroundColor: isChecked ? '#e0f2fe' : '#fff',
                                     border: `1px solid ${isChecked ? '#0284c7' : '#cbd5e1'}`,
