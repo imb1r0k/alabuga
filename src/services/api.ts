@@ -265,7 +265,22 @@ export const getAdminTeamCalendar = async (teamId: number) => {
   return response.data;
 };
 
-export const addAdminTeamEvent = async (teamId: number, eventData: any) => {
+export const addAdminTeamEvent = async (teamId: number, eventData: any, imageFile?: File | null) => {
+  if (imageFile) {
+    const formData = new FormData();
+    formData.append('team_id', String(teamId));
+    formData.append('title', eventData.title || '');
+    if (eventData.event_date) formData.append('event_date', eventData.event_date);
+    if (eventData.description) formData.append('description', eventData.description);
+    if (eventData.image_url) formData.append('image_url', eventData.image_url);
+    formData.append('image', imageFile);
+
+    const response = await api.post('/admin/teams/calendar', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  }
+
   const response = await api.post('/admin/teams/calendar', { ...eventData, team_id: teamId });
   return response.data;
 };

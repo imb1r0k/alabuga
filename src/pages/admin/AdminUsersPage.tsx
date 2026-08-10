@@ -37,7 +37,7 @@ export const AdminUsersPage: React.FC = () => {
   const [showFiltersModal, setShowFiltersModal] = useState(false);
   const [onlyActive, setOnlyActive] = useState<boolean>(() => {
     const val = getCookie('users_show_active_only');
-    return val !== null ? val === 'true' : true; // По умолчанию TRUE
+    return val !== null ? val === 'true' : true;
   });
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [teamFilter, setTeamFilter] = useState<string>('all');
@@ -243,7 +243,6 @@ export const AdminUsersPage: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-            {/* Кнопка фильтров */}
             <button
               className="btn btn-secondary"
               onClick={() => setShowFiltersModal(!showFiltersModal)}
@@ -263,7 +262,6 @@ export const AdminUsersPage: React.FC = () => {
               {isFiltered && <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#0284c7' }} />}
             </button>
 
-            {/* Поиск пользователей */}
             <div style={{ position: 'relative', width: '280px', maxWidth: '100%' }}>
               <Search size={18} color="#94a3b8" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
               <input
@@ -291,7 +289,6 @@ export const AdminUsersPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Раскрывающееся окно настройки фильтров */}
         {showFiltersModal && (
           <div style={{
             backgroundColor: '#ffffff',
@@ -462,190 +459,219 @@ export const AdminUsersPage: React.FC = () => {
               </table>
             </div>
 
-            {/* Модалка редактирования пользователя */}
+            {/* ВСПЛЫВАЮЩЕЕ МОДАЛЬНОЕ ОКНО РЕДАКТИРОВАНИЯ ПОЛЬЗОВАТЕЛЯ */}
             {selectedUser && (
-              <div style={{ marginTop: '24px', backgroundColor: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h3 style={{ margin: 0, fontSize: '16px' }}>Редактирование пользователя #{selectedUser.id}</h3>
-                  <button onClick={() => setSelectedUser(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '18px' }}>✕</button>
-                </div>
-
-                {msg && (
-                  <div style={{ padding: '10px', borderRadius: '4px', marginBottom: '12px', backgroundColor: msg.includes('Ошибка') ? '#f8d7da' : '#d4edda', fontSize: '14px' }}>
-                    {msg}
-                  </div>
-                )}
-
-                <form onSubmit={handleSaveUser} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-                  <div className="input-group">
-                    <label>Имя</label>
-                    <input
-                      type="text"
-                      value={userFormData.first_name}
-                      onChange={(e) => setUserFormData({ ...userFormData, first_name: e.target.value })}
-                    />
-                  </div>
-
-                  <div className="input-group">
-                    <label>Фамилия</label>
-                    <input
-                      type="text"
-                      value={userFormData.last_name}
-                      onChange={(e) => setUserFormData({ ...userFormData, last_name: e.target.value })}
-                    />
-                  </div>
-
-                  <div className="input-group">
-                    <label>Логин / Email</label>
-                    <input
-                      type="text"
-                      value={userFormData.email}
-                      onChange={(e) => setUserFormData({ ...userFormData, email: e.target.value })}
-                    />
-                  </div>
-
-                  <div className="input-group">
-                    <label>Телефон</label>
-                    <input
-                      type="text"
-                      value={userFormData.phone}
-                      onChange={(e) => setUserFormData({ ...userFormData, phone: e.target.value })}
-                    />
-                  </div>
-
-                  <div className="input-group">
-                    <label>Статус</label>
-                    <select
-                      value={userFormData.status}
-                      onChange={(e) => setUserFormData({ ...userFormData, status: e.target.value })}
-                      style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+              <div style={{
+                position: 'fixed',
+                inset: 0,
+                backgroundColor: 'rgba(0,0,0,0.5)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 1000,
+                padding: '16px'
+              }}>
+                <div style={{
+                  backgroundColor: '#fff',
+                  borderRadius: '12px',
+                  maxWidth: '650px',
+                  width: '100%',
+                  maxHeight: '90vh',
+                  overflowY: 'auto',
+                  boxShadow: '0 10px 25px rgba(0,0,0,0.25)',
+                  position: 'relative',
+                  padding: '24px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <h3 style={{ margin: 0, fontSize: '18px', color: '#0f172a' }}>Редактирование пользователя #{selectedUser.id}</h3>
+                    <button
+                      onClick={() => setSelectedUser(null)}
+                      style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#64748b' }}
                     >
-                      <option value="active">Активен</option>
-                      <option value="archived">В архиве</option>
-                    </select>
-                  </div>
-
-                  <div className="input-group">
-                    <label>Роль</label>
-                    <select
-                      value={userFormData.role}
-                      onChange={(e) => setUserFormData({ ...userFormData, role: e.target.value })}
-                      style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
-                    >
-                      <option value="user">Пользователь (user)</option>
-                      <option value="curator">Куратор (curator)</option>
-                      {isAdmin && <option value="admin">Администратор (admin)</option>}
-                    </select>
-                  </div>
-
-                  {userFormData.role !== 'curator' && (
-                    <div className="input-group">
-                      <label>Команда участника</label>
-                      <select
-                        value={userFormData.team_id || 0}
-                        onChange={(e) => {
-                          const teamId = Number(e.target.value);
-                          const team = teams.find((t) => t.id === teamId);
-                          setUserFormData({
-                            ...userFormData,
-                            team_id: teamId,
-                            team_name: team ? team.name : '',
-                          });
-                        }}
-                        style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
-                      >
-                        <option value={0}>— Без команды —</option>
-                        {teams.map((team) => (
-                          <option key={team.id} value={team.id}>{team.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {userFormData.role === 'curator' && (
-                    <div style={{ gridColumn: '1 / -1', backgroundColor: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', padding: '16px' }}>
-                      <h4 style={{ margin: '0 0 10px', fontSize: '14px', color: '#0369a1', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <Shield size={16} /> Закрепленные за куратором команды:
-                      </h4>
-                      <p style={{ fontSize: '12px', color: '#0284c7', marginBottom: '12px' }}>
-                        Куратор сможет управлять участниками и чатом только выбранных команд.
-                      </p>
-
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <div
-                          onClick={() => handleToggleCuratorTeam(0)}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            cursor: 'pointer',
-                            padding: '8px 12px',
-                            borderRadius: '6px',
-                            backgroundColor: userFormData.curator_team_ids?.includes(0) ? '#e0f2fe' : '#fff',
-                            border: `1px solid ${userFormData.curator_team_ids?.includes(0) ? '#0284c7' : '#cbd5e1'}`,
-                            fontWeight: userFormData.curator_team_ids?.includes(0) ? 600 : 400,
-                          }}
-                        >
-                          {userFormData.curator_team_ids?.includes(0) ? <CheckSquare size={18} color="#0284c7" /> : <Square size={18} color="#94a3b8" />}
-                          <span style={{ fontSize: '13px' }}>🌐 Все команды (any)</span>
-                        </div>
-
-                        {!userFormData.curator_team_ids?.includes(0) && (
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '8px', marginTop: '6px' }}>
-                            {teams.map((t) => {
-                              const isChecked = userFormData.curator_team_ids?.includes(t.id);
-                              return (
-                                <div
-                                  key={t.id}
-                                  onClick={() => handleToggleCuratorTeam(t.id)}
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '8px',
-                                    cursor: 'pointer',
-                                    padding: '8px 10px',
-                                    borderRadius: '6px',
-                                    backgroundColor: isChecked ? '#e0f2fe' : '#fff',
-                                    border: `1px solid ${isChecked ? '#0284c7' : '#cbd5e1'}`,
-                                    fontSize: '13px',
-                                  }}
-                                >
-                                  {isChecked ? <CheckSquare size={16} color="#0284c7" /> : <Square size={16} color="#94a3b8" />}
-                                  <span>{t.name}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="input-group" style={{ gridColumn: '1 / -1' }}>
-                    <label>Новый пароль (оставьте пустым, чтобы не менять)</label>
-                    <input
-                      type="password"
-                      value={userFormData.password}
-                      onChange={(e) => setUserFormData({ ...userFormData, password: e.target.value })}
-                      placeholder="Новый пароль"
-                    />
-                  </div>
-
-                  <div style={{ gridColumn: '1 / -1' }}>
-                    <button type="submit" className="btn btn-primary" disabled={saving}>
-                      {saving ? 'Сохранение...' : 'Сохранить изменения'}
+                      <X size={20} />
                     </button>
                   </div>
-                </form>
 
-                {userDetails?.current_booking && (
-                  <div style={{ marginTop: '20px', borderTop: '1px solid #eee', paddingTop: '16px' }}>
-                    <h4 style={{ fontSize: '14px', marginBottom: '8px' }}>Текущее бронирование</h4>
-                    <p style={{ fontSize: '13px', color: '#475569' }}>
-                      Корпус: <strong>{userDetails.current_booking.building_name}</strong>, Этаж: <strong>{userDetails.current_booking.floor_number}</strong>, Комната: <strong>№{userDetails.current_booking.room_number}</strong> (Статус: {userDetails.current_booking.status})
-                    </p>
-                  </div>
-                )}
+                  {msg && (
+                    <div style={{ padding: '10px', borderRadius: '4px', marginBottom: '12px', backgroundColor: msg.includes('Ошибка') ? '#f8d7da' : '#d4edda', fontSize: '14px' }}>
+                      {msg}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleSaveUser} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                    <div className="input-group">
+                      <label>Имя</label>
+                      <input
+                        type="text"
+                        value={userFormData.first_name}
+                        onChange={(e) => setUserFormData({ ...userFormData, first_name: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="input-group">
+                      <label>Фамилия</label>
+                      <input
+                        type="text"
+                        value={userFormData.last_name}
+                        onChange={(e) => setUserFormData({ ...userFormData, last_name: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="input-group">
+                      <label>Логин / Email</label>
+                      <input
+                        type="text"
+                        value={userFormData.email}
+                        onChange={(e) => setUserFormData({ ...userFormData, email: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="input-group">
+                      <label>Телефон</label>
+                      <input
+                        type="text"
+                        value={userFormData.phone}
+                        onChange={(e) => setUserFormData({ ...userFormData, phone: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="input-group">
+                      <label>Статус</label>
+                      <select
+                        value={userFormData.status}
+                        onChange={(e) => setUserFormData({ ...userFormData, status: e.target.value })}
+                        style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+                      >
+                        <option value="active">Активен</option>
+                        <option value="archived">В архиве</option>
+                      </select>
+                    </div>
+
+                    <div className="input-group">
+                      <label>Роль</label>
+                      <select
+                        value={userFormData.role}
+                        onChange={(e) => setUserFormData({ ...userFormData, role: e.target.value })}
+                        style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+                      >
+                        <option value="user">Пользователь (user)</option>
+                        <option value="curator">Куратор (curator)</option>
+                        {isAdmin && <option value="admin">Администратор (admin)</option>}
+                      </select>
+                    </div>
+
+                    {userFormData.role !== 'curator' && (
+                      <div className="input-group">
+                        <label>Команда участника</label>
+                        <select
+                          value={userFormData.team_id || 0}
+                          onChange={(e) => {
+                            const teamId = Number(e.target.value);
+                            const team = teams.find((t) => t.id === teamId);
+                            setUserFormData({
+                              ...userFormData,
+                              team_id: teamId,
+                              team_name: team ? team.name : '',
+                            });
+                          }}
+                          style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+                        >
+                          <option value={0}>— Без команды —</option>
+                          {teams.map((team) => (
+                            <option key={team.id} value={team.id}>{team.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {userFormData.role === 'curator' && (
+                      <div style={{ gridColumn: '1 / -1', backgroundColor: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', padding: '16px' }}>
+                        <h4 style={{ margin: '0 0 10px', fontSize: '14px', color: '#0369a1', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <Shield size={16} /> Закрепленные за куратором команды:
+                        </h4>
+                        <p style={{ fontSize: '12px', color: '#0284c7', marginBottom: '12px' }}>
+                          Куратор сможет управлять участниками и чатом только выбранных команд.
+                        </p>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <div
+                            onClick={() => handleToggleCuratorTeam(0)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              cursor: 'pointer',
+                              padding: '8px 12px',
+                              borderRadius: '6px',
+                              backgroundColor: userFormData.curator_team_ids?.includes(0) ? '#e0f2fe' : '#fff',
+                              border: `1px solid ${userFormData.curator_team_ids?.includes(0) ? '#0284c7' : '#cbd5e1'}`,
+                              fontWeight: userFormData.curator_team_ids?.includes(0) ? 600 : 400,
+                            }}
+                          >
+                            {userFormData.curator_team_ids?.includes(0) ? <CheckSquare size={18} color="#0284c7" /> : <Square size={18} color="#94a3b8" />}
+                            <span style={{ fontSize: '13px' }}>🌐 Все команды (any)</span>
+                          </div>
+
+                          {!userFormData.curator_team_ids?.includes(0) && (
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '8px', marginTop: '6px' }}>
+                              {teams.map((t) => {
+                                const isChecked = userFormData.curator_team_ids?.includes(t.id);
+                                return (
+                                  <div
+                                    key={t.id}
+                                    onClick={() => handleToggleCuratorTeam(t.id)}
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '8px',
+                                      cursor: 'pointer',
+                                      padding: '8px 10px',
+                                      borderRadius: '6px',
+                                      backgroundColor: isChecked ? '#e0f2fe' : '#fff',
+                                      border: `1px solid ${isChecked ? '#0284c7' : '#cbd5e1'}`,
+                                      fontSize: '13px',
+                                    }}
+                                  >
+                                    {isChecked ? <CheckSquare size={16} color="#0284c7" /> : <Square size={16} color="#94a3b8" />}
+                                    <span>{t.name}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="input-group" style={{ gridColumn: '1 / -1' }}>
+                      <label>Новый пароль (оставьте пустым, чтобы не менять)</label>
+                      <input
+                        type="password"
+                        value={userFormData.password}
+                        onChange={(e) => setUserFormData({ ...userFormData, password: e.target.value })}
+                        placeholder="Новый пароль"
+                      />
+                    </div>
+
+                    <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '10px' }}>
+                      <button type="submit" className="btn btn-primary" disabled={saving} style={{ flex: 1 }}>
+                        {saving ? 'Сохранение...' : 'Сохранить изменения'}
+                      </button>
+                      <button type="button" className="btn btn-secondary" onClick={() => setSelectedUser(null)}>
+                        Закрыть
+                      </button>
+                    </div>
+                  </form>
+
+                  {userDetails?.current_booking && (
+                    <div style={{ marginTop: '20px', borderTop: '1px solid #eee', paddingTop: '16px' }}>
+                      <h4 style={{ fontSize: '14px', marginBottom: '8px' }}>Текущее бронирование</h4>
+                      <p style={{ fontSize: '13px', color: '#475569' }}>
+                        Корпус: <strong>{userDetails.current_booking.building_name}</strong>, Этаж: <strong>{userDetails.current_booking.floor_number}</strong>, Комната: <strong>№{userDetails.current_booking.room_number}</strong> (Статус: {userDetails.current_booking.status})
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

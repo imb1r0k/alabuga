@@ -30,6 +30,13 @@ try {
         PRIMARY KEY (user_id, team_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
+    // Столбец для изображений событий календаря
+    try {
+        $pdo->exec("ALTER TABLE team_calendar_events ADD COLUMN image_url VARCHAR(500) NULL");
+    } catch (PDOException $ex) {
+        // Колонку уже добавили
+    }
+
 } catch (PDOException $e) {
     http_response_code(500);
     echo json_encode(['error' => 'Ошибка подключения к базе данных: ' . $e->getMessage()]);
@@ -82,7 +89,7 @@ function detectGenderByLastName($lastName) {
         return 'M';
     }
 
-    return null; // Нестандартная / сложная фамилия (например, на -о, -е, -их, -ых) -> пропускаем без ошибки
+    return null; // Нестандартная / сложная фамилия
 }
 
 function generatePassword($length = 8) {
@@ -180,8 +187,9 @@ function checkCuratorAccessToUser($pdo, $curatorId, $targetUserId) {
     $stmt = $pdo->prepare("SELECT team_id FROM users WHERE id = ?");
     $stmt->execute([$targetUserId]);
     $userTeamId = (int)$stmt->fetchColumn();
-    
-    return in_array($userTeamId, $curatorTeams, true);
+
+    // Куратор имеет доступ к своим участникам, а также к свободным пользователям без команды
+    return ($userTeamId === 0 || in_array($userTeamId, $curatorTeams, true));
 }
 
 function checkCuratorAccessToTeam($pdo, $curatorId, $teamId) {
@@ -241,14 +249,10 @@ $data = json_decode($rawInput, true) ?: [];
 
 try {
 
-    // ─── Автоодобрение бронирований ───────────────────────────────────────
-
     if ($uri === 'admin/auto-approve' || $uri === 'auto-approve-bookings') {
         $res = processAutoApproveBookings($pdo);
         jsonResponse($res);
     }
-
-    // ─── Статистика для админ-панели ──────────────────────────────────────
 
     if ($uri === 'admin/stats') {
         $user = requireAdmin($pdo);
@@ -292,8 +296,6 @@ try {
         ]);
     }
 
-    // ─── Экспорт всех бронирований ────────────────────────────────────────
-
     if ($uri === 'admin/export/bookings') {
         $user = requireStrictAdmin($pdo);
         $stmt = $pdo->query("
@@ -310,8 +312,6 @@ try {
         ");
         jsonResponse($stmt->fetchAll());
     }
-
-    // ─── Экспорт макетов всех корпусов ────────────────────────────────────
 
     if ($uri === 'admin/export/layouts') {
         $user = requireStrictAdmin($pdo);
@@ -348,8 +348,6 @@ try {
         jsonResponse($result);
     }
 
-    // ─── Очистка: перенести все брони в архив ────────────────────────────
-
     if ($uri === 'admin/archive-bookings') {
         $user = requireStrictAdmin($pdo);
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
@@ -357,8 +355,6 @@ try {
         $stmt->execute();
         jsonResponse(['success' => true, 'affected' => $stmt->rowCount()]);
     }
-
-    // ─── Очистка: перенести всех пользователей (кроме админов) в архив ───
 
     if ($uri === 'admin/archive-users') {
         $user = requireStrictAdmin($pdo);
@@ -368,8 +364,6 @@ try {
         jsonResponse(['success' => true, 'affected' => $stmt->rowCount()]);
     }
 
-    // ─── Очистка: чаты ВСЕХ команд ───────────────────────────────────────
-
     if ($uri === 'admin/teams/clear-all-chats') {
         $user = requireStrictAdmin($pdo);
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
@@ -377,8 +371,6 @@ try {
         $stmt->execute();
         jsonResponse(['success' => true, 'affected' => $stmt->rowCount()]);
     }
-
-    // ─── Настройки ─────────────────────────────────────────────────────────
 
     if ($uri === 'settings') {
         if ($method === 'GET') {
@@ -407,8 +399,6 @@ try {
 
         jsonError('Метод не поддерживается', 405);
     }
-
-    // ─── Глобальные уведомления ──────────────────────────────────────────────
 
     if ($uri === 'get-global-notification' || $uri === 'notifications/global') {
         $stmt = $pdo->prepare("SELECT `value` FROM settings WHERE `key` = 'global_notification'");
@@ -485,8 +475,6 @@ try {
         jsonResponse(['success' => true]);
     }
 
-    // ─── Регистрация ────────────────────────────────────────────────────────
-
     if ($uri === 'register') {
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
 
@@ -562,8 +550,6 @@ try {
         jsonResponse(['token' => $token, 'user' => $userData]);
     }
 
-    // ─── Авторизация (логин) ───────────────────────────────────────────────
-
     if ($uri === 'login') {
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
 
@@ -604,15 +590,11 @@ try {
         jsonResponse(['token' => $token, 'user' => $user]);
     }
 
-    // ─── Текущий пользователь ──────────────────────────────────────────────
-
     if ($uri === 'user') {
         $user = requireAuth($pdo);
         unset($user['password']);
         jsonResponse($user);
     }
-
-    // ─── Выход ──────────────────────────────────────────────────────────────
 
     if ($uri === 'logout') {
         $token = getBearerToken();
@@ -622,8 +604,6 @@ try {
         }
         jsonResponse(['success' => true]);
     }
-
-    // ─── Моё текущее/последнее бронирование ─────────────────────────────────
 
     if ($uri === 'my-booking') {
         $user = requireAuth($pdo);
@@ -640,8 +620,6 @@ try {
         $booking = $stmt->fetch();
         jsonResponse(['booking' => $booking]);
     }
-
-    // ─── Отозвать своё активное бронирование ───────────────────────────────
 
     if ($uri === 'cancel-booking' || $uri === 'my-booking/cancel') {
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
@@ -660,8 +638,6 @@ try {
 
         jsonResponse(['success' => true, 'message' => 'Заявка успешно отозвана']);
     }
-
-    // ─── Команды (админка) ──────────────────────────────────────────────────
 
     if ($uri === 'admin/teams') {
         $user = requireAdmin($pdo);
@@ -829,7 +805,6 @@ try {
         jsonError('Метод не поддерживается', 405);
     }
 
-    // Очистка всех сообщений чата команды
     if ($uri === 'admin/teams/clear-chat') {
         $user = requireAdmin($pdo);
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
@@ -843,7 +818,6 @@ try {
         jsonResponse(['success' => true]);
     }
 
-    // Удаление конкретного сообщения в чате команды
     if ($uri === 'admin/teams/delete-message') {
         $user = requireAdmin($pdo);
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
@@ -877,22 +851,47 @@ try {
         }
 
         if ($method === 'POST') {
-            $action = $data['action'] ?? 'create';
-            $teamId = (int)($data['team_id'] ?? 0);
+            $postData = $_POST ?: $data;
+            $action = $postData['action'] ?? 'create';
+            $teamId = (int)($postData['team_id'] ?? 0);
 
             if (!checkCuratorAccessToTeam($pdo, $user['id'], $teamId)) {
                 jsonError('У вас нет доступа к этой команде', 403);
             }
 
             if ($action === 'create') {
-                $title = trim($data['title'] ?? '');
-                $eventDate = trim($data['event_date'] ?? '');
-                $desc = trim($data['description'] ?? '');
-                if (!$title || !$eventDate) jsonError('Заполните название и дату');
-                $stmt = $pdo->prepare("INSERT INTO team_calendar_events (team_id, title, event_date, description, created_by) VALUES (?, ?, ?, ?, ?)");
-                $stmt->execute([$teamId, $title, $eventDate, $desc, $user['id']]);
+                $title = trim($postData['title'] ?? '');
+                $eventDate = trim($postData['event_date'] ?? '');
+                $desc = trim($postData['description'] ?? '');
+                $imageUrl = trim($postData['image_url'] ?? '');
+
+                // Обработка загрузки файла изображения
+                if (isset($_FILES['image']) && $_FILES['image']['error'] === UPLOAD_ERR_OK) {
+                    $uploadDir = __DIR__ . '/../uploads/';
+                    if (!is_dir($uploadDir)) {
+                        @mkdir($uploadDir, 0777, true);
+                    }
+                    $ext = strtolower(pathinfo($_FILES['image']['name'], PATHINFO_EXTENSION));
+                    if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'], true)) {
+                        $filename = 'event_' . time() . '_' . rand(1000, 9999) . '.' . $ext;
+                        $targetPath = $uploadDir . $filename;
+                        if (move_uploaded_file($_FILES['image']['tmp_name'], $targetPath)) {
+                            $imageUrl = '/uploads/' . $filename;
+                        }
+                    }
+                }
+
+                if (!$title) jsonError('Заполните название события');
+                if (!$eventDate) {
+                    $eventDate = date('Y-m-d H:i:s');
+                } else {
+                    $eventDate = date('Y-m-d H:i:s', strtotime($eventDate));
+                }
+
+                $stmt = $pdo->prepare("INSERT INTO team_calendar_events (team_id, title, event_date, description, image_url, created_by) VALUES (?, ?, ?, ?, ?, ?)");
+                $stmt->execute([$teamId, $title, $eventDate, $desc, $imageUrl, $user['id']]);
             } elseif ($action === 'delete') {
-                $id = (int)($data['id'] ?? 0);
+                $id = (int)($postData['id'] ?? 0);
                 $stmt = $pdo->prepare("DELETE FROM team_calendar_events WHERE id = ?");
                 $stmt->execute([$id]);
             }
@@ -901,8 +900,6 @@ try {
 
         jsonError('Метод не поддерживается', 405);
     }
-
-    // ─── Публичные данные для бронирования ──────────────────────────────────
 
     if ($uri === 'public/buildings') {
         $stmt = $pdo->query("SELECT * FROM buildings ORDER BY id ASC");
@@ -976,8 +973,6 @@ try {
             'floors' => $floorsData,
         ]);
     }
-
-    // ─── Бронирование комнаты ──────────────────────────────────────────────
 
     if ($uri === 'book') {
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
@@ -1316,8 +1311,6 @@ try {
         ]);
     }
 
-    // ─── Профиль пользователя ───────────────────────────────────────────────
-
     if ($uri === 'profile') {
         $user = requireAuth($pdo);
         if ($method === 'GET') {
@@ -1341,8 +1334,6 @@ try {
         jsonError('Метод не поддерживается', 405);
     }
 
-    // ─── Мои бронирования (история) ─────────────────────────────────────────
-
     if ($uri === 'my-bookings') {
         $user = requireAuth($pdo);
         $stmt = $pdo->prepare("
@@ -1358,8 +1349,6 @@ try {
         $stmt->execute([$user['id']]);
         jsonResponse($stmt->fetchAll());
     }
-
-    // ─── Моя команда ─────────────────────────────────────────────────────────
 
     if ($uri === 'my-team') {
         $user = requireAuth($pdo);
@@ -1393,8 +1382,6 @@ try {
         ]);
     }
 
-    // ─── Мой командный чат ──────────────────────────────────────────────────
-
     if ($uri === 'my-team/chat') {
         $user = requireAuth($pdo);
         if (!$user['team_id']) jsonError('Вы не состоите в команде', 400);
@@ -1423,8 +1410,6 @@ try {
         jsonError('Метод не поддерживается', 405);
     }
 
-    // ─── Мой командный календарь ────────────────────────────────────────────
-
     if ($uri === 'my-team/calendar') {
         $user = requireAuth($pdo);
         if (!$user['team_id']) jsonError('Вы не состоите в команде', 400);
@@ -1442,8 +1427,6 @@ try {
         }
         jsonError('Метод не поддерживается', 405);
     }
-
-    // ─── Публичный профиль пользователя ─────────────────────────────────────
 
     if ($uri === 'public/profile') {
         $login = trim($_GET['login'] ?? '');
@@ -1500,8 +1483,6 @@ try {
         ]);
     }
 
-    // ─── Маршруты Админ-панели ──────────────────────────────────────────────
-
     if (strpos($uri, 'admin/') === 0) {
         $curatorUser = requireAdmin($pdo);
 
@@ -1513,10 +1494,12 @@ try {
                     $users = $stmt->fetchAll();
                 } else {
                     if (empty($curatorTeams)) {
-                        $users = [];
+                        // Показываем также свободных пользователей без команды, чтобы куратор мог их добавить
+                        $stmt = $pdo->query("SELECT id, first_name, last_name, patronymic, name, login as email, phone, role, status, team_name, team_id, created_at FROM users WHERE team_id IS NULL OR team_id = 0 ORDER BY id DESC");
+                        $users = $stmt->fetchAll();
                     } else {
                         $placeholders = implode(',', array_fill(0, count($curatorTeams), '?'));
-                        $stmt = $pdo->prepare("SELECT id, first_name, last_name, patronymic, name, login as email, phone, role, status, team_name, team_id, created_at FROM users WHERE team_id IN ($placeholders) OR id = ? ORDER BY id DESC");
+                        $stmt = $pdo->prepare("SELECT id, first_name, last_name, patronymic, name, login as email, phone, role, status, team_name, team_id, created_at FROM users WHERE team_id IN ($placeholders) OR team_id IS NULL OR team_id = 0 OR id = ? ORDER BY id DESC");
                         $params = array_merge($curatorTeams, [$curatorUser['id']]);
                         $stmt->execute($params);
                         $users = $stmt->fetchAll();
@@ -1598,7 +1581,6 @@ try {
                         }
                     }
 
-                    // Сохранение привязанных к куратору команд
                     if ($role === 'curator') {
                         $curatorTeamIds = $data['curator_team_ids'] ?? [];
                         if (is_array($curatorTeamIds)) {

@@ -18,7 +18,7 @@ import {
   addAdminTeamEvent,
   deleteAdminTeamEvent,
 } from '../../services/api';
-import { Users, MessageSquare, Calendar, Trash2, Plus, Save, UserPlus, UserMinus, Eraser, ShieldCheck } from 'lucide-react';
+import { Users, MessageSquare, Calendar, Trash2, Plus, Save, UserPlus, UserMinus, Eraser, ShieldCheck, Search, Image as ImageIcon, X } from 'lucide-react';
 
 export const AdminTeamsPage: React.FC = () => {
   const [teams, setTeams] = useState<any[]>([]);
@@ -31,9 +31,12 @@ export const AdminTeamsPage: React.FC = () => {
   const [teamName, setTeamName] = useState('');
   const [teamDesc, setTeamDesc] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+
+  // Добавление участников
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
+  const [memberSearch, setMemberSearch] = useState('');
 
   // Данные выбранной команды
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
@@ -42,6 +45,8 @@ export const AdminTeamsPage: React.FC = () => {
   const [calendarEvents, setCalendarEvents] = useState<any[]>([]);
   const [newEventTitle, setNewEventTitle] = useState('');
   const [newEventDate, setNewEventDate] = useState('');
+  const [newEventImageUrl, setNewEventImageUrl] = useState('');
+  const [newEventImageFile, setNewEventImageFile] = useState<File | null>(null);
 
   const { showToast } = useToast();
 
@@ -182,15 +187,28 @@ export const AdminTeamsPage: React.FC = () => {
 
   const handleAddCalendarEvent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newEventTitle.trim() || !newEventDate || !selectedTeam) return;
+    if (!newEventTitle.trim() || !selectedTeam) return;
+
+    // Если время не выбрано - ставим прямо сейчас
+    const targetDate = newEventDate ? newEventDate : new Date().toISOString().slice(0, 16);
+
     try {
-      await addAdminTeamEvent(selectedTeam.id, {
-        title: newEventTitle,
-        event_date: newEventDate,
-        description: '',
-      });
+      await addAdminTeamEvent(
+        selectedTeam.id,
+        {
+          title: newEventTitle,
+          event_date: targetDate,
+          description: '',
+          image_url: newEventImageUrl,
+        },
+        newEventImageFile
+      );
+
       setNewEventTitle('');
       setNewEventDate('');
+      setNewEventImageUrl('');
+      setNewEventImageFile(null);
+
       const newEvents = await getAdminTeamCalendar(selectedTeam.id);
       setCalendarEvents(newEvents);
       showToast('Событие добавлено в календарь', 'success');
@@ -205,8 +223,8 @@ export const AdminTeamsPage: React.FC = () => {
       await addAdminTeamMember(selectedTeam.id, userId);
       const members = await getAdminTeamMembers(selectedTeam.id);
       setTeamMembers(members);
-      setShowAddMemberModal(false);
       showToast('Участник добавлен в команду', 'success');
+      loadUsers();
     } catch (err: any) {
       showToast('Ошибка при добавлении участника: ' + (err.response?.data?.error || err.message), 'error');
     }
@@ -220,6 +238,7 @@ export const AdminTeamsPage: React.FC = () => {
       const members = await getAdminTeamMembers(selectedTeam.id);
       setTeamMembers(members);
       showToast('Участник удалён из команды', 'success');
+      loadUsers();
     } catch (err: any) {
       showToast('Ошибка при удалении участника: ' + (err.response?.data?.error || err.message), 'error');
     }
@@ -237,53 +256,39 @@ export const AdminTeamsPage: React.FC = () => {
     }
   };
 
+  // Фильтрованный список участников для модалки добавления
+  const filteredUsersForAdd = useMemo(() => {
+    let result = allUsers.filter((u) => !u.team_id || Number(u.team_id) === Number(selectedTeam?.id));
+    if (memberSearch.trim()) {
+      const q = memberSearch.trim().toLowerCase();
+      result = result.filter((u) => {
+        const fullName = `${u.last_name || ''} ${u.first_name || ''} ${u.patronymic || ''} ${u.name || ''}`.toLowerCase();
+        const login = (u.email || u.login || '').toLowerCase();
+        const phone = (u.phone || '').toLowerCase();
+        return fullName.includes(q) || login.includes(q) || phone.includes(q);
+      });
+    }
+    return result;
+  }, [allUsers, selectedTeam, memberSearch]);
+
   return (
     <AdminLayout>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <h2 style={{ margin: 0, fontSize: '20px', color: '#0f172a' }}>Управление командами</h2>
-        <button
-          className="btn btn-primary"
-          onClick={() => setShowCreateForm(!showCreateForm)}
-          style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-        >
-          <Plus size={18} /> Создать команду
-        </button>
       </div>
-
-      {showCreateForm && (
-        <form onSubmit={handleCreateTeam} style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '8px', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
-            <input
-              type="text"
-              placeholder="Название команды"
-              value={newTeamName}
-              onChange={(e) => setNewTeamName(e.target.value)}
-              required
-              style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-            />
-            <input
-              type="text"
-              placeholder="Описание (необязательно)"
-              value={newTeamDesc}
-              onChange={(e) => setNewTeamDesc(e.target.value)}
-              style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-            />
-            <button type="submit" className="btn btn-primary">Создать</button>
-          </div>
-        </form>
-      )}
 
       {loading ? (
         <Skeleton width="100%" height={200} />
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '20px', alignItems: 'start' }}>
-          {/* Список команд */}
+        <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '20px', alignItems: 'start' }}>
+          
+          {/* Левое боковое меню со списком команд */}
           <div style={{ backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', padding: '16px' }}>
             <h4 style={{ margin: '0 0 12px', fontSize: '14px', color: '#334155' }}>Команды</h4>
             {teams.length === 0 ? (
               <p style={{ fontSize: '13px', color: '#94a3b8' }}>Пока не создано команд</p>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '16px' }}>
                 {teams.map((team) => (
                   <div
                     key={team.id}
@@ -324,6 +329,41 @@ export const AdminTeamsPage: React.FC = () => {
                 ))}
               </div>
             )}
+
+            {/* Кнопка создания команды перемещена сюда */}
+            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '12px' }}>
+              {!showCreateForm ? (
+                <button
+                  className="btn btn-primary"
+                  onClick={() => setShowCreateForm(true)}
+                  style={{ width: '100%', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                >
+                  <Plus size={16} /> Создать команду
+                </button>
+              ) : (
+                <form onSubmit={handleCreateTeam} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <input
+                    type="text"
+                    placeholder="Название команды"
+                    value={newTeamName}
+                    onChange={(e) => setNewTeamName(e.target.value)}
+                    required
+                    style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Описание (необязательно)"
+                    value={newTeamDesc}
+                    onChange={(e) => setNewTeamDesc(e.target.value)}
+                    style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                  />
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <button type="submit" className="btn btn-primary" style={{ flex: 1, fontSize: '12px' }}>Сохранить</button>
+                    <button type="button" className="btn btn-secondary" onClick={() => setShowCreateForm(false)} style={{ fontSize: '12px' }}>Отмена</button>
+                  </div>
+                </form>
+              )}
+            </div>
           </div>
 
           {/* Детали выбранной команды */}
@@ -360,7 +400,7 @@ export const AdminTeamsPage: React.FC = () => {
                 <h4 style={{ margin: '0 0 12px', fontSize: '14px', color: '#334155', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Users size={16} /> Участники ({teamMembers.length})
                   <button
-                    onClick={() => setShowAddMemberModal(true)}
+                    onClick={() => { setMemberSearch(''); setShowAddMemberModal(true); }}
                     className="btn btn-primary"
                     style={{ marginLeft: 'auto', fontSize: '12px', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: '4px' }}
                   >
@@ -400,7 +440,7 @@ export const AdminTeamsPage: React.FC = () => {
                                 )}
                               </td>
                               <td style={{ padding: '8px' }}>
-                                {!isCurator && m.role !== 'captain' && (
+                                {!isCurator && (
                                   <button
                                     onClick={() => handleRemoveMember(m.id, `${m.last_name} ${m.first_name || m.name}`)}
                                     title="Удалить из команды"
@@ -475,37 +515,70 @@ export const AdminTeamsPage: React.FC = () => {
                 <h4 style={{ margin: '0 0 12px', fontSize: '14px', color: '#334155', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Calendar size={16} /> Календарь команды
                 </h4>
-                <form onSubmit={handleAddCalendarEvent} style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
-                  <input
-                    type="text"
-                    placeholder="Название события"
-                    value={newEventTitle}
-                    onChange={(e) => setNewEventTitle(e.target.value)}
-                    style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', flex: 1 }}
-                  />
-                  <input
-                    type="datetime-local"
-                    value={newEventDate}
-                    onChange={(e) => setNewEventDate(e.target.value)}
-                    style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-                  />
-                  <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <Plus size={16} /> Добавить
-                  </button>
+                
+                <form onSubmit={handleAddCalendarEvent} style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '16px', backgroundColor: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <input
+                      type="text"
+                      placeholder="Название события"
+                      value={newEventTitle}
+                      onChange={(e) => setNewEventTitle(e.target.value)}
+                      required
+                      style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', flex: 1, minWidth: '180px' }}
+                    />
+                    <input
+                      type="datetime-local"
+                      value={newEventDate}
+                      onChange={(e) => setNewEventDate(e.target.value)}
+                      title="Если не выбрано, установится текущие дата и время"
+                      style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input
+                      type="text"
+                      placeholder="Ссылка на изображение (необязательно)"
+                      value={newEventImageUrl}
+                      onChange={(e) => setNewEventImageUrl(e.target.value)}
+                      style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', flex: 1, minWidth: '180px', fontSize: '13px' }}
+                    />
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', backgroundColor: '#e2e8f0', padding: '8px 12px', borderRadius: '6px', fontSize: '13px', color: '#334155' }}>
+                      <ImageIcon size={16} />
+                      {newEventImageFile ? newEventImageFile.name.slice(0, 15) + '...' : 'Загрузить файл'}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => setNewEventImageFile(e.target.files?.[0] || null)}
+                        style={{ display: 'none' }}
+                      />
+                    </label>
+                    <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Plus size={16} /> Добавить событие
+                    </button>
+                  </div>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>
+                    * Если дата не выбрана, событие создастся на текущее время.
+                  </span>
                 </form>
+
                 {calendarEvents.length === 0 ? (
                   <p style={{ fontSize: '13px', color: '#94a3b8' }}>Событий пока нет</p>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     {calendarEvents.map((ev) => (
-                      <div key={ev.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px 12px' }}>
-                        <div>
-                          <strong style={{ fontSize: '14px' }}>{ev.title}</strong>
-                          <div style={{ fontSize: '12px', color: '#64748b' }}>{new Date(ev.event_date).toLocaleString()}</div>
+                      <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 12px', backgroundColor: '#ffffff' }}>
+                        {ev.image_url && (
+                          <img src={ev.image_url} alt={ev.title} style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '6px', flexShrink: 0, border: '1px solid #cbd5e1' }} />
+                        )}
+                        <div style={{ flex: 1 }}>
+                          <strong style={{ fontSize: '14px', color: '#0f172a' }}>{ev.title}</strong>
+                          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>{new Date(ev.event_date).toLocaleString('ru-RU')}</div>
                         </div>
                         <button
                           onClick={() => handleDeleteEvent(ev.id)}
-                          style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#ef4444' }}
+                          style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#ef4444', padding: '4px' }}
+                          title="Удалить событие"
                         >
                           <Trash2 size={16} />
                         </button>
@@ -521,7 +594,7 @@ export const AdminTeamsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Модальное окно добавления участника */}
+      {/* Модальное окно добавления участника с поиском */}
       {showAddMemberModal && selectedTeam && (
         <div style={{
           position: 'fixed',
@@ -533,48 +606,75 @@ export const AdminTeamsPage: React.FC = () => {
           zIndex: 1000,
           padding: '16px'
         }}>
-          <div style={{ backgroundColor: '#fff', padding: '24px', borderRadius: '8px', maxWidth: '500px', width: '100%', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
-            <h3 style={{ margin: '0 0 16px', fontSize: '18px' }}>Добавление участника в команду «{selectedTeam.name}»</h3>
+          <div style={{ backgroundColor: '#fff', padding: '24px', borderRadius: '12px', maxWidth: '520px', width: '100%', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto', position: 'relative' }}>
+            <button
+              onClick={() => setShowAddMemberModal(false)}
+              style={{ position: 'absolute', top: '16px', right: '16px', border: 'none', background: 'none', cursor: 'pointer', color: '#64748b' }}
+            >
+              <X size={20} />
+            </button>
+
+            <h3 style={{ margin: '0 0 16px', fontSize: '18px', color: '#0f172a' }}>
+              Добавление участника в команду «{selectedTeam.name}»
+            </h3>
+
+            {/* Поиск среди пользователей */}
+            <div style={{ position: 'relative', marginBottom: '16px' }}>
+              <Search size={16} color="#94a3b8" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
+              <input
+                type="text"
+                placeholder="Поиск участников по ФИО, логину или телефону..."
+                value={memberSearch}
+                onChange={(e) => setMemberSearch(e.target.value)}
+                style={{ width: '100%', padding: '8px 12px 8px 34px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+              />
+              {memberSearch && (
+                <button
+                  onClick={() => setMemberSearch('')}
+                  style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8' }}
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
 
             {usersLoading ? (
-              <p>Загрузка пользователей...</p>
+              <p style={{ color: '#94a3b8' }}>Загрузка пользователей...</p>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {allUsers.filter((u) => !u.team_id || Number(u.team_id) === Number(selectedTeam.id)).length === 0 ? (
-                  <p style={{ fontSize: '14px', color: '#94a3b8' }}>Нет доступных пользователей</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '350px', overflowY: 'auto' }}>
+                {filteredUsersForAdd.length === 0 ? (
+                  <p style={{ fontSize: '13px', color: '#94a3b8', textAlign: 'center', padding: '16px' }}>Пользователи не найдены</p>
                 ) : (
-                  allUsers
-                    .filter((u) => !u.team_id || Number(u.team_id) === Number(selectedTeam.id))
-                    .map((u) => (
-                      <div
-                        key={u.id}
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          padding: '10px 12px',
-                          borderRadius: '6px',
-                          border: '1px solid #e2e8f0',
-                          backgroundColor: '#f8fafc',
-                        }}
-                      >
-                        <div>
-                          <strong style={{ fontSize: '14px' }}>{u.last_name} {u.first_name || u.name}</strong>
-                          <div style={{ fontSize: '12px', color: '#64748b' }}>Логин: {u.email || u.login}</div>
-                        </div>
-                        {Number(u.team_id) === Number(selectedTeam.id) ? (
-                          <span style={{ fontSize: '12px', color: '#16a34a', fontWeight: 600 }}>В команде ✓</span>
-                        ) : (
-                          <button
-                            onClick={() => handleAddMember(u.id)}
-                            className="btn btn-primary"
-                            style={{ fontSize: '13px', padding: '6px 12px' }}
-                          >
-                            <Plus size={14} /> Добавить
-                          </button>
-                        )}
+                  filteredUsersForAdd.map((u) => (
+                    <div
+                      key={u.id}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '10px 12px',
+                        borderRadius: '6px',
+                        border: '1px solid #e2e8f0',
+                        backgroundColor: '#f8fafc',
+                      }}
+                    >
+                      <div>
+                        <strong style={{ fontSize: '14px', color: '#0f172a' }}>{u.last_name} {u.first_name || u.name}</strong>
+                        <div style={{ fontSize: '12px', color: '#64748b' }}>Логин: {u.email || u.login}</div>
                       </div>
-                    ))
+                      {Number(u.team_id) === Number(selectedTeam.id) ? (
+                        <span style={{ fontSize: '12px', color: '#16a34a', fontWeight: 600 }}>В команде ✓</span>
+                      ) : (
+                        <button
+                          onClick={() => handleAddMember(u.id)}
+                          className="btn btn-primary"
+                          style={{ fontSize: '12px', padding: '6px 12px' }}
+                        >
+                          <Plus size={14} /> Добавить
+                        </button>
+                      )}
+                    </div>
+                  ))
                 )}
               </div>
             )}
