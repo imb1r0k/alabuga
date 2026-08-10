@@ -557,9 +557,6 @@ export const AdminTeamsPage: React.FC = () => {
                       <Plus size={16} /> Добавить событие
                     </button>
                   </div>
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>
-                    * Если дата не выбрана, событие создастся на текущее время.
-                  </span>
                 </form>
 
                 {calendarEvents.length === 0 ? (

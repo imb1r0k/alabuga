@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { getPublicBuildings, getMyBooking, cancelMyBooking } from '../services/api';
 import { PublicFloorMap } from '../components/PublicFloorMap';
+import { RoomInfoModal } from '../components/RoomInfoModal';
 import { BookingModal } from '../components/BookingModal';
 import { useToast } from '../components/Toast';
 
@@ -15,9 +16,13 @@ export const HomePage: React.FC = () => {
 
   const [buildings, setBuildings] = useState<any[]>([]);
   const [selectedBuildingId, setSelectedBuildingId] = useState<number | null>(null);
-  const [selectedRoom, setSelectedRoom] = useState<any>(null);
   const [selectedBuildingName, setSelectedBuildingName] = useState('');
   const [selectedFloorNumber, setSelectedFloorNumber] = useState(0);
+
+  // Модальные окна
+  const [previewRoom, setPreviewRoom] = useState<any>(null); // Окно предпросмотра жильцов
+  const [selectedRoomForBooking, setSelectedRoomForBooking] = useState<any>(null); // Окно непосредственного бронирования
+
   const [loadingBuildings, setLoadingBuildings] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
@@ -89,13 +94,21 @@ export const HomePage: React.FC = () => {
   const handleBuildingSelect = (building: any) => {
     setSelectedBuildingId(building.id);
     setSelectedBuildingName(building.name);
-    setSelectedRoom(null);
+    setPreviewRoom(null);
+    setSelectedRoomForBooking(null);
   };
 
+  // Вызывается при нажатии на комнату на плане
   const handleRoomSelect = (room: any, building: any, floor: any) => {
-    setSelectedRoom(room);
+    setPreviewRoom(room);
     setSelectedBuildingName(building.name);
     setSelectedFloorNumber(floor.floor_number);
+  };
+
+  // Вызывается при нажатии кнопки "Забронировать место" из окна предпросмотра
+  const handleProceedToBooking = () => {
+    setSelectedRoomForBooking(previewRoom);
+    setPreviewRoom(null);
   };
 
   const getGenderLabel = (gender: string) => {
@@ -339,12 +352,24 @@ export const HomePage: React.FC = () => {
         )}
       </div>
 
-      {selectedRoom && (
-        <BookingModal
-          room={selectedRoom}
+      {/* Окно предпросмотра заселившихся участников */}
+      {previewRoom && (
+        <RoomInfoModal
+          room={previewRoom}
           buildingName={selectedBuildingName}
           floorNumber={selectedFloorNumber}
-          onClose={() => setSelectedRoom(null)}
+          onClose={() => setPreviewRoom(null)}
+          onProceedToBooking={handleProceedToBooking}
+        />
+      )}
+
+      {/* Окно непосредственного оформления заявки */}
+      {selectedRoomForBooking && (
+        <BookingModal
+          room={selectedRoomForBooking}
+          buildingName={selectedBuildingName}
+          floorNumber={selectedFloorNumber}
+          onClose={() => setSelectedRoomForBooking(null)}
         />
       )}
     </div>

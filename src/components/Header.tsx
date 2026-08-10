@@ -12,7 +12,8 @@ import {
   Users,
   Building2,
   BookmarkCheck,
-  ShieldCheck
+  ShieldCheck,
+  Bot
 } from 'lucide-react';
 
 const isImageUrl = (value: string) => {
@@ -129,6 +130,11 @@ export const Header: React.FC = () => {
               <NavLink to="/admin-panel/teams" style={navLinkStyle}>
                 <Users size={16} />
                 <span>Команды</span>
+              </NavLink>
+
+              <NavLink to="/admin-panel/vk-bot" style={navLinkStyle}>
+                <Bot size={16} />
+                <span>Бот ВК</span>
               </NavLink>
             </div>
           )}
@@ -350,6 +356,26 @@ export const Header: React.FC = () => {
               >
                 <Users size={18} />
                 <span>Управление командами</span>
+              </NavLink>
+
+              <NavLink
+                to="/admin-panel/vk-bot"
+                onClick={() => setMobileMenuOpen(false)}
+                style={({ isActive }) => ({
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  color: isActive ? '#38bdf8' : '#cbd5e1',
+                  backgroundColor: isActive ? 'rgba(56, 189, 248, 0.1)' : 'transparent',
+                  textDecoration: 'none',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                })}
+              >
+                <Bot size={18} />
+                <span>Бот ВК</span>
               </NavLink>
             </div>
           )}

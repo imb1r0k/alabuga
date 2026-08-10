@@ -17,6 +17,7 @@ import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 import { AdminBuildingsPage } from './pages/admin/AdminBuildingsPage';
 import { AdminBookingsPage } from './pages/admin/AdminBookingsPage';
 import { AdminTeamsPage } from './pages/admin/AdminTeamsPage';
+import { AdminVkBotPage } from './pages/admin/AdminVkBotPage';
 
 function App() {
   return (
@@ -81,6 +82,14 @@ function App() {
                     element={
                       <ProtectedRoute>
                         <AdminTeamsPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin-panel/vk-bot"
+                    element={
+                      <ProtectedRoute>
+                        <AdminVkBotPage />
                       </ProtectedRoute>
                     }
                   />
