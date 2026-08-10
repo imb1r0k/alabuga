@@ -24,6 +24,65 @@ export const updateSettings = async (settings: Record<string, string>) => {
   return response.data;
 };
 
+// ─── Управление ботом ВК (Админка) ─────────────────────────────────────────────
+
+export const getVkBotSettings = async () => {
+  const response = await api.get('/admin/vk-bot/settings');
+  return response.data;
+};
+
+export const saveVkBotSettings = async (settings: Record<string, string>) => {
+  const response = await api.post('/admin/vk-bot/settings', settings);
+  return response.data;
+};
+
+export const getVkBotTaskGroups = async () => {
+  const response = await api.get('/admin/vk-bot/groups');
+  return response.data;
+};
+
+export const saveVkBotTaskGroup = async (groupData: any) => {
+  const response = await api.post('/admin/vk-bot/groups', groupData);
+  return response.data;
+};
+
+export const deleteVkBotTaskGroup = async (id: number) => {
+  const response = await api.post('/admin/vk-bot/groups', { action: 'delete', id });
+  return response.data;
+};
+
+export const getVkBotTasks = async (groupId?: number) => {
+  const url = groupId ? `/admin/vk-bot/tasks?group_id=${groupId}` : '/admin/vk-bot/tasks';
+  const response = await api.get(url);
+  return response.data;
+};
+
+export const saveVkBotTask = async (taskData: any) => {
+  const response = await api.post('/admin/vk-bot/tasks', taskData);
+  return response.data;
+};
+
+export const deleteVkBotTask = async (id: number) => {
+  const response = await api.post('/admin/vk-bot/tasks', { action: 'delete', id });
+  return response.data;
+};
+
+export const getVkBotReports = async (status: string = 'all') => {
+  const response = await api.get(`/admin/vk-bot/reports?status=${status}`);
+  return response.data;
+};
+
+export const updateVkBotReportStatus = async (reportId: number, status: 'approved' | 'rejected', rejectReason?: string) => {
+  const response = await api.post('/admin/vk-bot/reports', { id: reportId, status, reject_reason: rejectReason });
+  return response.data;
+};
+
+export const getVkBotTickets = async (groupId?: number) => {
+  const url = groupId ? `/admin/vk-bot/tickets?group_id=${groupId}` : '/admin/vk-bot/tickets';
+  const response = await api.get(url);
+  return response.data;
+};
+
 // ─── Глобальные уведомления ─────────────────────────────────────────────────
 
 export const getGlobalNotification = async () => {
@@ -98,23 +157,6 @@ export const getExportBookings = async () => {
 
 export const getExportLayouts = async () => {
   const response = await api.get('/admin/export/layouts');
-  return response.data;
-};
-
-// ─── Очистка (Админка) ───────────────────────────────────────────────────────
-
-export const archiveAllBookings = async () => {
-  const response = await api.post('/admin/archive-bookings');
-  return response.data;
-};
-
-export const archiveAllUsers = async () => {
-  const response = await api.post('/admin/archive-users');
-  return response.data;
-};
-
-export const clearAllTeamChats = async () => {
-  const response = await api.post('/admin/teams/clear-all-chats');
   return response.data;
 };
 
@@ -316,8 +358,6 @@ export const getMyTeam = async () => {
   return response.data;
 };
 
-// ─── Мой командный чат ───────────────────────────────────────────────────────
-
 export const getMyTeamChat = async () => {
   const response = await api.get('/my-team/chat');
   return response.data;
@@ -327,8 +367,6 @@ export const sendMyTeamMessage = async (message: string) => {
   const response = await api.post('/my-team/chat', { message });
   return response.data;
 };
-
-// ─── Мой командный календарь ─────────────────────────────────────────────────
 
 export const getMyTeamCalendar = async () => {
   const response = await api.get('/my-team/calendar');
