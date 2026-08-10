@@ -26,8 +26,8 @@ export const updateSettings = async (settings: Record<string, string>) => {
 
 // ─── Глобальные уведомления ─────────────────────────────────────────────────
 
-export const getGlobalNotification = async () => {
-  const response = await api.get('/get-global-notification');
+export const getGlobalNotification = async (isAdmin = false) => {
+  const response = await api.get(`/get-global-notification${isAdmin ? '?admin=1' : ''}`);
   return response.data;
 };
 
