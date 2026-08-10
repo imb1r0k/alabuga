@@ -41,48 +41,11 @@ try {
 function detectGenderByLastName($lastName) {
     $lastName = trim((string)$lastName);
     if ($lastName === '') return null;
-    $lastNameLower = mb_strtolower($lastName, 'UTF-8');
-
-    // Женские окончания
-    if (
-        mb_substr($lastNameLower, -2, 2, 'UTF-8') === 'ая' ||
-        mb_substr($lastNameLower, -2, 2, 'UTF-8') === 'яя' ||
-        mb_substr($lastNameLower, -3, 3, 'UTF-8') === 'ова' ||
-        mb_substr($lastNameLower, -3, 3, 'UTF-8') === 'ева' ||
-        mb_substr($lastNameLower, -3, 3, 'UTF-8') === 'ина' ||
-        mb_substr($lastNameLower, -3, 3, 'UTF-8') === 'ына' ||
-        mb_substr($lastNameLower, -4, 4, 'UTF-8') === 'ская' ||
-        mb_substr($lastNameLower, -4, 4, 'UTF-8') === 'цкая'
-    ) {
+    $lastChar = mb_substr($lastName, -1, 1, 'UTF-8');
+    if (in_array($lastChar, ['а', 'я'], true) || mb_substr($lastName, -2, 2, 'UTF-8') === 'ая' || mb_substr($lastName, -2, 2, 'UTF-8') === 'яя') {
         return 'F';
     }
-
-    // Мужские окончания
-    if (
-        mb_substr($lastNameLower, -2, 2, 'UTF-8') === 'ов' ||
-        mb_substr($lastNameLower, -2, 2, 'UTF-8') === 'ев' ||
-        mb_substr($lastNameLower, -2, 2, 'UTF-8') === 'ин' ||
-        mb_substr($lastNameLower, -2, 2, 'UTF-8') === 'ын' ||
-        mb_substr($lastNameLower, -2, 2, 'UTF-8') === 'ий' ||
-        mb_substr($lastNameLower, -2, 2, 'UTF-8') === 'ый' ||
-        mb_substr($lastNameLower, -3, 3, 'UTF-8') === 'ский' ||
-        mb_substr($lastNameLower, -3, 3, 'UTF-8') === 'цкий'
-    ) {
-        return 'M';
-    }
-
-    // Если фамилия оканчивается на "а" или "я", но не попала в стандартные — возможно женская, но может быть несклоняемой
-    $lastChar = mb_substr($lastNameLower, -1, 1, 'UTF-8');
-    if ($lastChar === 'а' || $lastChar === 'я') {
-        return 'F';
-    }
-
-    // Согласные буквы на конце (типичные мужские фамилии без суффикса или на -ич/-ук и т.д.)
-    if (in_array($lastChar, ['б','в','г','д','ж','з','к','л','м','н','п','р','с','т','ф','х','ц','ч','ш','щ','й'], true)) {
-        return 'M';
-    }
-
-    return null; // Нестандартная / сложная фамилия (например, на -о, -е, -их, -ых) -> пропускаем без ошибки
+    return 'M';
 }
 
 function generatePassword($length = 8) {
@@ -987,13 +950,7 @@ try {
 
         if (!$roomId) jsonError('Комната не выбрана', 400);
 
-        $stmt = $pdo->prepare("
-            SELECT r.*, bu.name as building_name, bu.gender as building_gender, f.floor_number, f.gender as floor_gender
-            FROM rooms r
-            JOIN buildings bu ON r.building_id = bu.id
-            JOIN floors f ON r.floor_id = f.id
-            WHERE r.id = ?
-        ");
+        $stmt = $pdo->prepare("SELECT r.*, bu.name as building_name, f.floor_number FROM rooms r JOIN buildings bu ON r.building_id = bu.id JOIN floors f ON r.floor_id = f.id WHERE r.id = ?");
         $stmt->execute([$roomId]);
         $room = $stmt->fetch();
         if (!$room) jsonError('Комната не найдена', 404);
@@ -1081,20 +1038,6 @@ try {
                 jsonError('Неверный логин/телефон или пароль', 401);
             }
             unset($user['password']);
-        }
-
-        // --- ПРОВЕРКА ПОЛА ПОЛЬЗОВАТЕЛЯ И ПОЛА КОМНАТЫ ---
-        $roomEffGender = $room['gender'] !== 'DEFAULT' ? $room['gender'] : ($room['floor_gender'] !== 'DEFAULT' ? $room['floor_gender'] : $room['building_gender']);
-        
-        if ($roomEffGender !== 'MIXED' && $roomEffGender !== 'DEFAULT') {
-            $userLastName = $user['last_name'] ?? '';
-            $userGender = detectGenderByLastName($userLastName);
-
-            if ($userGender !== null && $userGender !== $roomEffGender) {
-                $roomLabel = $roomEffGender === 'M' ? 'мальчиков (мужская)' : 'девочек (женская)';
-                $userGenderLabel = $userGender === 'M' ? 'мужской' : 'женский';
-                jsonError("Данная комната предназначена только для {$roomLabel}. Ваш пол был определён как {$userGenderLabel} по фамилии ({$userLastName}). Пожалуйста, выберите подходящую комнату.", 400);
-            }
         }
 
         $token = bin2hex(random_bytes(32));
@@ -1225,14 +1168,6 @@ try {
                 jsonError('Неверный логин/телефон или пароль', 401);
             }
             unset($user['password']);
-        }
-
-        // --- ПРОВЕРКА ПОЛА ПО ФАМИЛИИ ДЛЯ АВТОЗАСЕЛЕНИЯ ---
-        $detectedUserGender = detectGenderByLastName($user['last_name'] ?? $user['name'] ?? '');
-        if ($detectedUserGender !== null && $detectedUserGender !== $gender) {
-            $userGenderLabel = $detectedUserGender === 'M' ? 'мужской' : 'женский';
-            $selectedGenderLabel = $gender === 'M' ? 'мальчик' : 'девочка';
-            jsonError("Несоответствие пола: По фамилии ({$user['last_name']}) ваш пол определён как {$userGenderLabel}, а в форме выбран пол '{$selectedGenderLabel}'. Проверьте правильность выбранного пола.", 400);
         }
 
         $stmt = $pdo->prepare("
@@ -1550,12 +1485,6 @@ try {
                 $teamName = trim($data['team_name'] ?? '');
                 $teamId = (int)($data['team_id'] ?? 0);
                 $password = trim($data['password'] ?? '');
-
-                // Ограничение: выдавать роль Администратора может только Главный администратор!
-                $curatorRoleClean = strtolower(trim($curatorUser['role'] ?? ''));
-                if ($curatorRoleClean !== 'admin' && $role === 'admin') {
-                    jsonError('Назначать роль Администратора может только Главный администратор', 403);
-                }
 
                 if ($id > 0) {
                     if ($curatorUser['role'] === 'curator' && !checkCuratorAccessToUser($pdo, $curatorUser['id'], $id) && $curatorUser['id'] != $id) {

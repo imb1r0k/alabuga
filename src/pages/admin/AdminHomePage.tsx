@@ -31,7 +31,7 @@ export const AdminHomePage: React.FC = () => {
   // Скрываемость блока настроек
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // Загружаем текущее глобальное уведомление
+  // Загружаем текущее глобальное уведомление из БД
   const loadNotification = async () => {
     try {
       const data = await getGlobalNotification();
@@ -40,15 +40,29 @@ export const AdminHomePage: React.FC = () => {
         setNotifText(n.text);
         setNotifType(n.type === 'one-view' ? 'one-view' : 'permanent');
         setNotifEnabled(!!n.enabled);
+      } else {
+        setNotifText('');
+        setNotifType('permanent');
+        setNotifEnabled(false);
       }
     } catch (err) {
-      // Игнорируем ошибку загрузки уведомления
+      console.error('Ошибка загрузки уведомления:', err);
     }
   };
 
   useEffect(() => {
     loadNotification();
   }, []);
+
+  // Синхронизация hero настроек при изменении их в контексте
+  useEffect(() => {
+    setTitleInput(siteTitle);
+    setBadgeInput(hero.hero_badge);
+    setTitleHeroInput(hero.hero_title);
+    setDescInput(hero.hero_description);
+    setBtnTextInput(hero.hero_button_text);
+    setBtnTextAuthInput(hero.hero_button_text_auth);
+  }, [siteTitle, hero]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,6 +102,7 @@ export const AdminHomePage: React.FC = () => {
         enabled: notifEnabled,
       });
       showToast('Глобальное уведомление сохранено', 'success');
+      await loadNotification();
     } catch (err: any) {
       showToast('Ошибка сохранения: ' + (err.response?.data?.error || err.message), 'error');
     } finally {
