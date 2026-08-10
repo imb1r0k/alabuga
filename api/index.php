@@ -23,12 +23,17 @@ try {
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
-    // Автоматическое создание таблицы привязки кураторов к командам при необходимости
+    // Автоматическое создание таблицы привязки кураторов к командам
     $pdo->exec("CREATE TABLE IF NOT EXISTS curator_teams (
         user_id INT NOT NULL,
         team_id INT NOT NULL,
         PRIMARY KEY (user_id, team_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+    // Удаляем устаревший уникальный индекс unique_curator_team, если он блокирует совпадения team_id = 0
+    try {
+        $pdo->exec("ALTER TABLE curator_teams DROP INDEX unique_curator_team");
+    } catch (PDOException $ex) {}
 
     // Попытка добавить колонки rating и completed_tasks если ещё не существуют
     try {
@@ -608,15 +613,11 @@ try {
         jsonResponse(['token' => $token, 'user' => $user]);
     }
 
-    // ─── Текущий пользователь ──────────────────────────────────────────────
-
     if ($uri === 'user') {
         $user = requireAuth($pdo);
         unset($user['password']);
         jsonResponse($user);
     }
-
-    // ─── Выход ──────────────────────────────────────────────────────────────
 
     if ($uri === 'logout') {
         $token = getBearerToken();
@@ -626,8 +627,6 @@ try {
         }
         jsonResponse(['success' => true]);
     }
-
-    // ─── Моё текущее/последнее бронирование ─────────────────────────────────
 
     if ($uri === 'my-booking') {
         $user = requireAuth($pdo);
@@ -644,8 +643,6 @@ try {
         $booking = $stmt->fetch();
         jsonResponse(['booking' => $booking]);
     }
-
-    // ─── Отозвать своё активное бронирование ───────────────────────────────
 
     if ($uri === 'cancel-booking' || $uri === 'my-booking/cancel') {
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
@@ -664,8 +661,6 @@ try {
 
         jsonResponse(['success' => true, 'message' => 'Заявка успешно отозвана']);
     }
-
-    // ─── Команды (админка) ──────────────────────────────────────────────────
 
     if ($uri === 'admin/teams') {
         $user = requireAdmin($pdo);
@@ -928,8 +923,6 @@ try {
         jsonError('Метод не поддерживается', 405);
     }
 
-    // ─── Публичные данные для бронирования ──────────────────────────────────
-
     if ($uri === 'public/buildings') {
         $stmt = $pdo->query("SELECT * FROM buildings ORDER BY id ASC");
         $buildings = $stmt->fetchAll();
@@ -1018,8 +1011,6 @@ try {
             'floors' => $floorsData,
         ]);
     }
-
-    // ─── Бронирование комнаты ──────────────────────────────────────────────
 
     if ($uri === 'book') {
         if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
@@ -1356,8 +1347,6 @@ try {
         ]);
     }
 
-    // ─── Профиль пользователя ───────────────────────────────────────────────
-
     if ($uri === 'profile') {
         $user = requireAuth($pdo);
         if ($method === 'GET') {
@@ -1381,8 +1370,6 @@ try {
         jsonError('Метод не поддерживается', 405);
     }
 
-    // ─── Мои бронирования (история) ─────────────────────────────────────────
-
     if ($uri === 'my-bookings') {
         $user = requireAuth($pdo);
         $stmt = $pdo->prepare("
@@ -1398,8 +1385,6 @@ try {
         $stmt->execute([$user['id']]);
         jsonResponse($stmt->fetchAll());
     }
-
-    // ─── Моя команда ─────────────────────────────────────────────────────────
 
     if ($uri === 'my-team') {
         $user = requireAuth($pdo);
@@ -1433,8 +1418,6 @@ try {
         ]);
     }
 
-    // ─── Мой командный чат ──────────────────────────────────────────────────
-
     if ($uri === 'my-team/chat') {
         $user = requireAuth($pdo);
         if (!$user['team_id']) jsonError('Вы не состоите в команде', 400);
@@ -1463,8 +1446,6 @@ try {
         jsonError('Метод не поддерживается', 405);
     }
 
-    // ─── Мой командный календарь ────────────────────────────────────────────
-
     if ($uri === 'my-team/calendar') {
         $user = requireAuth($pdo);
         if (!$user['team_id']) jsonError('Вы не состоите в команде', 400);
@@ -1482,8 +1463,6 @@ try {
         }
         jsonError('Метод не поддерживается', 405);
     }
-
-    // ─── Публичный профиль пользователя ─────────────────────────────────────
 
     if ($uri === 'public/profile') {
         $login = trim($_GET['login'] ?? '');
@@ -1539,8 +1518,6 @@ try {
             'current_booking' => $currentBooking,
         ]);
     }
-
-    // ─── Маршруты Админ-панели ──────────────────────────────────────────────
 
     if (strpos($uri, 'admin/') === 0) {
         $curatorUser = requireAdmin($pdo);
@@ -1641,14 +1618,12 @@ try {
                     }
 
                     if ($role === 'curator') {
-                        $curatorTeamIds = $data['curator_team_ids'] ?? [];
-                        if (is_array($curatorTeamIds)) {
-                            $delStmt = $pdo->prepare("DELETE FROM curator_teams WHERE user_id = ?");
-                            $delStmt->execute([$id]);
-                            $insStmt = $pdo->prepare("INSERT INTO curator_teams (user_id, team_id) VALUES (?, ?)");
-                            foreach ($curatorTeamIds as $tid) {
-                                $insStmt->execute([$id, (int)$tid]);
-                            }
+                        $curatorTeamIds = array_unique(array_map('intval', $data['curator_team_ids'] ?? []));
+                        $delStmt = $pdo->prepare("DELETE FROM curator_teams WHERE user_id = ?");
+                        $delStmt->execute([$id]);
+                        $insStmt = $pdo->prepare("INSERT IGNORE INTO curator_teams (user_id, team_id) VALUES (?, ?)");
+                        foreach ($curatorTeamIds as $tid) {
+                            $insStmt->execute([$id, (int)$tid]);
                         }
                     } else {
                         $delStmt = $pdo->prepare("DELETE FROM curator_teams WHERE user_id = ?");

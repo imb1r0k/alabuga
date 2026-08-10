@@ -57,7 +57,6 @@ interface TileTemplate {
   textColor: string;
 }
 
-// Улучшенная, понятная и четкая иконка лестницы
 const StairsIcon: React.FC<{ size?: number }> = ({ size = 22 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M4 19h4v-4h4v-4h4V7h4" />
@@ -75,7 +74,7 @@ const STANDARD_TEMPLATES: TileTemplate[] = [
 ];
 
 const GEN_TEMPLATES: TileTemplate[] = [
-  { type: 'gen-start', title: 'Начало генерации', icon: Play, bg: '#d1e7dd', borderColor: '#198754', textColor: '#0f5132' },
+  { type: 'gen-start', title: 'Начало генерации', icon: Play, bg: '#d1e7dd', borderColor: '#198754', textColor: '#0f172a' },
   { type: 'gen-turn', title: 'Поворот генерации', icon: RotateCw, bg: '#cff4fc', borderColor: '#0dcaf0', textColor: '#055160' },
   { type: 'gen-end', title: 'Конец генерации', icon: Square, bg: '#f8d7da', borderColor: '#dc3545', textColor: '#842029' },
 ];
@@ -137,7 +136,7 @@ export const AdminBuildingsPage: React.FC = () => {
   const [selectedTool, setSelectedTool] = useState<TileType>('room');
   const [selectedDir, setSelectedDir] = useState<Direction>('right');
 
-  // Drag & drop локальной плитки (для перетаскивания и обмена местами)
+  // Drag & drop
   const [draggedItem, setDraggedItem] = useState<{ isExisting: boolean; type?: TileType; x?: number; y?: number } | null>(null);
 
   const [genFrom, setGenFrom] = useState(1);
@@ -462,7 +461,6 @@ export const AdminBuildingsPage: React.FC = () => {
     }
   };
 
-  // Старт перетаскивания (для заготовки или существующей плитки)
   const handleDragStartTool = (e: React.DragEvent, type: TileType) => {
     if (!isEditLayout) return;
     setDraggedItem({ isExisting: false, type });
@@ -481,7 +479,6 @@ export const AdminBuildingsPage: React.FC = () => {
     } catch (_) {}
   };
 
-  // Обработка Дропа с поддержкой анимированного обмена местами!
   const handleDrop = (e: React.DragEvent, dropX: number, dropY: number) => {
     e.preventDefault();
     e.stopPropagation();
@@ -512,7 +509,6 @@ export const AdminBuildingsPage: React.FC = () => {
       return;
     }
 
-    // Если перетаскивали новую заготовку
     let typeToPlace = draggedItem?.type || selectedTool;
     try {
       const textData = e.dataTransfer.getData('text/plain') as TileType;
@@ -539,7 +535,6 @@ export const AdminBuildingsPage: React.FC = () => {
     setHasUnsavedChanges(true);
   };
 
-  // АВТОГЕНЕРАЦИЯ С ПРОПУСКОМ ЗАНИТЫХ ЯЧЕЕК И АВТОМАТИЧЕСКИМ ВЫХОДОМ
   const handleRunGeneration = () => {
     if (!selectedFloor || !selectedBuilding) return;
     setGenStatusMsg('Генерация макета...');
@@ -578,7 +573,6 @@ export const AdminBuildingsPage: React.FC = () => {
       const roomNumStr = `${currentNum}`;
       const existingInCell = newRoomsList.find((r) => Number(r.x_pos) === rX && Number(r.y_pos) === rY);
 
-      // Если в ячейке НЕ маркер генерации, а сушествующая лестница, лифт, тех. помещение или комната — ПРОПУСКАЕМ ячейку!
       if (existingInCell && !['gen-start', 'gen-turn', 'gen-end'].includes(existingInCell.room_type)) {
         // Пропускаем ячейку
       } else {
@@ -643,7 +637,7 @@ export const AdminBuildingsPage: React.FC = () => {
 
     setLocalRooms(newRoomsList);
     setHasUnsavedChanges(true);
-    setGenMode(false); // Автоматически выходим из режима генерации!
+    setGenMode(false);
     showToast(`Успешно сгенерировано ${placedCount} комнат! Нажмите «Сохранить макет».`, 'success');
   };
 
@@ -708,7 +702,6 @@ export const AdminBuildingsPage: React.FC = () => {
     setSelectedRoom(null);
   };
 
-  // Рендер ячейки
   const renderCellTile = (x: number, y: number) => {
     const room = localRooms.find((r) => Number(r.x_pos) === x && Number(r.y_pos) === y);
     const calcRoomNum = getCalculatedRoomNumber(x, y);
@@ -717,11 +710,9 @@ export const AdminBuildingsPage: React.FC = () => {
     const effectiveRoomGender = getEffectiveGender(room?.gender, selectedFloor?.gender);
     const bookedCount = room && room.room_type === 'room' && room.id ? getRoomOccupancy(room.id) : 0;
 
-    // Определяем, что показывать как номер/название
     let displayNumber = room?.room_number || '';
     let displayName = room?.name || '';
     
-    // Для лестницы и лифта показываем название вместо номера
     if (room?.room_type === 'stairs' || room?.room_type === 'elevator') {
       displayNumber = room.name;
     }
@@ -937,7 +928,7 @@ export const AdminBuildingsPage: React.FC = () => {
             <div style={{ flex: 1, minWidth: 0, backgroundColor: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', border: '1px solid #e2e8f0' }}>
               {selectedBuilding ? (
                 <div style={{ width: '100%' }}>
-                  {/* Стабильная шапка корпуса без смещений */}
+                  {/* Шапка корпуса */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px', width: '100%' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <GenderBadge gender={selectedBuilding.gender} size={28} />
@@ -1020,15 +1011,11 @@ export const AdminBuildingsPage: React.FC = () => {
                           <Zap size={16} /> {genMode ? 'Генерация ВКЛ' : '⚡ Автогенерация'}
                         </button>
                       )}
-
-                      <button onClick={openAddFloorModal} className="btn btn-secondary" style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <Plus size={16} /> Добавить этаж
-                      </button>
                     </div>
                   </div>
 
-                  {/* Список этажей */}
-                  <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
+                  {/* Список этажей и кнопка добавления этажа в ряду */}
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
                     {floors.map((f) => {
                       const effectiveFloorGender = getEffectiveGender(f.gender, selectedBuilding.gender);
                       const fStats = getSpecificFloorStats(f.id);
@@ -1080,6 +1067,28 @@ export const AdminBuildingsPage: React.FC = () => {
                         </div>
                       );
                     })}
+
+                    {/* Кнопка "Добавить этаж" помещена прямо за последним этажом */}
+                    <button
+                      onClick={openAddFloorModal}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        border: '1px dashed #0284c7',
+                        backgroundColor: '#f0f9ff',
+                        color: '#0284c7',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        transition: 'all 0.15s ease',
+                      }}
+                      title="Создать новый этаж в этом корпусе"
+                    >
+                      <Plus size={15} /> Добавить этаж
+                    </button>
                   </div>
 
                   {selectedFloor ? (

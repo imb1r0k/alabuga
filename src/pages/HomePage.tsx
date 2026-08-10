@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ArrowRight, Building2, MapPin, Clock, XCircle, CheckCircle2, AlertCircle, UserPlus, Trash2 } from 'lucide-react';
+import { ArrowRight, Building2, MapPin, Clock, XCircle, CheckCircle2, AlertCircle, UserPlus, Trash2, Info } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { getPublicBuildings, getMyBooking, cancelMyBooking } from '../services/api';
@@ -25,6 +25,7 @@ export const HomePage: React.FC = () => {
 
   const [loadingBuildings, setLoadingBuildings] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [showScrollHint, setShowScrollHint] = useState(false);
 
   const [myBooking, setMyBooking] = useState<any>(null);
   const bookingSectionRef = useRef<HTMLDivElement>(null);
@@ -32,7 +33,10 @@ export const HomePage: React.FC = () => {
 
   useEffect(() => {
     if (location.state?.scrollToBooking) {
-      bookingSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
+      setShowScrollHint(true);
+      setTimeout(() => {
+        bookingSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
       window.history.replaceState({}, document.title);
     }
   }, [location.state]);
@@ -295,6 +299,26 @@ export const HomePage: React.FC = () => {
       )}
 
       <div ref={bookingSectionRef} className="card" style={{ marginBottom: '48px' }}>
+        {showScrollHint && (
+          <div style={{
+            backgroundColor: '#e0f2fe',
+            border: '1px solid #7dd3fc',
+            color: '#0369a1',
+            borderRadius: '10px',
+            padding: '12px 16px',
+            marginBottom: '20px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            fontSize: '14px',
+            fontWeight: 500,
+            animation: 'toastIn 0.3s ease',
+          }}>
+            <Info size={20} color="#0284c7" />
+            <span>Выберите корпус, этаж и комнату на плане ниже для самостоятельного заселения.</span>
+          </div>
+        )}
+
         <div style={{ marginBottom: '24px' }}>
           <h2 style={{ fontSize: '24px', fontWeight: 'bold', color: '#0f172a', marginBottom: '8px' }}>Выберите комнату</h2>
           <p style={{ fontSize: '14px', color: '#64748b' }}>Просмотрите доступные комнаты в корпусах и нажмите на интересующую для бронирования.</p>
@@ -311,7 +335,13 @@ export const HomePage: React.FC = () => {
                 <Building2 size={18} color="#0284c7" />
                 Выберите корпус:
               </label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
+
+              {/* Адаптивная сетка карточек корпусов */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+                gap: '10px',
+              }}>
                 {buildings.map((b) => {
                   const isSelected = selectedBuildingId === b.id;
                   const leftPlaces = (b.total_capacity || 0) - (b.occupied_places || 0);
@@ -323,17 +353,17 @@ export const HomePage: React.FC = () => {
                       style={{
                         backgroundColor: colors.bg,
                         border: `2px solid ${isSelected ? '#0284c7' : colors.border}`,
-                        borderRadius: '12px',
-                        padding: '16px',
+                        borderRadius: '10px',
+                        padding: '12px 14px',
                         cursor: 'pointer',
                         transition: 'all 0.2s',
-                        boxShadow: isSelected ? '0 4px 8px rgba(0,0,0,0.15)' : '0 1px 3px rgba(0,0,0,0.08)',
+                        boxShadow: isSelected ? '0 4px 8px rgba(0,0,0,0.12)' : '0 1px 2px rgba(0,0,0,0.05)',
                         transform: isSelected ? 'scale(1.02)' : 'scale(1)',
                       }}
                     >
-                      <div style={{ fontWeight: 'bold', fontSize: '16px', color: colors.text, marginBottom: '6px' }}>{b.name}</div>
-                      <div style={{ fontSize: '13px', color: colors.text, opacity: 0.8 }}>{getGenderLabel(b.gender)}</div>
-                      <div style={{ fontSize: '14px', color: colors.text, fontWeight: 600, marginTop: '8px' }}>
+                      <div style={{ fontWeight: 'bold', fontSize: '15px', color: colors.text, marginBottom: '2px', wordBreak: 'break-word' }}>{b.name}</div>
+                      <div style={{ fontSize: '12px', color: colors.text, opacity: 0.85 }}>{getGenderLabel(b.gender)}</div>
+                      <div style={{ fontSize: '12px', color: colors.text, fontWeight: 700, marginTop: '6px' }}>
                         Осталось {leftPlaces} из {b.total_capacity || 0} мест
                       </div>
                     </div>
