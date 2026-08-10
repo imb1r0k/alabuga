@@ -3,7 +3,6 @@ import { Skeleton } from '../../components/Skeleton';
 import { AdminLayout } from '../../components/AdminLayout';
 import { useToast } from '../../components/Toast';
 import { getAdminUsers, updateAdminUser, getUserDetails, getAdminTeams } from '../../services/api';
-import { useAuth } from '../../contexts/AuthContext';
 import { Link } from 'react-router-dom';
 import { QrCode, X, Shield, CheckSquare, Square, Search, Filter, RotateCcw } from 'lucide-react';
 
@@ -25,7 +24,6 @@ function getCookie(name: string): string | null {
 }
 
 export const AdminUsersPage: React.FC = () => {
-  const { isAdmin } = useAuth();
   const [users, setUsers] = useState<any[]>([]);
   const [teams, setTeams] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -534,7 +532,7 @@ export const AdminUsersPage: React.FC = () => {
                     >
                       <option value="user">Пользователь (user)</option>
                       <option value="curator">Куратор (curator)</option>
-                      {isAdmin && <option value="admin">Администратор (admin)</option>}
+                      <option value="admin">Администратор (admin)</option>
                     </select>
                   </div>
 
