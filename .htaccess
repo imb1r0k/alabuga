@@ -1,12 +1,16 @@
-RewriteEngine On
+# Полностью запрещаем выполнение любых скриптов
+Options -ExecCGI
+AddHandler cgi-script .php .pl .py .sh .cgi .exe
+Options -Indexes
 
-# Передача заголовка Authorization в PHP
-SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
-RewriteCond %{HTTP:Authorization} ^(.*)
-RewriteRule .* - [e=HTTP_AUTHORIZATION:%1]
+# Разрешаем только скачивание файлов
+<FilesMatch "\.(jpg|jpeg|png|gif|webp|bmp|svg|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|rtf|odt|zip|rar|7z|tar|gz|mp4|avi|mov|wmv|flv|mkv|webm|mp3|wav|ogg|flac|aac|csv|json|xml|log)$">
+    Order Allow,Deny
+    Allow from all
+</FilesMatch>
 
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^ index.php [QSA,L]
-
-
+# Все остальные файлы запрещены
+<FilesMatch ".*">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>
