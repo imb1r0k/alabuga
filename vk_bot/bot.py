@@ -5,6 +5,7 @@ from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 import threading
 import logging
 import re
+import os
 
 from database import (
     get_bot_settings,
@@ -13,6 +14,9 @@ from database import (
     get_tasks_for_group,
     get_user_task_report,
     create_report,
+    save_report_media,
+    process_vk_attachments,
+    get_report_media,
     get_user_tickets,
     get_pending_notifications,
     mark_notification_sent,
@@ -22,8 +26,8 @@ from database import (
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Храним состояние пользователей (ожидание ввода отчета)
 user_states = {}
+UPLOAD_DIR = 'uploads/vk_bot/'
 
 
 def send_notification_worker(vk, settings):
@@ -104,7 +108,6 @@ def get_task_from_button(text, tasks):
     diff_labels = {'easy': 'Простое', 'medium': 'Среднее', 'hard': 'Сложное'}
     counts = {'easy': 1, 'medium': 1, 'hard': 1}
 
-    # Убираем эмодзи и статусы из текста
     clean_text = re.sub(r'[✅⏳❌🔵🟡🔴\s]', '', text).strip()
 
     for t in tasks:
@@ -135,7 +138,6 @@ def main():
     vk = vk_session.get_api()
     longpoll = VkLongPoll(vk_session)
 
-    # Запускаем фоновый поток для уведомлений
     notification_thread = threading.Thread(
         target=send_notification_worker,
         args=(vk, settings),
@@ -150,17 +152,19 @@ def main():
             vk_id = event.user_id
             text = event.text.strip()
 
+            # Проверяем наличие вложений
+            attachments = []
+            if event.attachments:
+                attachments = event.attachments
+
             try:
-                # Получаем информацию о пользователе ВК
                 user_info = vk.users.get(user_ids=vk_id)[0]
                 first_name = user_info.get('first_name', '')
                 last_name = user_info.get('last_name', '')
                 vk_url = f"https://vk.com/id{vk_id}"
 
-                # Ищем или создаем пользователя
                 db_user = find_or_create_user(vk_id, first_name, last_name, vk_url)
 
-                # Если пользователь только что создан — отправляем логин и пароль
                 if db_user.get('generated_password'):
                     login_msg = (
                         f"👋 Привет, {first_name}!\n\n"
@@ -188,7 +192,6 @@ def main():
                     )
                     continue
 
-            # Обновляем настройки и активную группу
             settings = get_bot_settings()
             site_url = settings.get('site_url', '')
             active_group = get_active_task_group()
@@ -207,12 +210,41 @@ def main():
                     )
                     continue
 
-                create_report(db_user['id'], task['id'], text)
+                # Обрабатываем вложения
+                saved_files = []
+                attachment_text = ""
+                
+                if attachments:
+                    try:
+                        saved_files, attachment_text = process_vk_attachments(attachments, vk_session)
+                        if attachment_text:
+                            text = f"{text}\n\n📎 Прикрепленные файлы:\n{attachment_text}" if text else f"📎 Прикрепленные файлы:\n{attachment_text}"
+                    except Exception as e:
+                        logger.error(f"Ошибка обработки вложений: {e}")
+
+                # Создаем отчет
+                has_attachments = len(saved_files) > 0
+                report_id = create_report(db_user['id'], task['id'], text, has_attachments)
+
+                # Сохраняем файлы в базу
+                for file_info in saved_files:
+                    save_report_media(
+                        report_id,
+                        file_info['file_url'],
+                        file_info['file_type'],
+                        file_info['original_name'],
+                        file_info['file_size']
+                    )
+
                 del user_states[vk_id]
+
+                response_msg = "✅ Ваш отчет принят на рассмотрение администратором!\nСтатус задания изменится после проверки."
+                if has_attachments:
+                    response_msg += f"\n📎 Прикреплено файлов: {len(saved_files)}"
 
                 vk.messages.send(
                     user_id=vk_id,
-                    message="✅ Ваш отчет принят на рассмотрение администратором!\nСтатус задания изменится после проверки.",
+                    message=response_msg,
                     random_id=0,
                     keyboard=create_main_keyboard(active_group, site_url)
                 )
@@ -231,6 +263,7 @@ def main():
                     tasks = get_tasks_for_group(active_group['id'])
                     welcome = settings.get('welcome_text', 'Привет! Выполняй задания и получай билеты! 🎫')
                     welcome += f"\n\n⏰ Задания действуют до: {active_group['end_date']}"
+                    welcome += f"\n📎 Для подтверждения прикрепляйте фото, файлы или ссылки!"
 
                     vk.messages.send(
                         user_id=vk_id,
@@ -302,7 +335,8 @@ def main():
                         msg = (
                             f"📌 {matched_task['title']}\n\n"
                             f"{matched_task['description']}{status_str}\n\n"
-                            f"📝 Пришлите ссылку или текст с подтверждением выполнения задания."
+                            f"📝 Пришлите ссылку или текст с подтверждением выполнения задания.\n"
+                            f"📎 Вы также можете прикрепить фото, видео или документы."
                         )
 
                         user_states[vk_id] = matched_task

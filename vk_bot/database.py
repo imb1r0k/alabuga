@@ -6,9 +6,29 @@ import re
 import hashlib
 import random
 import string
+import os
+import requests
+from urllib.parse import urlparse
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Конфигурация загрузки файлов
+UPLOAD_DIR = 'uploads/vk_bot/'
+MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+ALLOWED_EXTENSIONS = {
+    'image': ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'],
+    'document': ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'rtf', 'odt'],
+    'archive': ['zip', 'rar', '7z', 'tar', 'gz'],
+    'video': ['mp4', 'avi', 'mov', 'wmv', 'flv', 'mkv', 'webm'],
+    'audio': ['mp3', 'wav', 'ogg', 'flac', 'aac'],
+    'other': ['csv', 'json', 'xml', 'log']
+}
+ALLOWED_EXTENSIONS_FLAT = []
+for ext_list in ALLOWED_EXTENSIONS.values():
+    ALLOWED_EXTENSIONS_FLAT.extend(ext_list)
+# Запрещенные расширения
+FORBIDDEN_EXTENSIONS = ['htaccess', 'php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'phps', 'cgi', 'pl', 'py', 'sh', 'exe', 'bat', 'cmd', 'com', 'scr', 'vbs', 'js', 'jar']
 
 
 def get_db_connection():
@@ -38,10 +58,7 @@ def get_bot_settings():
 
 
 def hash_password(password):
-    """
-    Хеширование пароля для совместимости с PHP password_hash
-    Использует SHA-256 для простоты
-    """
+    """Хеширование пароля для совместимости с PHP password_hash"""
     return hashlib.sha256(password.encode()).hexdigest()
 
 
@@ -52,14 +69,8 @@ def generate_password(length=10):
 
 
 def generate_login(first_name, last_name):
-    """
-    Генерирует логин на основе имени и фамилии
-    Проверяет уникальность в базе
-    """
-    # Очищаем от спецсимволов и транслитерации
+    """Генерирует логин на основе имени и фамилии"""
     base_login = re.sub(r'[^a-zA-Zа-яА-Я0-9]', '', f"{last_name.lower()}{first_name.lower()}")
-    
-    # Если слишком короткий, добавляем случайные цифры
     if len(base_login) < 3:
         base_login = f"user{random.randint(100, 999)}"
     
@@ -74,32 +85,17 @@ def generate_login(first_name, last_name):
 
 
 def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
-    """
-    Находит или создает пользователя в таблице users.
-    
-    Алгоритм поиска:
-    1. По VK URL (самый надежный)
-    2. По VK ID
-    3. По имени и фамилии (регистронезависимо)
-    4. Если не найден - создает нового
-    
-    Возвращает:
-        dict: Данные пользователя с добавленным ключом 'generated_password' если создан новый
-    """
+    """Находит или создает пользователя в таблице users"""
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            # 1. Проверяем по VK URL (самый надежный способ)
+            # 1. Проверяем по VK URL
             if vk_url:
                 cursor.execute("SELECT * FROM users WHERE vk_url = %s", (vk_url,))
                 user = cursor.fetchone()
                 if user:
-                    # Обновляем vk_id если изменился
                     if user.get('vk_id') != vk_id:
-                        cursor.execute(
-                            "UPDATE users SET vk_id = %s WHERE id = %s",
-                            (vk_id, user['id'])
-                        )
+                        cursor.execute("UPDATE users SET vk_id = %s WHERE id = %s", (vk_id, user['id']))
                         logger.info(f"Обновлен vk_id для пользователя {user['id']}")
                     return user
 
@@ -108,16 +104,12 @@ def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
                 cursor.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
                 user = cursor.fetchone()
                 if user:
-                    # Обновляем vk_url если изменился
                     if user.get('vk_url') != vk_url:
-                        cursor.execute(
-                            "UPDATE users SET vk_url = %s WHERE id = %s",
-                            (vk_url, user['id'])
-                        )
+                        cursor.execute("UPDATE users SET vk_url = %s WHERE id = %s", (vk_url, user['id']))
                         logger.info(f"Обновлен vk_url для пользователя {user['id']}")
                     return user
 
-            # 3. Проверяем по имени и фамилии (регистронезависимо)
+            # 3. Проверяем по имени и фамилии
             if first_name and last_name:
                 cursor.execute("""
                     SELECT * FROM users 
@@ -125,9 +117,7 @@ def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
                     LIMIT 1
                 """, (first_name, last_name))
                 user = cursor.fetchone()
-
                 if user:
-                    # Обновляем vk_id и vk_url
                     cursor.execute(
                         "UPDATE users SET vk_id = %s, vk_url = %s WHERE id = %s",
                         (vk_id, vk_url, user['id'])
@@ -146,31 +136,15 @@ def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
                 (vk_id, vk_url, first_name, last_name, name, login, phone, password, role, status, rating, completed_tasks)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
-                vk_id,
-                vk_url,
-                first_name,
-                last_name,
-                full_name,
-                login,
-                '',  # phone - пустой, пользователь заполнит позже
-                hashed_password,
-                'user',  # role
-                'active',  # status
-                0,  # rating
-                0  # completed_tasks
+                vk_id, vk_url, first_name, last_name, full_name,
+                login, '', hashed_password, 'user', 'active', 0, 0
             ))
 
             user_id = cursor.lastrowid
-
-            # Получаем созданного пользователя
             cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
             user = cursor.fetchone()
-
-            logger.info(f"Создан новый пользователь: {first_name} {last_name}, логин: {login}")
-            
-            # Добавляем сгенерированный пароль для отправки пользователю
             user['generated_password'] = password
-
+            logger.info(f"Создан новый пользователь: {first_name} {last_name}, логин: {login}")
             return user
 
     except Exception as e:
@@ -192,7 +166,7 @@ def get_user_by_vk_id(vk_id):
 
 
 def get_active_task_group():
-    """Получает активную группу заданий (текущая дата в диапазоне)"""
+    """Получает активную группу заданий"""
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
@@ -236,18 +210,212 @@ def get_user_task_report(user_id, task_id):
         conn.close()
 
 
-def create_report(user_id, task_id, submission_text):
+def create_report(user_id, task_id, submission_text, has_attachments=False):
     """Создает новый отчет по заданию"""
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
-                INSERT INTO vk_bot_reports (user_id, task_id, submission_text, status) 
-                VALUES (%s, %s, %s, 'pending')
-            """, (user_id, task_id, submission_text))
+                INSERT INTO vk_bot_reports (user_id, task_id, submission_text, has_attachments, status) 
+                VALUES (%s, %s, %s, %s, 'pending')
+            """, (user_id, task_id, submission_text, 1 if has_attachments else 0))
             return cursor.lastrowid
     finally:
         conn.close()
+
+
+def save_report_media(report_id, file_url, file_type, original_name, file_size):
+    """Сохраняет информацию о медиафайле в базу данных"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO vk_bot_report_media (report_id, file_url, file_type, original_name, file_size) 
+                VALUES (%s, %s, %s, %s, %s)
+            """, (report_id, file_url, file_type, original_name, file_size))
+            return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def get_report_media(report_id):
+    """Получает медиафайлы для отчета"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT * FROM vk_bot_report_media 
+                WHERE report_id = %s 
+                ORDER BY id ASC
+            """, (report_id,))
+            return cursor.fetchall()
+    finally:
+        conn.close()
+
+
+def download_vk_attachment(attachment, vk_session, upload_dir=UPLOAD_DIR):
+    """
+    Скачивает вложение из VK и сохраняет на сервер.
+    Возвращает словарь с информацией о файле или None.
+    """
+    try:
+        # Получаем тип и URL вложения
+        attach_type = attachment.get('type')
+        attach_data = attachment.get(attach_type, {})
+        
+        # Определяем URL для скачивания
+        file_url = None
+        file_name = None
+        file_size = 0
+        
+        if attach_type == 'photo':
+            # Для фото берем самую большую версию
+            sizes = attach_data.get('sizes', [])
+            if sizes:
+                # Сортируем по размеру (берем самую большую)
+                sizes.sort(key=lambda x: x.get('width', 0) * x.get('height', 0), reverse=True)
+                file_url = sizes[0].get('url')
+                file_name = f"photo_{attach_data.get('id', random.randint(1000, 9999))}.jpg"
+                file_size = 0  # VK не возвращает размер в API
+        elif attach_type == 'video':
+            file_url = attach_data.get('player')
+            if file_url:
+                file_name = f"video_{attach_data.get('id', random.randint(1000, 9999))}.mp4"
+        elif attach_type == 'doc':
+            file_url = attach_data.get('url')
+            original_name = attach_data.get('title', 'document')
+            ext = attach_data.get('ext', '')
+            file_name = f"{original_name}.{ext}" if ext else original_name
+            file_size = attach_data.get('size', 0)
+        elif attach_type == 'audio':
+            file_url = attach_data.get('url')
+            file_name = f"audio_{attach_data.get('id', random.randint(1000, 9999))}.mp3"
+        elif attach_type == 'link':
+            # Для ссылок просто сохраняем URL как текст
+            return {
+                'file_type': 'link',
+                'file_url': attach_data.get('url', ''),
+                'original_name': attach_data.get('title', 'Ссылка'),
+                'file_size': 0
+            }
+        else:
+            return None
+        
+        if not file_url:
+            return None
+        
+        # Определяем расширение файла
+        extension = os.path.splitext(file_name)[1].lower().replace('.', '')
+        if not extension:
+            # Пробуем определить из URL
+            parsed = urlparse(file_url)
+            path = parsed.path
+            ext_from_url = os.path.splitext(path)[1].lower().replace('.', '')
+            if ext_from_url:
+                extension = ext_from_url
+                file_name = f"{os.path.splitext(file_name)[0]}.{extension}"
+            else:
+                extension = 'file'
+                file_name = f"{file_name}.file"
+        
+        # Проверяем расширение на запрещенные
+        if extension.lower() in FORBIDDEN_EXTENSIONS:
+            logger.warning(f"Запрещенное расширение файла: {extension}")
+            return None
+        
+        # Проверяем размер
+        if file_size > MAX_FILE_SIZE:
+            logger.warning(f"Файл слишком большой: {file_size} > {MAX_FILE_SIZE}")
+            return None
+        
+        # Создаем директорию если её нет
+        full_upload_dir = os.path.join(os.path.dirname(__file__), '..', '..', upload_dir)
+        if not os.path.exists(full_upload_dir):
+            os.makedirs(full_upload_dir, exist_ok=True)
+        
+        # Генерируем уникальное имя файла
+        unique_name = f"{hashlib.md5(f"{file_name}{random.randint(1000, 9999)}".encode()).hexdigest()[:12]}.{extension}"
+        local_path = os.path.join(full_upload_dir, unique_name)
+        web_path = f"/{upload_dir}{unique_name}"
+        
+        # Скачиваем файл
+        response = requests.get(file_url, stream=True, timeout=30, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        
+        if response.status_code != 200:
+            logger.error(f"Ошибка скачивания файла: {response.status_code}")
+            return None
+        
+        # Сохраняем файл
+        with open(local_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+        
+        actual_size = os.path.getsize(local_path)
+        if actual_size > MAX_FILE_SIZE:
+            os.remove(local_path)
+            logger.warning(f"Файл слишком большой после скачивания: {actual_size}")
+            return None
+        
+        # Определяем тип файла
+        file_type = 'file'
+        if extension in ALLOWED_EXTENSIONS.get('image', []):
+            file_type = 'image'
+        elif extension in ALLOWED_EXTENSIONS.get('video', []):
+            file_type = 'video'
+        elif extension in ALLOWED_EXTENSIONS.get('audio', []):
+            file_type = 'audio'
+        elif extension in ALLOWED_EXTENSIONS.get('archive', []):
+            file_type = 'archive'
+        elif extension in ALLOWED_EXTENSIONS.get('document', []):
+            file_type = 'document'
+        
+        return {
+            'file_type': file_type,
+            'file_url': web_path,
+            'original_name': file_name,
+            'file_size': actual_size,
+            'local_path': local_path
+        }
+        
+    except Exception as e:
+        logger.error(f"Ошибка скачивания вложения: {e}")
+        return None
+
+
+def process_vk_attachments(attachments, vk_session):
+    """
+    Обрабатывает вложения из сообщения VK.
+    Возвращает список сохраненных файлов и текстовое описание.
+    """
+    if not attachments:
+        return [], ""
+    
+    saved_files = []
+    text_parts = []
+    
+    for attach in attachments:
+        result = download_vk_attachment(attach, vk_session)
+        if result:
+            if result.get('file_type') == 'link':
+                text_parts.append(f"🔗 Ссылка: {result.get('file_url')}")
+            else:
+                saved_files.append(result)
+                # Добавляем информацию о файле в текст
+                file_type_emoji = {
+                    'image': '🖼️',
+                    'video': '🎬',
+                    'audio': '🎵',
+                    'document': '📄',
+                    'archive': '📦',
+                    'file': '📎'
+                }
+                emoji = file_type_emoji.get(result['file_type'], '📎')
+                text_parts.append(f"{emoji} {result['original_name']} ({result['file_size']//1024} KB)")
+    
+    return saved_files, "\n".join(text_parts)
 
 
 def get_user_tickets(user_id):
@@ -313,14 +481,10 @@ def add_notification(user_id, message, report_id=None):
 
 
 def update_report_status(report_id, status, reject_reason=''):
-    """
-    Обновляет статус отчета, начисляет баллы, выдает билеты.
-    Возвращает данные для отправки уведомления
-    """
+    """Обновляет статус отчета, начисляет баллы, выдает билеты"""
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            # Получаем отчет с данными
             cursor.execute("""
                 SELECT r.*, 
                        t.points, t.title, t.group_id,
@@ -335,7 +499,6 @@ def update_report_status(report_id, status, reject_reason=''):
             if not report:
                 return None
 
-            # Обновляем статус отчета
             cursor.execute("""
                 UPDATE vk_bot_reports 
                 SET status = %s, reject_reason = %s 
@@ -346,7 +509,6 @@ def update_report_status(report_id, status, reject_reason=''):
             message = ''
 
             if status == 'approved':
-                # Начисляем баллы пользователю
                 points = report.get('points', 10)
                 cursor.execute("""
                     UPDATE users 
@@ -354,7 +516,6 @@ def update_report_status(report_id, status, reject_reason=''):
                     WHERE id = %s
                 """, (points, user_id))
 
-                # Проверяем, выполнил ли пользователь все задания группы
                 cursor.execute("""
                     SELECT COUNT(*) as total 
                     FROM vk_bot_tasks 
@@ -371,7 +532,6 @@ def update_report_status(report_id, status, reject_reason=''):
                 """, (user_id, report['group_id']))
                 done_tasks = cursor.fetchone()['done']
 
-                # Если все задания выполнены — выдаем билет
                 if total_tasks > 0 and done_tasks >= total_tasks:
                     import hashlib
                     ticket_num = 'TKT-' + hashlib.md5(
@@ -387,7 +547,6 @@ def update_report_status(report_id, status, reject_reason=''):
             elif status == 'rejected':
                 message = f"❌ Ваше задание \"{report['title']}\" отклонено. Причина: {reject_reason or 'Не выполнено учение'}. Отправьте отчет заново."
 
-            # Добавляем уведомление
             if message:
                 add_notification(user_id, message, report_id)
 
