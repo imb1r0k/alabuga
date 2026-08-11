@@ -173,7 +173,6 @@ export const AdminVkBotPage: React.FC = () => {
   const loadReportMedia = async (reportId: number) => {
     setLoadingMedia(prev => ({ ...prev, [reportId]: true }));
     try {
-      // Реальный API запрос для получения медиафайлов
       const data = await getVkBotReportMedia(reportId);
       const mediaFiles = Array.isArray(data) ? data : [];
       setReportMedia(prev => ({ ...prev, [reportId]: mediaFiles }));
@@ -194,7 +193,6 @@ export const AdminVkBotPage: React.FC = () => {
       const reportsData = Array.isArray(data) ? data : [];
       setReports(reportsData);
       
-      // Загружаем медиа для каждого отчета
       for (const report of reportsData) {
         await loadReportMedia(report.id);
       }
@@ -356,6 +354,12 @@ export const AdminVkBotPage: React.FC = () => {
 
   // Скачивание файла
   const handleDownloadFile = (fileUrl: string, fileName: string) => {
+    // Для VK файлов используем прямой переход по ссылке
+    if (fileUrl.includes('vk.com/') || fileUrl.includes('sun9-')) {
+      window.open(fileUrl, '_blank');
+      return;
+    }
+    
     const link = document.createElement('a');
     link.href = fileUrl;
     link.download = fileName;
@@ -396,6 +400,16 @@ export const AdminVkBotPage: React.FC = () => {
     if (status === 'pending') return { label: 'На рассмотрении', color: '#f59e0b', bg: '#fef3c7' };
     if (status === 'approved') return { label: 'Принято ✅', color: '#16a34a', bg: '#dcfce7' };
     return { label: 'Отклонено ❌', color: '#dc2626', bg: '#fee2e2' };
+  };
+
+  // Проверка, является ли ссылка изображением
+  const isImageUrl = (url: string): boolean => {
+    if (!url) return false;
+    return url.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i) !== null ||
+           url.includes('/photo') ||
+           url.includes('sun9-') ||
+           url.includes('vk.com/photo') ||
+           url.startsWith('/uploads/');
   };
 
   return (
@@ -817,7 +831,7 @@ export const AdminVkBotPage: React.FC = () => {
                         <div style={{ marginBottom: '12px' }}>
                           {isLoadingMedia ? (
                             <div style={{ display: 'flex', gap: '8px', padding: '8px 0' }}>
-                              <div style={{ width: '80px', height: '80px', borderRadius: '8px', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <div style={{ width: '100px', height: '100px', borderRadius: '8px', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 <span style={{ fontSize: '12px', color: '#94a3b8' }}>Загрузка...</span>
                               </div>
                             </div>
@@ -828,9 +842,8 @@ export const AdminVkBotPage: React.FC = () => {
                               </div>
                               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                                 {mediaFiles.map((media, idx) => {
-                                  const isImage = media.file_type === 'image' || 
-                                    media.original_name?.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i) ||
-                                    media.file_url?.includes('/photo');
+                                  const isImage = isImageUrl(media.file_url);
+                                  const isVkFile = media.file_url?.includes('vk.com/');
                                   
                                   return (
                                     <div 
@@ -852,18 +865,27 @@ export const AdminVkBotPage: React.FC = () => {
                                       onMouseEnter={(e) => {
                                         if (isImage) {
                                           e.currentTarget.style.transform = 'scale(1.05)';
+                                          e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
                                         }
                                       }}
                                       onMouseLeave={(e) => {
                                         e.currentTarget.style.transform = 'scale(1)';
+                                        e.currentTarget.style.boxShadow = 'none';
                                       }}
-                                      onClick={() => isImage && setLightboxImage(media.file_url)}
+                                      onClick={() => {
+                                        if (isImage && media.file_url) {
+                                          setLightboxImage(media.file_url);
+                                        } else if (media.file_url) {
+                                          window.open(media.file_url, '_blank');
+                                        }
+                                      }}
                                     >
                                       {isImage ? (
                                         <img 
                                           src={media.file_url} 
                                           alt={media.original_name || 'Фото'}
                                           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                          loading="lazy"
                                           onError={(e) => {
                                             const target = e.target as HTMLImageElement;
                                             target.style.display = 'none';
@@ -872,8 +894,14 @@ export const AdminVkBotPage: React.FC = () => {
                                               const iconDiv = document.createElement('div');
                                               iconDiv.style.textAlign = 'center';
                                               iconDiv.style.padding = '8px';
+                                              iconDiv.style.display = 'flex';
+                                              iconDiv.style.flexDirection = 'column';
+                                              iconDiv.style.alignItems = 'center';
+                                              iconDiv.style.justifyContent = 'center';
+                                              iconDiv.style.width = '100%';
+                                              iconDiv.style.height = '100%';
                                               iconDiv.innerHTML = `
-                                                <div style="font-size:32px;">📷</div>
+                                                <div style="font-size:32px;">🖼️</div>
                                                 <span style="font-size:8px;color:#94a3b8;display:block;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${media.original_name || 'Фото'}</span>
                                               `;
                                               parent.appendChild(iconDiv);
@@ -881,9 +909,9 @@ export const AdminVkBotPage: React.FC = () => {
                                           }}
                                         />
                                       ) : (
-                                        <div style={{ textAlign: 'center', padding: '8px' }}>
+                                        <div style={{ textAlign: 'center', padding: '8px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
                                           {getFileIcon(media.file_type, media.original_name || '')}
-                                          <span style={{ fontSize: '8px', color: '#64748b', display: 'block', maxWidth: '80px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                          <span style={{ fontSize: '8px', color: '#64748b', display: 'block', maxWidth: '80px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '4px' }}>
                                             {media.original_name || 'Файл'}
                                           </span>
                                         </div>
@@ -913,6 +941,7 @@ export const AdminVkBotPage: React.FC = () => {
                                         }}
                                         onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
                                         onMouseLeave={(e) => e.currentTarget.style.opacity = '0'}
+                                        title="Скачать файл"
                                       >
                                         <Download size={14} />
                                       </button>
@@ -921,7 +950,9 @@ export const AdminVkBotPage: React.FC = () => {
                                         <button
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            setLightboxImage(media.file_url);
+                                            if (media.file_url) {
+                                              setLightboxImage(media.file_url);
+                                            }
                                           }}
                                           style={{
                                             position: 'absolute',
@@ -941,6 +972,7 @@ export const AdminVkBotPage: React.FC = () => {
                                           }}
                                           onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
                                           onMouseLeave={(e) => e.currentTarget.style.opacity = '0'}
+                                          title="Увеличить"
                                         >
                                           <ZoomIn size={14} />
                                         </button>
@@ -1050,6 +1082,7 @@ export const AdminVkBotPage: React.FC = () => {
                 cursor: 'pointer',
                 zIndex: 10,
                 opacity: 0.7,
+                transition: 'opacity 0.2s',
               }}
               onClick={(e) => {
                 e.stopPropagation();
@@ -1060,18 +1093,49 @@ export const AdminVkBotPage: React.FC = () => {
             >
               <XCircle size={36} />
             </button>
-            <img
-              src={lightboxImage}
-              alt="Просмотр"
+            
+            <div
               style={{
+                position: 'relative',
                 maxWidth: '90vw',
                 maxHeight: '90vh',
-                objectFit: 'contain',
-                borderRadius: '8px',
-                boxShadow: '0 20px 60px rgba(0,0,0,0.5)'
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
               onClick={(e) => e.stopPropagation()}
-            />
+            >
+              <img
+                src={lightboxImage}
+                alt="Просмотр"
+                style={{
+                  maxWidth: '90vw',
+                  maxHeight: '85vh',
+                  objectFit: 'contain',
+                  borderRadius: '8px',
+                  boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+                }}
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement;
+                  target.style.display = 'none';
+                  const parent = target.parentElement;
+                  if (parent) {
+                    const errorDiv = document.createElement('div');
+                    errorDiv.style.textAlign = 'center';
+                    errorDiv.style.color = '#fff';
+                    errorDiv.style.padding = '40px';
+                    errorDiv.innerHTML = `
+                      <div style="font-size:48px;margin-bottom:16px;">🖼️</div>
+                      <p style="font-size:16px;opacity:0.7;">Не удалось загрузить изображение</p>
+                      <p style="font-size:14px;opacity:0.5;margin-top:8px;word-break:break-all;">${lightboxImage}</p>
+                      <a href="${lightboxImage}" target="_blank" rel="noopener noreferrer" style="color:#3b82f6;text-decoration:underline;display:inline-block;margin-top:12px;">🔗 Открыть в новой вкладке</a>
+                    `;
+                    parent.appendChild(errorDiv);
+                  }
+                }}
+              />
+            </div>
+            
             <button
               style={{
                 position: 'absolute',
@@ -1088,20 +1152,31 @@ export const AdminVkBotPage: React.FC = () => {
                 gap: '8px',
                 fontSize: '14px',
                 backdropFilter: 'blur(10px)',
+                transition: 'background 0.2s',
               }}
               onClick={(e) => {
                 e.stopPropagation();
-                const link = document.createElement('a');
-                link.href = lightboxImage;
-                link.download = 'image.jpg';
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+                if (lightboxImage) {
+                  if (lightboxImage.includes('vk.com/')) {
+                    window.open(lightboxImage, '_blank');
+                  } else {
+                    const link = document.createElement('a');
+                    link.href = lightboxImage;
+                    link.download = 'image.jpg';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }
+                }
               }}
               onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.3)'}
               onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.2)'}
             >
-              <Download size={18} /> Скачать
+              {lightboxImage?.includes('vk.com/') ? (
+                <>🔗 Открыть в VK</>
+              ) : (
+                <><Download size={18} /> Скачать</>
+              )}
             </button>
           </div>
         )}
