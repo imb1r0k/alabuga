@@ -148,7 +148,7 @@ export const autoBook = async (payload: any) => {
   return response.data;
 };
 
-// ─── Экспорт (Админка) ───────────────────────────────────────────────────────
+// ─── Экспорт и Очистка (Админка) ──────────────────────────────────────────────
 
 export const getExportBookings = async () => {
   const response = await api.get('/admin/export/bookings');
@@ -157,6 +157,21 @@ export const getExportBookings = async () => {
 
 export const getExportLayouts = async () => {
   const response = await api.get('/admin/export/layouts');
+  return response.data;
+};
+
+export const archiveAllBookings = async () => {
+  const response = await api.post('/admin/archive-bookings');
+  return response.data;
+};
+
+export const archiveAllUsers = async () => {
+  const response = await api.post('/admin/archive-users');
+  return response.data;
+};
+
+export const clearAllTeamChats = async () => {
+  const response = await api.post('/admin/teams/clear-all-chats');
   return response.data;
 };
 
