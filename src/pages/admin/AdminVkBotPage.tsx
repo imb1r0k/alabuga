@@ -13,6 +13,7 @@ import {
   getVkBotReports,
   updateVkBotReportStatus,
   getVkBotTickets,
+  getVkBotReportMedia,
 } from '../../services/api';
 import {
   Bot,
@@ -169,24 +170,21 @@ export const AdminVkBotPage: React.FC = () => {
     }
   };
 
-  // Функция для получения медиафайлов через API
-  const fetchReportMedia = async (reportId: number): Promise<MediaFile[]> => {
+  const loadReportMedia = async (reportId: number) => {
+    setLoadingMedia(prev => ({ ...prev, [reportId]: true }));
     try {
-      // Используем API для получения медиафайлов
-      const response = await fetch(`/api/admin/vk-bot/reports/media?report_id=${reportId}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        return Array.isArray(data) ? data : [];
+      // Реальный API запрос для получения медиафайлов
+      const data = await getVkBotReportMedia(reportId);
+      const mediaFiles = Array.isArray(data) ? data : [];
+      setReportMedia(prev => ({ ...prev, [reportId]: mediaFiles }));
+      if (mediaFiles.length > 0) {
+        console.log(`📎 Медиа для отчета ${reportId}:`, mediaFiles);
       }
-      return [];
     } catch (err) {
       console.error('Ошибка загрузки медиа:', err);
-      return [];
+      setReportMedia(prev => ({ ...prev, [reportId]: [] }));
+    } finally {
+      setLoadingMedia(prev => ({ ...prev, [reportId]: false }));
     }
   };
 
@@ -203,19 +201,6 @@ export const AdminVkBotPage: React.FC = () => {
     } catch (err) {
       console.error('Ошибка загрузки отчетов:', err);
       setReports([]);
-    }
-  };
-
-  const loadReportMedia = async (reportId: number) => {
-    setLoadingMedia(prev => ({ ...prev, [reportId]: true }));
-    try {
-      const mediaFiles = await fetchReportMedia(reportId);
-      setReportMedia(prev => ({ ...prev, [reportId]: mediaFiles }));
-    } catch (err) {
-      console.error('Ошибка загрузки медиа:', err);
-      setReportMedia(prev => ({ ...prev, [reportId]: [] }));
-    } finally {
-      setLoadingMedia(prev => ({ ...prev, [reportId]: false }));
     }
   };
 
@@ -411,15 +396,6 @@ export const AdminVkBotPage: React.FC = () => {
     if (status === 'pending') return { label: 'На рассмотрении', color: '#f59e0b', bg: '#fef3c7' };
     if (status === 'approved') return { label: 'Принято ✅', color: '#16a34a', bg: '#dcfce7' };
     return { label: 'Отклонено ❌', color: '#dc2626', bg: '#fee2e2' };
-  };
-
-  // Определение типа файла по ссылке VK
-  const getFileTypeFromUrl = (url: string): string => {
-    if (url.includes('/photo')) return 'image';
-    if (url.includes('/video')) return 'video';
-    if (url.includes('/doc')) return 'document';
-    if (url.includes('/audio')) return 'audio';
-    return 'file';
   };
 
   return (
@@ -889,7 +865,6 @@ export const AdminVkBotPage: React.FC = () => {
                                           alt={media.original_name || 'Фото'}
                                           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                           onError={(e) => {
-                                            // Если фото не загрузилось, показываем иконку
                                             const target = e.target as HTMLImageElement;
                                             target.style.display = 'none';
                                             const parent = target.parentElement;
