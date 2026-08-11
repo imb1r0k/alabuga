@@ -8,6 +8,7 @@ import random
 import string
 import os
 import requests
+import json
 from urllib.parse import urlparse
 
 logging.basicConfig(level=logging.INFO)
@@ -259,49 +260,110 @@ def download_vk_attachment(attachment, vk_session, upload_dir=UPLOAD_DIR):
     Возвращает словарь с информацией о файле или None.
     """
     try:
-        # Получаем тип и URL вложения
+        # Получаем тип и данные вложения
+        # attachment может быть как словарем, так и строкой
+        if isinstance(attachment, str):
+            # Если пришла строка, пробуем распарсить как JSON
+            try:
+                attachment = json.loads(attachment)
+            except:
+                logger.error(f"Не удалось распарсить вложение: {attachment}")
+                return None
+        
+        # Проверяем, что attachment - это словарь
+        if not isinstance(attachment, dict):
+            logger.error(f"Вложение не является словарем: {type(attachment)}")
+            return None
+        
         attach_type = attachment.get('type')
+        if not attach_type:
+            logger.error(f"Не удалось определить тип вложения: {attachment}")
+            return None
+        
+        # Получаем данные вложения
         attach_data = attachment.get(attach_type, {})
+        if not attach_data:
+            # Пробуем получить данные напрямую из attachment
+            attach_data = attachment
         
         # Определяем URL для скачивания
         file_url = None
         file_name = None
         file_size = 0
         
+        # Для фото - ищем URL в разных местах
         if attach_type == 'photo':
-            # Для фото берем самую большую версию
+            # Пробуем получить URL из sizes
             sizes = attach_data.get('sizes', [])
             if sizes:
                 # Сортируем по размеру (берем самую большую)
                 sizes.sort(key=lambda x: x.get('width', 0) * x.get('height', 0), reverse=True)
                 file_url = sizes[0].get('url')
                 file_name = f"photo_{attach_data.get('id', random.randint(1000, 9999))}.jpg"
-                file_size = 0  # VK не возвращает размер в API
+            else:
+                # Пробуем другие поля
+                for key in ['photo_2560', 'photo_1280', 'photo_807', 'photo_604', 'photo_130', 'photo_75']:
+                    if attach_data.get(key):
+                        file_url = attach_data[key]
+                        break
+                if file_url:
+                    file_name = f"photo_{attach_data.get('id', random.randint(1000, 9999))}.jpg"
+        
         elif attach_type == 'video':
+            # Для видео - пробуем получить ссылку
             file_url = attach_data.get('player')
+            if not file_url:
+                file_url = attach_data.get('video', {}).get('player')
             if file_url:
                 file_name = f"video_{attach_data.get('id', random.randint(1000, 9999))}.mp4"
+        
         elif attach_type == 'doc':
+            # Для документов
             file_url = attach_data.get('url')
+            if not file_url:
+                file_url = attach_data.get('doc', {}).get('url')
             original_name = attach_data.get('title', 'document')
             ext = attach_data.get('ext', '')
-            file_name = f"{original_name}.{ext}" if ext else original_name
+            if not ext:
+                ext = attach_data.get('doc', {}).get('ext', '')
+            file_name = f"{original_name}.{ext}" if ext else f"{original_name}.file"
             file_size = attach_data.get('size', 0)
+            if not file_size:
+                file_size = attach_data.get('doc', {}).get('size', 0)
+        
         elif attach_type == 'audio':
             file_url = attach_data.get('url')
+            if not file_url:
+                file_url = attach_data.get('audio', {}).get('url')
             file_name = f"audio_{attach_data.get('id', random.randint(1000, 9999))}.mp3"
+        
         elif attach_type == 'link':
-            # Для ссылок просто сохраняем URL как текст
+            # Для ссылок
+            url = attach_data.get('url', '')
+            if not url:
+                url = attach_data.get('link', {}).get('url', '')
             return {
                 'file_type': 'link',
-                'file_url': attach_data.get('url', ''),
+                'file_url': url,
                 'original_name': attach_data.get('title', 'Ссылка'),
                 'file_size': 0
             }
+        
+        elif attach_type == 'wall':
+            # Для записей на стене - сохраняем ссылку
+            return {
+                'file_type': 'link',
+                'file_url': f"https://vk.com/wall{attach_data.get('owner_id', '')}_{attach_data.get('id', '')}",
+                'original_name': 'Запись на стене',
+                'file_size': 0
+            }
+        
         else:
+            logger.warning(f"Неизвестный тип вложения: {attach_type}")
             return None
         
         if not file_url:
+            logger.warning(f"Не удалось получить URL для вложения типа {attach_type}")
             return None
         
         # Определяем расширение файла
@@ -329,16 +391,17 @@ def download_vk_attachment(attachment, vk_session, upload_dir=UPLOAD_DIR):
             return None
         
         # Создаем директорию если её нет
-        full_upload_dir = os.path.join(os.path.dirname(__file__), '..', '..', upload_dir)
+        full_upload_dir = os.path.join(os.path.dirname(__file__), '..', 'uploads', 'vk_bot')
         if not os.path.exists(full_upload_dir):
             os.makedirs(full_upload_dir, exist_ok=True)
         
         # Генерируем уникальное имя файла
         unique_name = f"{hashlib.md5(f"{file_name}{random.randint(1000, 9999)}".encode()).hexdigest()[:12]}.{extension}"
         local_path = os.path.join(full_upload_dir, unique_name)
-        web_path = f"/{upload_dir}{unique_name}"
+        web_path = f"/uploads/vk_bot/{unique_name}"
         
         # Скачиваем файл
+        logger.info(f"Скачивание файла: {file_url}")
         response = requests.get(file_url, stream=True, timeout=30, headers={
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
@@ -361,16 +424,18 @@ def download_vk_attachment(attachment, vk_session, upload_dir=UPLOAD_DIR):
         
         # Определяем тип файла
         file_type = 'file'
-        if extension in ALLOWED_EXTENSIONS.get('image', []):
+        if extension.lower() in ALLOWED_EXTENSIONS.get('image', []):
             file_type = 'image'
-        elif extension in ALLOWED_EXTENSIONS.get('video', []):
+        elif extension.lower() in ALLOWED_EXTENSIONS.get('video', []):
             file_type = 'video'
-        elif extension in ALLOWED_EXTENSIONS.get('audio', []):
+        elif extension.lower() in ALLOWED_EXTENSIONS.get('audio', []):
             file_type = 'audio'
-        elif extension in ALLOWED_EXTENSIONS.get('archive', []):
+        elif extension.lower() in ALLOWED_EXTENSIONS.get('archive', []):
             file_type = 'archive'
-        elif extension in ALLOWED_EXTENSIONS.get('document', []):
+        elif extension.lower() in ALLOWED_EXTENSIONS.get('document', []):
             file_type = 'document'
+        
+        logger.info(f"Файл сохранен: {web_path} ({actual_size} bytes)")
         
         return {
             'file_type': file_type,
@@ -396,7 +461,24 @@ def process_vk_attachments(attachments, vk_session):
     saved_files = []
     text_parts = []
     
+    # attachments может быть списком или объектом
+    if not isinstance(attachments, list):
+        # Если это не список, пробуем преобразовать
+        if hasattr(attachments, '__iter__'):
+            attachments = list(attachments)
+        else:
+            attachments = [attachments]
+    
     for attach in attachments:
+        # Если attachment - это строка, пробуем распарсить
+        if isinstance(attach, str):
+            try:
+                attach = json.loads(attach)
+            except:
+                # Может быть просто ID или ссылка
+                text_parts.append(f"📎 {attach}")
+                continue
+        
         result = download_vk_attachment(attach, vk_session)
         if result:
             if result.get('file_type') == 'link':
