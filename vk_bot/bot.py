@@ -156,6 +156,17 @@ def main():
             attachments = []
             if event.attachments:
                 attachments = event.attachments
+                logger.info(f"=== ВЛОЖЕНИЯ ПОЛУЧЕНЫ ===")
+                logger.info(f"Тип attachments: {type(attachments)}")
+                logger.info(f"Количество вложений: {len(attachments)}")
+                for i, attach in enumerate(attachments):
+                    logger.info(f"Вложение {i}: {attach}")
+                    if isinstance(attach, dict):
+                        logger.info(f"  Ключи: {attach.keys()}")
+                        if 'type' in attach:
+                            logger.info(f"  Тип: {attach['type']}")
+                            attach_data = attach.get(attach['type'], {})
+                            logger.info(f"  Данные: {attach_data}")
 
             try:
                 user_info = vk.users.get(user_ids=vk_id)[0]
