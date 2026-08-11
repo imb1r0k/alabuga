@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from './Toast';
 import { bookRoom } from '../services/api';
 import { formatPhoneInput } from '../utils/phone';
+import { detectGenderByLastName } from '../utils/gender';
 
 interface BookingModalProps {
   room: any;
@@ -41,6 +42,22 @@ export const BookingModal: React.FC<BookingModalProps> = ({ room, buildingName, 
     e.preventDefault();
     setError('');
     setLoading(true);
+
+    // ─── Фронтенд-проверка соответствия пола пользователя и комнаты ───
+    // Логика определения пола скопирована из PHP (detectGenderByLastName)
+    const detectedGender = detectGenderByLastName(lastName);
+    const roomGender = room?.gender;
+    if (
+      detectedGender &&
+      (roomGender === 'M' || roomGender === 'F') &&
+      detectedGender !== roomGender
+    ) {
+      const errorMsg = 'Ваш пол не соответствует полу комнаты';
+      setError(errorMsg);
+      showToast(errorMsg, 'error');
+      setLoading(false);
+      return;
+    }
 
     try {
       // Если пользователь авторизован — используем его токен и отправляем бронь
