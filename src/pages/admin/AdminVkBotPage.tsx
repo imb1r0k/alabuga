@@ -13,6 +13,8 @@ import {
   getVkBotReports,
   updateVkBotReportStatus,
   getVkBotTickets,
+  getVkBotReportMedia,
+  sendVkBotBroadcast,
 } from '../../services/api';
 import {
   Bot,
@@ -167,7 +169,6 @@ export const AdminVkBotPage: React.FC = () => {
     }
   };
 
-  // Загрузка медиафайлов отчета
   const fetchReportMedia = async (reportId: number): Promise<MediaFile[]> => {
     try {
       const response = await fetch(`/api/admin/vk-bot/reports/media?report_id=${reportId}`, {
@@ -205,6 +206,9 @@ export const AdminVkBotPage: React.FC = () => {
     try {
       const mediaFiles = await fetchReportMedia(reportId);
       setReportMedia(prev => ({ ...prev, [reportId]: mediaFiles }));
+      if (mediaFiles.length > 0) {
+        console.log(`📎 Медиа для отчета ${reportId}:`, mediaFiles);
+      }
     } catch (err) {
       console.error('Ошибка загрузки медиа:', err);
       setReportMedia(prev => ({ ...prev, [reportId]: [] }));
@@ -354,9 +358,11 @@ export const AdminVkBotPage: React.FC = () => {
 
     setBroadcastLoading(true);
     try {
-      showToast(`Рассылка запущена для ${broadcastRecipients} пользователей`, 'success');
+      const response = await sendVkBotBroadcast(broadcastMessage, broadcastRecipients);
+      showToast(response.message || 'Рассылка успешно отправлена', 'success');
       setBroadcastMessage('');
     } catch (err: any) {
+      console.error('Ошибка отправки рассылки:', err);
       showToast('Ошибка отправки рассылки: ' + (err.response?.data?.error || err.message), 'error');
     } finally {
       setBroadcastLoading(false);
@@ -365,6 +371,11 @@ export const AdminVkBotPage: React.FC = () => {
 
   // Скачивание файла
   const handleDownloadFile = (fileUrl: string, fileName: string) => {
+    if (fileUrl.includes('vk.com/') || fileUrl.includes('sun9-')) {
+      window.open(fileUrl, '_blank');
+      return;
+    }
+    
     const link = document.createElement('a');
     link.href = fileUrl;
     link.download = fileName;
@@ -909,7 +920,6 @@ export const AdminVkBotPage: React.FC = () => {
                                         </div>
                                       )}
                                       
-                                      {/* Кнопка скачивания */}
                                       <button
                                         onClick={(e) => {
                                           e.stopPropagation();
