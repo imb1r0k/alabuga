@@ -8,3 +8,15 @@ RewriteRule .* - [e=HTTP_AUTHORIZATION:%1]
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.php [QSA,L]
+
+<FilesMatch "\.(htaccess|php|phtml|php3|php4|php5|php7|phps|cgi|pl|py|sh|exe|bat|cmd|com|scr|vbs|js|jar)$">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>
+
+<Directory "uploads">
+    Options -Indexes
+    AllowOverride None
+    Order Allow,Deny
+    Allow from all
+</Directory>
