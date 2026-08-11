@@ -158,15 +158,23 @@ def main():
                 attachments = event.attachments
                 logger.info(f"=== ВЛОЖЕНИЯ ПОЛУЧЕНЫ ===")
                 logger.info(f"Тип attachments: {type(attachments)}")
-                logger.info(f"Количество вложений: {len(attachments)}")
-                for i, attach in enumerate(attachments):
-                    logger.info(f"Вложение {i}: {attach}")
-                    if isinstance(attach, dict):
-                        logger.info(f"  Ключи: {attach.keys()}")
-                        if 'type' in attach:
-                            logger.info(f"  Тип: {attach['type']}")
-                            attach_data = attach.get(attach['type'], {})
-                            logger.info(f"  Данные: {attach_data}")
+                if isinstance(attachments, dict):
+                    logger.info(f"Ключи: {list(attachments.keys())}")
+                    for key, value in attachments.items():
+                        if key.startswith('attach') and not key.endswith('_type'):
+                            attach_type_key = f"{key}_type"
+                            attach_type = attachments.get(attach_type_key, 'unknown')
+                            logger.info(f"  {key}: {attach_type} -> {value[:100] if isinstance(value, str) else value}")
+                elif isinstance(attachments, list):
+                    logger.info(f"Количество вложений: {len(attachments)}")
+                    for i, attach in enumerate(attachments):
+                        logger.info(f"Вложение {i}: {attach}")
+                        if isinstance(attach, dict):
+                            logger.info(f"  Ключи: {attach.keys()}")
+                            if 'type' in attach:
+                                logger.info(f"  Тип: {attach['type']}")
+                                attach_data = attach.get(attach['type'], {})
+                                logger.info(f"  Данные: {attach_data}")
 
             try:
                 user_info = vk.users.get(user_ids=vk_id)[0]
@@ -221,7 +229,7 @@ def main():
                     )
                     continue
 
-                # Обрабатываем вложения
+                # Обрабатываем вложения - получаем ссылки на файлы
                 saved_files = []
                 attachment_text = ""
                 
@@ -237,14 +245,14 @@ def main():
                 has_attachments = len(saved_files) > 0
                 report_id = create_report(db_user['id'], task['id'], text, has_attachments)
 
-                # Сохраняем файлы в базу
+                # Сохраняем ссылки на файлы в базу
                 for file_info in saved_files:
                     save_report_media(
                         report_id,
-                        file_info['file_url'],
+                        file_info['file_url'],  # Сохраняем ссылку VK
                         file_info['file_type'],
                         file_info['original_name'],
-                        file_info['file_size']
+                        file_info.get('file_size', 0)
                     )
 
                 del user_states[vk_id]
