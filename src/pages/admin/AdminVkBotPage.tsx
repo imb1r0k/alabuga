@@ -133,7 +133,7 @@ export const AdminVkBotPage: React.FC = () => {
   const loadSettings = async () => {
     try {
       const data = await getVkBotSettings();
-      if (data) {
+      if (data && typeof data === 'object') {
         setSettings((prev) => ({ ...prev, ...data }));
       }
     } catch (err) {
@@ -144,43 +144,48 @@ export const AdminVkBotPage: React.FC = () => {
   const loadGroups = async () => {
     try {
       const data = await getVkBotTaskGroups();
-      setGroups(data);
-      if (data.length > 0 && !selectedGroupId) {
-        setSelectedGroupId(data[0].id);
+      // Проверяем, что data - это массив
+      const groupsData = Array.isArray(data) ? data : [];
+      setGroups(groupsData);
+      if (groupsData.length > 0 && !selectedGroupId) {
+        setSelectedGroupId(groupsData[0].id);
       }
     } catch (err) {
-      console.error(err);
+      console.error('Ошибка загрузки групп:', err);
+      setGroups([]);
     }
   };
 
   const loadTasks = async (gId: number) => {
     try {
       const data = await getVkBotTasks(gId);
-      setTasks(data);
+      setTasks(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error(err);
+      console.error('Ошибка загрузки заданий:', err);
+      setTasks([]);
     }
   };
 
   const loadReports = async (st: string) => {
     try {
       const data = await getVkBotReports(st);
-      setReports(data);
+      const reportsData = Array.isArray(data) ? data : [];
+      setReports(reportsData);
       // Загружаем медиа для каждого отчета
-      data.forEach(report => {
+      reportsData.forEach(report => {
         loadReportMedia(report.id);
       });
     } catch (err) {
-      console.error(err);
+      console.error('Ошибка загрузки отчетов:', err);
+      setReports([]);
     }
   };
 
   const loadReportMedia = async (reportId: number) => {
     try {
       // Здесь должен быть API запрос для получения медиафайлов
-      // Для примера используем заглушку
-      const mockMedia = [];
       // В реальном проекте будет API: getReportMedia(reportId)
+      const mockMedia: MediaFile[] = [];
       setReportMedia(prev => ({ ...prev, [reportId]: mockMedia }));
     } catch (err) {
       console.error('Ошибка загрузки медиа:', err);
@@ -190,9 +195,10 @@ export const AdminVkBotPage: React.FC = () => {
   const loadTickets = async (gId?: number) => {
     try {
       const data = await getVkBotTickets(gId);
-      setTickets(data);
+      setTickets(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error(err);
+      console.error('Ошибка загрузки билетов:', err);
+      setTickets([]);
     }
   };
 
@@ -415,6 +421,7 @@ export const AdminVkBotPage: React.FC = () => {
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
+            const pendingCount = Array.isArray(reports) ? reports.filter(r => r.status === 'pending').length : 0;
             return (
               <button
                 key={tab.id}
@@ -438,7 +445,7 @@ export const AdminVkBotPage: React.FC = () => {
               >
                 <Icon size={18} />
                 {tab.label}
-                {tab.id === 'reports' && reports.filter(r => r.status === 'pending').length > 0 && (
+                {tab.id === 'reports' && pendingCount > 0 && (
                   <span style={{
                     backgroundColor: '#ef4444',
                     color: '#fff',
@@ -447,7 +454,7 @@ export const AdminVkBotPage: React.FC = () => {
                     borderRadius: '10px',
                     marginLeft: '4px'
                   }}>
-                    {reports.filter(r => r.status === 'pending').length}
+                    {pendingCount}
                   </span>
                 )}
               </button>
@@ -467,7 +474,7 @@ export const AdminVkBotPage: React.FC = () => {
 
             {/* Карточки групп заданий */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-              {groups.length === 0 ? (
+              {!Array.isArray(groups) || groups.length === 0 ? (
                 <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '32px', color: '#94a3b8' }}>
                   Нет созданных групп заданий
                 </div>
@@ -528,8 +535,8 @@ export const AdminVkBotPage: React.FC = () => {
                       </p>
 
                       <div style={{ display: 'flex', gap: '12px', fontSize: '12px', color: '#64748b', borderTop: '1px solid rgba(0,0,0,0.08)', paddingTop: '8px' }}>
-                        <span>📋 Заданий: {g.tasks_count}</span>
-                        <span>🎟 Билетов: {g.tickets_issued}</span>
+                        <span>📋 Заданий: {g.tasks_count || 0}</span>
+                        <span>🎟 Билетов: {g.tickets_issued || 0}</span>
                       </div>
                     </div>
                   );
@@ -542,14 +549,14 @@ export const AdminVkBotPage: React.FC = () => {
               <div style={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '20px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
                   <h3 style={{ margin: 0, fontSize: '18px', color: '#0f172a' }}>
-                    Задания волны «{groups.find((g) => g.id === selectedGroupId)?.title}»
+                    Задания волны «{Array.isArray(groups) ? groups.find((g) => g.id === selectedGroupId)?.title : ''}»
                   </h3>
                   <button className="btn btn-primary" onClick={() => handleOpenTaskModal()} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <Plus size={16} /> Добавить задание
                   </button>
                 </div>
 
-                {tasks.length === 0 ? (
+                {!Array.isArray(tasks) || tasks.length === 0 ? (
                   <p style={{ color: '#94a3b8', fontStyle: 'italic', textAlign: 'center', padding: '24px' }}>
                     В этой группе еще нет заданий
                   </p>
@@ -567,7 +574,6 @@ export const AdminVkBotPage: React.FC = () => {
                           border: '1px solid #e2e8f0', 
                           backgroundColor: '#fff',
                           transition: 'all 0.2s',
-                          ':hover': { borderColor: '#94a3b8' }
                         }}>
                           <div style={{ flex: 1 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
@@ -593,7 +599,7 @@ export const AdminVkBotPage: React.FC = () => {
                               </span>
                             </div>
                             <p style={{ margin: 0, fontSize: '13px', color: '#475569', maxWidth: '600px' }}>
-                              {t.description.length > 100 ? t.description.slice(0, 100) + '...' : t.description}
+                              {t.description && t.description.length > 100 ? t.description.slice(0, 100) + '...' : t.description || ''}
                             </p>
                           </div>
                           <div style={{ display: 'flex', gap: '6px', marginLeft: '12px' }}>
@@ -629,7 +635,7 @@ export const AdminVkBotPage: React.FC = () => {
               <h3 style={{ margin: 0, fontSize: '18px', color: '#0f172a' }}>Проверка отчетов</h3>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                 {(['pending', 'approved', 'rejected', 'all'] as const).map((st) => {
-                  const count = reports.filter(r => r.status === st).length;
+                  const count = Array.isArray(reports) ? reports.filter(r => r.status === st).length : 0;
                   return (
                     <button
                       key={st}
@@ -647,7 +653,7 @@ export const AdminVkBotPage: React.FC = () => {
               </div>
             </div>
 
-            {reports.length === 0 ? (
+            {!Array.isArray(reports) || reports.length === 0 ? (
               <div style={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', textAlign: 'center', padding: '48px', color: '#94a3b8' }}>
                 <CheckCircle2 size={48} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
                 <p>Отчетов в этой категории пока нет</p>
@@ -685,16 +691,18 @@ export const AdminVkBotPage: React.FC = () => {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                           <div>
                             <strong style={{ fontSize: '15px', color: '#0f172a' }}>
-                              {r.user_first_name} {r.user_last_name}
+                              {r.user_first_name || ''} {r.user_last_name || ''}
                             </strong>
-                            <a
-                              href={`https://vk.com/id${r.vk_id}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              style={{ marginLeft: '8px', fontSize: '13px', color: '#0284c7', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                            >
-                              vk.com/id{r.vk_id} <ExternalLink size={12} />
-                            </a>
+                            {r.vk_id && (
+                              <a
+                                href={`https://vk.com/id${r.vk_id}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ marginLeft: '8px', fontSize: '13px', color: '#0284c7', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              >
+                                vk.com/id{r.vk_id} <ExternalLink size={12} />
+                              </a>
+                            )}
                           </div>
                           <span style={{
                             fontSize: '11px',
@@ -718,7 +726,7 @@ export const AdminVkBotPage: React.FC = () => {
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <span style={{ fontSize: '12px', color: '#64748b' }}>
-                            {new Date(r.created_at).toLocaleString('ru-RU')}
+                            {r.created_at ? new Date(r.created_at).toLocaleString('ru-RU') : ''}
                           </span>
                           <button
                             onClick={() => setExpandedReportId(isExpanded ? null : r.id)}
@@ -733,7 +741,7 @@ export const AdminVkBotPage: React.FC = () => {
                       <div style={{ padding: '16px 20px' }}>
                         <div style={{ marginBottom: '8px' }}>
                           <span style={{ fontSize: '12px', color: '#64748b' }}>📌 Задание:</span>
-                          <strong style={{ fontSize: '14px', color: '#0f172a', marginLeft: '8px' }}>{r.task_title}</strong>
+                          <strong style={{ fontSize: '14px', color: '#0f172a', marginLeft: '8px' }}>{r.task_title || ''}</strong>
                         </div>
 
                         <div style={{ 
@@ -748,8 +756,8 @@ export const AdminVkBotPage: React.FC = () => {
                           overflow: 'hidden',
                           position: 'relative'
                         }}>
-                          {r.submission_text}
-                          {!isExpanded && r.submission_text.length > 200 && (
+                          {r.submission_text || ''}
+                          {!isExpanded && r.submission_text && r.submission_text.length > 200 && (
                             <div style={{
                               position: 'absolute',
                               bottom: 0,
@@ -831,7 +839,7 @@ export const AdminVkBotPage: React.FC = () => {
                                     borderColor: '#16a34a'
                                   }}
                                 >
-                                  <Check size={16} /> Принять (+{r.points} баллов)
+                                  <Check size={16} /> Принять (+{r.points || 0} баллов)
                                 </button>
                                 <button 
                                   className="btn btn-danger" 
@@ -883,18 +891,18 @@ export const AdminVkBotPage: React.FC = () => {
                   style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff' }}
                 >
                   <option value="all">Все волны</option>
-                  {groups.map((g) => (
+                  {Array.isArray(groups) && groups.map((g) => (
                     <option key={g.id} value={g.id}>{g.title}</option>
                   ))}
                 </select>
                 <span style={{ fontSize: '13px', color: '#475569' }}>
-                  Всего: <strong>{tickets.length}</strong> билетов
+                  Всего: <strong>{Array.isArray(tickets) ? tickets.length : 0}</strong> билетов
                 </span>
               </div>
             </div>
 
             <div style={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-              {tickets.length === 0 ? (
+              {!Array.isArray(tickets) || tickets.length === 0 ? (
                 <p style={{ color: '#94a3b8', fontStyle: 'italic', textAlign: 'center', padding: '48px' }}>
                   🎫 В данной волне пока никто не получил лотерейный билет
                 </p>
@@ -912,20 +920,24 @@ export const AdminVkBotPage: React.FC = () => {
                     </thead>
                     <tbody>
                       {tickets.map((t) => (
-                        <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9', ':hover': { backgroundColor: '#f8fafc' } }}>
+                        <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                           <td style={{ padding: '12px 16px', fontWeight: 700, color: '#0284c7', fontFamily: 'monospace' }}>
-                            🎫 {t.ticket_number}
+                            🎫 {t.ticket_number || ''}
                           </td>
                           <td style={{ padding: '12px 16px' }}>
-                            <a href={`https://vk.com/id${t.vk_id}`} target="_blank" rel="noreferrer" style={{ color: '#0f172a', textDecoration: 'none', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                              {t.first_name} {t.last_name}
-                              <ExternalLink size={12} style={{ color: '#94a3b8' }} />
-                            </a>
+                            {t.vk_id ? (
+                              <a href={`https://vk.com/id${t.vk_id}`} target="_blank" rel="noreferrer" style={{ color: '#0f172a', textDecoration: 'none', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                {t.first_name || ''} {t.last_name || ''}
+                                <ExternalLink size={12} style={{ color: '#94a3b8' }} />
+                              </a>
+                            ) : (
+                              <span>{t.first_name || ''} {t.last_name || ''}</span>
+                            )}
                           </td>
-                          <td style={{ padding: '12px 16px', fontSize: '13px', color: '#475569' }}>{t.group_title}</td>
-                          <td style={{ padding: '12px 16px', fontWeight: 600, color: '#16a34a' }}>⭐ {t.total_points}</td>
+                          <td style={{ padding: '12px 16px', fontSize: '13px', color: '#475569' }}>{t.group_title || ''}</td>
+                          <td style={{ padding: '12px 16px', fontWeight: 600, color: '#16a34a' }}>⭐ {t.total_points || 0}</td>
                           <td style={{ padding: '12px 16px', color: '#64748b', fontSize: '13px' }}>
-                            {new Date(t.created_at).toLocaleDateString('ru-RU')}
+                            {t.created_at ? new Date(t.created_at).toLocaleDateString('ru-RU') : ''}
                           </td>
                         </tr>
                       ))}
