@@ -18,38 +18,38 @@ import {
   Bot,
   Calendar,
   CheckCircle2,
-  XCircle,
   Ticket,
   Settings2,
   Plus,
   Trash2,
   Check,
   X,
-  Clock,
-  Sparkles,
   ExternalLink,
-  MessageSquare,
-  Award,
-  Layers,
-  Image,
-  Paperclip,
   Send,
   Lock,
   Unlock,
   Edit,
   Eye,
   EyeOff,
-  Users,
-  Filter,
   RefreshCw,
-  Download
+  Image,
+  Paperclip,
+  Download,
+  ZoomIn,
+  XCircle,
+  File,
+  FileImage,
+  FileVideo,
+  FileAudio,
+  FileArchive,
+  FileText,
 } from 'lucide-react';
 
 interface MediaFile {
   id: number;
   report_id: number;
   file_url: string;
-  file_type: 'image' | 'file';
+  file_type: string;
   original_name: string;
   file_size: number;
 }
@@ -106,6 +106,10 @@ export const AdminVkBotPage: React.FC = () => {
 
   // Медиафайлы в отчетах
   const [reportMedia, setReportMedia] = useState<Record<number, MediaFile[]>>({});
+  const [loadingMedia, setLoadingMedia] = useState<Record<number, boolean>>({});
+  
+  // Модалка просмотра фото
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
   useEffect(() => {
     loadAllData();
@@ -144,7 +148,6 @@ export const AdminVkBotPage: React.FC = () => {
   const loadGroups = async () => {
     try {
       const data = await getVkBotTaskGroups();
-      // Проверяем, что data - это массив
       const groupsData = Array.isArray(data) ? data : [];
       setGroups(groupsData);
       if (groupsData.length > 0 && !selectedGroupId) {
@@ -182,13 +185,17 @@ export const AdminVkBotPage: React.FC = () => {
   };
 
   const loadReportMedia = async (reportId: number) => {
+    setLoadingMedia(prev => ({ ...prev, [reportId]: true }));
     try {
       // Здесь должен быть API запрос для получения медиафайлов
       // В реальном проекте будет API: getReportMedia(reportId)
+      // Пока используем мок-данные для демонстрации
       const mockMedia: MediaFile[] = [];
       setReportMedia(prev => ({ ...prev, [reportId]: mockMedia }));
     } catch (err) {
       console.error('Ошибка загрузки медиа:', err);
+    } finally {
+      setLoadingMedia(prev => ({ ...prev, [reportId]: false }));
     }
   };
 
@@ -333,8 +340,6 @@ export const AdminVkBotPage: React.FC = () => {
 
     setBroadcastLoading(true);
     try {
-      // Здесь должен быть API запрос для отправки рассылки
-      // await sendBroadcast(broadcastMessage, broadcastRecipients);
       showToast(`Рассылка запущена для ${broadcastRecipients} пользователей`, 'success');
       setBroadcastMessage('');
     } catch (err: any) {
@@ -342,6 +347,38 @@ export const AdminVkBotPage: React.FC = () => {
     } finally {
       setBroadcastLoading(false);
     }
+  };
+
+  // Скачивание файла
+  const handleDownloadFile = (fileUrl: string, fileName: string) => {
+    const link = document.createElement('a');
+    link.href = fileUrl;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Определение иконки для файла
+  const getFileIcon = (fileType: string, fileName: string) => {
+    const ext = fileName.split('.').pop()?.toLowerCase() || '';
+    
+    if (fileType === 'image' || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
+      return <FileImage size={24} color="#3b82f6" />;
+    }
+    if (fileType === 'video' || ['mp4', 'avi', 'mov', 'wmv', 'flv', 'mkv', 'webm'].includes(ext)) {
+      return <FileVideo size={24} color="#8b5cf6" />;
+    }
+    if (fileType === 'audio' || ['mp3', 'wav', 'ogg', 'flac', 'aac'].includes(ext)) {
+      return <FileAudio size={24} color="#ec4899" />;
+    }
+    if (fileType === 'archive' || ['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) {
+      return <FileArchive size={24} color="#f59e0b" />;
+    }
+    if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'rtf', 'odt'].includes(ext)) {
+      return <FileText size={24} color="#ef4444" />;
+    }
+    return <File size={24} color="#64748b" />;
   };
 
   const getDifficultyBadge = (difficulty: string) => {
@@ -573,7 +610,6 @@ export const AdminVkBotPage: React.FC = () => {
                           borderRadius: '8px', 
                           border: '1px solid #e2e8f0', 
                           backgroundColor: '#fff',
-                          transition: 'all 0.2s',
                         }}>
                           <div style={{ flex: 1 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
@@ -664,6 +700,8 @@ export const AdminVkBotPage: React.FC = () => {
                   const diff = getDifficultyBadge(r.difficulty);
                   const statusBadge = getStatusBadge(r.status);
                   const isExpanded = expandedReportId === r.id;
+                  const mediaFiles = reportMedia[r.id] || [];
+                  const isLoadingMedia = loadingMedia[r.id];
 
                   return (
                     <div 
@@ -771,39 +809,123 @@ export const AdminVkBotPage: React.FC = () => {
                         </div>
 
                         {/* Медиафайлы */}
-                        {reportMedia[r.id] && reportMedia[r.id].length > 0 && (
-                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
-                            {reportMedia[r.id].map((media, idx) => (
-                              <div key={idx} style={{
-                                width: '80px',
-                                height: '80px',
-                                borderRadius: '8px',
-                                border: '1px solid #e2e8f0',
-                                overflow: 'hidden',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                backgroundColor: '#f1f5f9',
-                                cursor: 'pointer'
-                              }}>
-                                {media.file_type === 'image' ? (
-                                  <img 
-                                    src={media.file_url} 
-                                    alt={media.original_name}
-                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                  />
-                                ) : (
-                                  <div style={{ textAlign: 'center', padding: '8px' }}>
-                                    <Paperclip size={24} color="#64748b" />
-                                    <span style={{ fontSize: '10px', color: '#64748b', display: 'block', maxWidth: '60px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                      {media.original_name}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                            ))}
+                        {isLoadingMedia ? (
+                          <div style={{ display: 'flex', gap: '8px', padding: '8px 0' }}>
+                            <div style={{ width: '80px', height: '80px', borderRadius: '8px', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <span style={{ fontSize: '12px', color: '#94a3b8' }}>Загрузка...</span>
+                            </div>
                           </div>
-                        )}
+                        ) : mediaFiles.length > 0 ? (
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+                            {mediaFiles.map((media, idx) => {
+                              const isImage = media.file_type === 'image' || 
+                                media.original_name.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i);
+                              
+                              return (
+                                <div key={idx} style={{
+                                  width: '80px',
+                                  height: '80px',
+                                  borderRadius: '8px',
+                                  border: '1px solid #e2e8f0',
+                                  overflow: 'hidden',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  backgroundColor: '#f1f5f9',
+                                  position: 'relative',
+                                  cursor: isImage ? 'pointer' : 'default',
+                                  transition: 'transform 0.2s',
+                                  ':hover': isImage ? { transform: 'scale(1.05)' } : {}
+                                }}
+                                onClick={() => isImage && setLightboxImage(media.file_url)}
+                                >
+                                  {isImage ? (
+                                    <img 
+                                      src={media.file_url} 
+                                      alt={media.original_name}
+                                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                      onError={(e) => {
+                                        (e.target as HTMLImageElement).style.display = 'none';
+                                        (e.target as HTMLImageElement).parentElement!.innerHTML = `
+                                          <div style="text-align:center;padding:8px;">
+                                            <File size={24} color="#94a3b8" />
+                                            <span style="font-size:8px;color:#94a3b8;display:block;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${media.original_name}</span>
+                                          </div>
+                                        `;
+                                      }}
+                                    />
+                                  ) : (
+                                    <div style={{ textAlign: 'center', padding: '8px' }}>
+                                      {getFileIcon(media.file_type, media.original_name)}
+                                      <span style={{ fontSize: '8px', color: '#64748b', display: 'block', maxWidth: '60px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {media.original_name}
+                                      </span>
+                                    </div>
+                                  )}
+                                  
+                                  {/* Кнопка скачивания */}
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDownloadFile(media.file_url, media.original_name);
+                                    }}
+                                    style={{
+                                      position: 'absolute',
+                                      bottom: '4px',
+                                      right: '4px',
+                                      background: 'rgba(0,0,0,0.7)',
+                                      border: 'none',
+                                      borderRadius: '4px',
+                                      color: '#fff',
+                                      padding: '4px',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      opacity: 0,
+                                      transition: 'opacity 0.2s',
+                                      ':hover': { opacity: 1 }
+                                    }}
+                                    onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+                                    onMouseLeave={(e) => e.currentTarget.style.opacity = '0'}
+                                  >
+                                    <Download size={12} />
+                                  </button>
+                                  
+                                  {isImage && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setLightboxImage(media.file_url);
+                                      }}
+                                      style={{
+                                        position: 'absolute',
+                                        top: '4px',
+                                        right: '4px',
+                                        background: 'rgba(0,0,0,0.7)',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        color: '#fff',
+                                        padding: '4px',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        opacity: 0,
+                                        transition: 'opacity 0.2s',
+                                        ':hover': { opacity: 1 }
+                                      }}
+                                      onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+                                      onMouseLeave={(e) => e.currentTarget.style.opacity = '0'}
+                                    >
+                                      <ZoomIn size={12} />
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
 
                         {/* Действия */}
                         {r.status === 'pending' && (
@@ -871,6 +993,88 @@ export const AdminVkBotPage: React.FC = () => {
                 })}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Lightbox для просмотра фото */}
+        {lightboxImage && (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(0,0,0,0.9)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 9999,
+              padding: '20px',
+              cursor: 'pointer'
+            }}
+            onClick={() => setLightboxImage(null)}
+          >
+            <button
+              style={{
+                position: 'absolute',
+                top: '20px',
+                right: '20px',
+                background: 'none',
+                border: 'none',
+                color: '#fff',
+                fontSize: '32px',
+                cursor: 'pointer',
+                zIndex: 10,
+                opacity: 0.7,
+                ':hover': { opacity: 1 }
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setLightboxImage(null);
+              }}
+            >
+              <XCircle size={36} />
+            </button>
+            <img
+              src={lightboxImage}
+              alt="Просмотр"
+              style={{
+                maxWidth: '90vw',
+                maxHeight: '90vh',
+                objectFit: 'contain',
+                borderRadius: '8px',
+                boxShadow: '0 20px 60px rgba(0,0,0,0.5)'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
+            <button
+              style={{
+                position: 'absolute',
+                bottom: '30px',
+                right: '30px',
+                background: 'rgba(255,255,255,0.2)',
+                border: 'none',
+                borderRadius: '8px',
+                color: '#fff',
+                padding: '10px 16px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '14px',
+                backdropFilter: 'blur(10px)',
+                ':hover': { background: 'rgba(255,255,255,0.3)' }
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                const link = document.createElement('a');
+                link.href = lightboxImage;
+                link.download = 'image.jpg';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+              }}
+            >
+              <Download size={18} /> Скачать
+            </button>
           </div>
         )}
 
