@@ -5,20 +5,6 @@ SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
 RewriteCond %{HTTP:Authorization} ^(.*)
 RewriteRule .* - [e=HTTP_AUTHORIZATION:%1]
 
-# Запрет доступа к .htaccess и исполняемым файлам в uploads
-<FilesMatch "\.(htaccess|php|phtml|php3|php4|php5|php7|phps|cgi|pl|py|sh|exe|bat|cmd|com|scr|vbs|js|jar)$">
-    Order Allow,Deny
-    Deny from all
-</FilesMatch>
-
-# Разрешаем доступ к медиафайлам в uploads
-<Directory "uploads">
-    Options -Indexes
-    AllowOverride None
-    Order Allow,Deny
-    Allow from all
-</Directory>
-
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.php [QSA,L]
