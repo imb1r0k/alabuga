@@ -13,7 +13,6 @@ import {
   getVkBotReports,
   updateVkBotReportStatus,
   getVkBotTickets,
-  getVkBotReportMedia,
   sendVkBotBroadcast,
 } from '../../services/api';
 import {
