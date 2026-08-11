@@ -2,30 +2,72 @@ import time
 import vk_api
 from vk_api.longpoll import VkLongPoll, VkEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+import threading
+import logging
+import re
 
 from database import (
     get_bot_settings,
-    get_or_create_user,
+    find_or_create_user,
     get_active_task_group,
     get_tasks_for_group,
     get_user_task_report,
     create_report,
-    get_user_tickets
+    get_user_tickets,
+    get_pending_notifications,
+    mark_notification_sent,
+    get_user_by_vk_id
 )
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Храним состояние пользователей (ожидание ввода отчета)
 user_states = {}
 
-def create_main_keyboard(active_group, user_id):
+
+def send_notification_worker(vk, settings):
+    """Фоновый поток для отправки уведомлений"""
+    while True:
+        try:
+            notifications = get_pending_notifications(limit=10)
+            for notif in notifications:
+                try:
+                    if notif.get('vk_id'):
+                        vk.messages.send(
+                            user_id=notif['vk_id'],
+                            message=notif['message'],
+                            random_id=0
+                        )
+                        mark_notification_sent(notif['id'])
+                        logger.info(f"Уведомление отправлено пользователю VK ID {notif['vk_id']}")
+                    time.sleep(0.5)
+                except Exception as e:
+                    logger.error(f"Ошибка отправки уведомления: {e}")
+        except Exception as e:
+            logger.error(f"Ошибка в потоке уведомлений: {e}")
+        time.sleep(5)
+
+
+def create_main_keyboard(active_group, site_url=''):
+    """Создает главную клавиатуру"""
     keyboard = VkKeyboard(one_time=False)
-    keyboard.add_button("📋 Список заданий", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("📋 Задания", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
     keyboard.add_button("👤 Мой профиль", color=VkKeyboardColor.SECONDARY)
+
+    if site_url:
+        keyboard.add_line()
+        keyboard.add_button("🌐 Личный кабинет", color=VkKeyboardColor.POSITIVE)
+
     return keyboard.get_keyboard()
 
+
 def build_tasks_keyboard(tasks, user_id):
+    """Создает клавиатуру с заданиями"""
     keyboard = VkKeyboard(one_time=False)
-    
-    diff_labels = {'easy': 'Простое', 'medium': 'Среднее', 'hard': 'Сложное'}
+
+    diff_labels = {'easy': '🔵 Простое', 'medium': '🟡 Среднее', 'hard': '🔴 Сложное'}
     counts = {'easy': 1, 'medium': 1, 'hard': 1}
 
     for idx, t in enumerate(tasks):
@@ -53,53 +95,115 @@ def build_tasks_keyboard(tasks, user_id):
             keyboard.add_line()
 
     keyboard.add_line()
-    keyboard.add_button("⬅ Назад в меню", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("⬅ Назад", color=VkKeyboardColor.SECONDARY)
     return keyboard.get_keyboard()
 
+
+def get_task_from_button(text, tasks):
+    """Определяет задание по тексту кнопки"""
+    diff_labels = {'easy': 'Простое', 'medium': 'Среднее', 'hard': 'Сложное'}
+    counts = {'easy': 1, 'medium': 1, 'hard': 1}
+
+    # Убираем эмодзи и статусы из текста
+    clean_text = re.sub(r'[✅⏳❌🔵🟡🔴\s]', '', text).strip()
+
+    for t in tasks:
+        c_num = counts[t['difficulty']]
+        counts[t['difficulty']] += 1
+        label_base = f"{diff_labels.get(t['difficulty'], 'Задание')}{c_num}"
+        if label_base in clean_text:
+            return t
+    return None
+
+
 def main():
-    print("Запуск бота ВКонтакте...")
+    logger.info("🚀 Запуск бота ВКонтакте...")
+
     settings = get_bot_settings()
     token = settings.get('vk_token', '')
+    site_url = settings.get('site_url', '')
 
     if not token:
-        print("ОШИБКА: Укажите VK Token на странице 'Бот ВК' в админ-панели сайта!")
+        logger.error("❌ ОШИБКА: Укажите VK Token в админ-панели!")
         while not token:
             time.sleep(10)
             settings = get_bot_settings()
             token = settings.get('vk_token', '')
+            site_url = settings.get('site_url', '')
 
     vk_session = vk_api.VkApi(token=token)
     vk = vk_session.get_api()
     longpoll = VkLongPoll(vk_session)
 
-    print("Бот успешно подключен к ВКонтакте и ожидает сообщений!")
+    # Запускаем фоновый поток для уведомлений
+    notification_thread = threading.Thread(
+        target=send_notification_worker,
+        args=(vk, settings),
+        daemon=True
+    )
+    notification_thread.start()
+
+    logger.info("✅ Бот успешно подключен к ВКонтакте и ожидает сообщений!")
 
     for event in longpoll.listen():
         if event.type == VkEventType.MESSAGE_NEW and event.to_me:
             vk_id = event.user_id
             text = event.text.strip()
 
-            # Информация о пользователе ВК
             try:
+                # Получаем информацию о пользователе ВК
                 user_info = vk.users.get(user_ids=vk_id)[0]
-                db_user = get_or_create_user(vk_id, user_info.get('first_name', ''), user_info.get('last_name', ''))
-            except Exception as e:
-                print(f"Ошибка получения пользователя: {e}")
-                db_user = get_or_create_user(vk_id)
+                first_name = user_info.get('first_name', '')
+                last_name = user_info.get('last_name', '')
+                vk_url = f"https://vk.com/id{vk_id}"
 
+                # Ищем или создаем пользователя
+                db_user = find_or_create_user(vk_id, first_name, last_name, vk_url)
+
+                # Если пользователь только что создан — отправляем логин и пароль
+                if db_user.get('generated_password'):
+                    login_msg = (
+                        f"👋 Привет, {first_name}!\n\n"
+                        f"Для тебя создан аккаунт на сайте форума:\n"
+                        f"🔑 Логин: {db_user['login']}\n"
+                        f"🔐 Пароль: {db_user['generated_password']}\n\n"
+                        f"🌐 {site_url}\n\n"
+                        f"⚠️ Измени пароль после первого входа!"
+                    )
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message=login_msg,
+                        random_id=0
+                    )
+                    logger.info(f"Создан новый пользователь: {first_name} {last_name}, логин: {db_user['login']}")
+
+            except Exception as e:
+                logger.error(f"Ошибка получения пользователя: {e}")
+                db_user = get_user_by_vk_id(vk_id)
+                if not db_user:
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="❌ Произошла ошибка при регистрации. Попробуйте позже.",
+                        random_id=0
+                    )
+                    continue
+
+            # Обновляем настройки и активную группу
             settings = get_bot_settings()
+            site_url = settings.get('site_url', '')
             active_group = get_active_task_group()
 
-            # Если пользователь находится в процессе отправки отчета по заданию
+            # --- Обработка ввода отчета ---
             if vk_id in user_states:
                 task = user_states[vk_id]
-                if text == "⬅ Назад в меню" or text == "Назад":
+
+                if text == "⬅ Назад":
                     del user_states[vk_id]
                     vk.messages.send(
                         user_id=vk_id,
-                        message="Действие отменено.",
+                        message="🔙 Действие отменено.",
                         random_id=0,
-                        keyboard=create_main_keyboard(active_group, db_user['id'])
+                        keyboard=create_main_keyboard(active_group, site_url)
                     )
                     continue
 
@@ -108,24 +212,24 @@ def main():
 
                 vk.messages.send(
                     user_id=vk_id,
-                    message="Ваш отчет принят на рассмотрение администратором! Статус задания изменился на '⏳ На рассмотрении'.",
+                    message="✅ Ваш отчет принят на рассмотрение администратором!\nСтатус задания изменится после проверки.",
                     random_id=0,
-                    keyboard=create_main_keyboard(active_group, db_user['id'])
+                    keyboard=create_main_keyboard(active_group, site_url)
                 )
                 continue
 
-            # Команды меню
-            if text == "📋 Список заданий" or text == "/start" or text == "Начать":
+            # --- Обработка команд ---
+            if text in ["📋 Задания", "/start", "Начать", "Старт"]:
                 if not active_group:
                     vk.messages.send(
                         user_id=vk_id,
-                        message="В данный момент нет активных заданий. Следите за обновлениями!",
+                        message="📢 В данный момент нет активных заданий.\nСледите за обновлениями!",
                         random_id=0,
-                        keyboard=create_main_keyboard(active_group, db_user['id'])
+                        keyboard=create_main_keyboard(active_group, site_url)
                     )
                 else:
                     tasks = get_tasks_for_group(active_group['id'])
-                    welcome = settings.get('welcome_text', 'Привет! Выполняй задания и получай билеты!')
+                    welcome = settings.get('welcome_text', 'Привет! Выполняй задания и получай билеты! 🎫')
                     welcome += f"\n\n⏰ Задания действуют до: {active_group['end_date']}"
 
                     vk.messages.send(
@@ -138,63 +242,69 @@ def main():
             elif text == "👤 Мой профиль":
                 tickets = get_user_tickets(db_user['id'])
                 msg = f"👤 Ваш профиль:\n"
-                msg += f"⭐ Рейтинг: {db_user['points']} баллов\n"
+                msg += f"⭐ Рейтинг: {db_user['rating']} баллов\n"
+                msg += f"📊 Выполнено заданий: {db_user['completed_tasks']}\n"
                 msg += f"🎟 Выдано билетов: {len(tickets)} шт.\n\n"
 
                 if tickets:
-                    msg += "Ваши лотерейные билеты:\n"
+                    msg += "🎫 Ваши лотерейные билеты:\n"
                     for t in tickets:
-                        msg += f"• {t['ticket_number']} ({t['group_title']})\n"
+                        msg += f"• `{t['ticket_number']}` ({t['group_title']})\n"
                     draw_time = settings.get('draw_time', '18:00')
-                    msg += f"\nОжидайте розыгрыша в {draw_time} на установочной сессии!"
+                    msg += f"\n⏰ Ожидайте розыгрыша в {draw_time}!"
                 else:
-                    msg += "Выполните все задания активной волны, чтобы получить лотерейный билет!"
+                    msg += "🎯 Выполните все задания активной волны, чтобы получить лотерейный билет!"
+
+                if site_url:
+                    msg += f"\n\n🌐 {site_url}"
 
                 vk.messages.send(
                     user_id=vk_id,
                     message=msg,
                     random_id=0,
-                    keyboard=create_main_keyboard(active_group, db_user['id'])
+                    keyboard=create_main_keyboard(active_group, site_url)
                 )
 
-            elif text == "⬅ Назад в меню":
+            elif text == "🌐 Личный кабинет" and site_url:
                 vk.messages.send(
                     user_id=vk_id,
-                    message="Главное меню:",
+                    message=f"🌐 Перейдите в личный кабинет по ссылке:\n{site_url}",
                     random_id=0,
-                    keyboard=create_main_keyboard(active_group, db_user['id'])
+                    keyboard=create_main_keyboard(active_group, site_url)
+                )
+
+            elif text == "⬅ Назад":
+                vk.messages.send(
+                    user_id=vk_id,
+                    message="🔙 Главное меню:",
+                    random_id=0,
+                    keyboard=create_main_keyboard(active_group, site_url)
                 )
 
             else:
-                # Проверка нажатия на кнопку конкретного задания
+                # --- Обработка нажатия на кнопку задания ---
                 if active_group:
                     tasks = get_tasks_for_group(active_group['id'])
-                    matched_task = None
-
-                    diff_labels = {'easy': 'Простое', 'medium': 'Среднее', 'hard': 'Сложное'}
-                    counts = {'easy': 1, 'medium': 1, 'hard': 1}
-
-                    for t in tasks:
-                        c_num = counts[t['difficulty']]
-                        counts[t['difficulty']] += 1
-                        label_base = f"{diff_labels.get(t['difficulty'], 'Задание')} {c_num}"
-
-                        if label_base in text:
-                            matched_task = t
-                            break
+                    matched_task = get_task_from_button(text, tasks)
 
                     if matched_task:
                         report = get_user_task_report(db_user['id'], matched_task['id'])
                         status_str = ""
+
                         if report:
                             if report['status'] == 'approved':
-                                status_str = "\n\n Статус: Выполнено (+ " + str(matched_task['points']) + " б.)"
+                                status_str = f"\n\n✅ Статус: Выполнено (+{matched_task['points']} баллов)"
                             elif report['status'] == 'pending':
                                 status_str = "\n\n⏳ Статус: На рассмотрении у администратора"
                             elif report['status'] == 'rejected':
-                                status_str = "\n\n❌ Статус: Отклонено (" + (report['reject_reason'] or 'Не выполнено учение') + "). Вы можете прислать подтверждение повторно!"
+                                status_str = f"\n\n❌ Статус: Отклонено ({report['reject_reason'] or 'Не выполнено учение'})\nПришлите подтверждение повторно!"
 
-                        msg = f"📌 {matched_task['title']}\n\n{matched_task['description']}{status_str}\n\nПришлите в ответном сообщении ссылку или подтверждающий текст выполнения задания."
+                        msg = (
+                            f"📌 {matched_task['title']}\n\n"
+                            f"{matched_task['description']}{status_str}\n\n"
+                            f"📝 Пришлите ссылку или текст с подтверждением выполнения задания."
+                        )
+
                         user_states[vk_id] = matched_task
 
                         vk.messages.send(
@@ -205,10 +315,18 @@ def main():
                     else:
                         vk.messages.send(
                             user_id=vk_id,
-                            message="Воспользуйтесь кнопками меню ниже:",
+                            message="🤖 Воспользуйтесь кнопками меню ниже:",
                             random_id=0,
-                            keyboard=create_main_keyboard(active_group, db_user['id'])
+                            keyboard=create_main_keyboard(active_group, site_url)
                         )
+                else:
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="📢 Сейчас нет активных заданий. Загляните позже!",
+                        random_id=0,
+                        keyboard=create_main_keyboard(active_group, site_url)
+                    )
+
 
 if __name__ == '__main__':
     main()
