@@ -83,6 +83,13 @@ export const getVkBotTickets = async (groupId?: number) => {
   return response.data;
 };
 
+// ─── Медиафайлы отчетов бота ВК ──────────────────────────────────────────────
+
+export const getVkBotReportMedia = async (reportId: number) => {
+  const response = await api.get(`/admin/vk-bot/reports/media?report_id=${reportId}`);
+  return response.data;
+};
+
 // ─── Глобальные уведомления ─────────────────────────────────────────────────
 
 export const getGlobalNotification = async () => {
@@ -392,5 +399,26 @@ export const getMyTeamCalendar = async () => {
 
 export const getPublicProfile = async (login: string) => {
   const response = await api.get(`/public/profile?login=${encodeURIComponent(login)}`);
+  return response.data;
+};
+
+// ─── Рассылка бота ВК ────────────────────────────────────────────────────────
+
+export const sendVkBotBroadcast = async (message: string, recipients: 'all' | 'active' | 'ticket_holders') => {
+  const response = await api.post('/admin/vk-bot/broadcast', { message, recipients });
+  return response.data;
+};
+
+// ─── Статистика бота ВК ─────────────────────────────────────────────────────
+
+export const getVkBotStats = async () => {
+  const response = await api.get('/admin/vk-bot/stats');
+  return response.data;
+};
+
+// ─── Экспорт данных бота ВК ─────────────────────────────────────────────────
+
+export const exportVkBotData = async (type: 'reports' | 'tickets') => {
+  const response = await api.get(`/admin/vk-bot/export?type=${type}`);
   return response.data;
 };
