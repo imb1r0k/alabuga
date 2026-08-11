@@ -14,6 +14,7 @@ import {
   updateVkBotReportStatus,
   getVkBotTickets,
   getVkBotReportMedia,
+  sendVkBotBroadcast,
 } from '../../services/api';
 import {
   Bot,
@@ -334,23 +335,25 @@ export const AdminVkBotPage: React.FC = () => {
 
   // Рассылка
   const handleBroadcast = async () => {
-    if (!broadcastMessage.trim()) {
-      showToast('Введите текст сообщения для рассылки', 'error');
-      return;
-    }
+  if (!broadcastMessage.trim()) {
+    showToast('Введите текст сообщения для рассылки', 'error');
+    return;
+  }
 
-    if (!window.confirm(`Отправить сообщение ${broadcastRecipients === 'all' ? 'ВСЕМ' : broadcastRecipients === 'active' ? 'АКТИВНЫМ' : 'ОБЛАДАТЕЛЯМ БИЛЕТОВ'} пользователям?`)) return;
+  if (!window.confirm(`Отправить сообщение ${broadcastRecipients === 'all' ? 'ВСЕМ' : broadcastRecipients === 'active' ? 'АКТИВНЫМ' : 'ОБЛАДАТЕЛЯМ БИЛЕТОВ'} пользователям?`)) return;
 
-    setBroadcastLoading(true);
-    try {
-      showToast(`Рассылка запущена для ${broadcastRecipients} пользователей`, 'success');
-      setBroadcastMessage('');
-    } catch (err: any) {
-      showToast('Ошибка отправки рассылки: ' + (err.response?.data?.error || err.message), 'error');
-    } finally {
-      setBroadcastLoading(false);
-    }
-  };
+  setBroadcastLoading(true);
+  try {
+    // Используем API для отправки рассылки
+    const response = await sendVkBotBroadcast(broadcastMessage, broadcastRecipients);
+    showToast(`Рассылка отправлена: ${response.message || 'Успешно'}`, 'success');
+    setBroadcastMessage('');
+  } catch (err: any) {
+    showToast('Ошибка отправки рассылки: ' + (err.response?.data?.error || err.message), 'error');
+  } finally {
+    setBroadcastLoading(false);
+  }
+};
 
   // Скачивание файла
   const handleDownloadFile = (fileUrl: string, fileName: string) => {
