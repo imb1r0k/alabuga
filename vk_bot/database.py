@@ -264,19 +264,24 @@ def process_vk_attachments(attachments, vk_session):
     saved_files = []
     text_parts = []
     
-    # attachments может быть словарем { 'attach1': 'id', 'attach1_type': 'photo', ... }
+    # attachments может быть словарем { 'attach1': {'type': 'photo', 'id': '...'}, 'attach1_type': 'photo' }
     attach_list = []
     
     if isinstance(attachments, dict):
         # Извлекаем все attach1, attach2, ... из словаря
         for key, value in attachments.items():
             if key.startswith('attach') and not key.endswith('_type'):
-                attach_type_key = f"{key}_type"
-                attach_type = attachments.get(attach_type_key, 'unknown')
-                attach_list.append({
-                    'type': attach_type,
-                    'id': value
-                })
+                # Значение может быть словарем с type и id
+                if isinstance(value, dict):
+                    attach_list.append(value)
+                else:
+                    # Если value - строка, ищем тип в attach1_type
+                    attach_type_key = f"{key}_type"
+                    attach_type = attachments.get(attach_type_key, 'photo')
+                    attach_list.append({
+                        'type': attach_type,
+                        'id': value
+                    })
     elif isinstance(attachments, list):
         attach_list = attachments
     else:
@@ -291,16 +296,15 @@ def process_vk_attachments(attachments, vk_session):
         attach_type = 'unknown'
         attach_id = None
         
-        # Если attach - строка с ID (приходит как "473566088_457255481")
+        # Если attach - строка с ID
         if isinstance(attach, str):
             attach_id = attach
-            attach_type = 'photo'  # По умолчанию считаем фото
+            attach_type = 'photo'
             try:
                 parts = attach.split('_')
                 if len(parts) == 2:
                     owner_id = parts[0]
                     media_id = parts[1]
-                    # Сохраняем как ссылку на VK
                     file_url = f"https://vk.com/photo{owner_id}_{media_id}"
                     file_name = f"photo_{media_id}.jpg"
                     text_parts.append(f"🖼️ Фото: {file_url}")
@@ -310,13 +314,24 @@ def process_vk_attachments(attachments, vk_session):
         
         # Если attach - словарь
         elif isinstance(attach, dict):
+            # Получаем тип и ID
             attach_type = attach.get('type', 'unknown')
+            attach_id = attach.get('id', '')
+            
+            # Если есть поле data, берем оттуда
             attach_data = attach.get('data', {})
             if not attach_data:
                 attach_data = attach
             
-            attach_id = attach_data.get('id', '')
+            # Пробуем получить owner_id
             owner_id = attach_data.get('owner_id', '')
+            if not owner_id and attach_id and '_' in str(attach_id):
+                parts = str(attach_id).split('_')
+                if len(parts) == 2:
+                    owner_id = parts[0]
+                    attach_id = parts[1]
+            
+            logger.info(f"Обработка вложения: тип={attach_type}, id={attach_id}, owner={owner_id}")
             
             # --- ОБРАБОТКА ФОТО ---
             if attach_type == 'photo':
@@ -326,16 +341,19 @@ def process_vk_attachments(attachments, vk_session):
                     sizes.sort(key=lambda x: x.get('width', 0) * x.get('height', 0), reverse=True)
                     file_url = sizes[0].get('url')
                     file_name = f"photo_{attach_id}.jpg" if attach_id else 'photo.jpg'
+                    logger.info(f"Получен URL фото из sizes: {file_url}")
                 elif owner_id and attach_id:
                     # Создаем ссылку на страницу фото в VK
                     file_url = f"https://vk.com/photo{owner_id}_{attach_id}"
                     file_name = f"photo_{attach_id}.jpg"
+                    logger.info(f"Создана ссылка на фото: {file_url}")
                 else:
                     # Пробуем другие поля
                     for key in ['photo_2560', 'photo_1280', 'photo_807', 'photo_604', 'photo_130', 'photo_75']:
                         if attach_data.get(key):
                             file_url = attach_data[key]
                             file_name = f"photo_{attach_id}.jpg" if attach_id else 'photo.jpg'
+                            logger.info(f"Получен URL фото из {key}: {file_url}")
                             break
             
             # --- ОБРАБОТКА ДОКУМЕНТОВ ---
@@ -347,6 +365,7 @@ def process_vk_attachments(attachments, vk_session):
                     file_url = attach_data.get('url')
                     file_name = attach_data.get('title', 'document')
                 file_size = attach_data.get('size', 0)
+                logger.info(f"Создана ссылка на документ: {file_url}")
             
             # --- ОБРАБОТКА ВИДЕО ---
             elif attach_type == 'video':
@@ -356,6 +375,7 @@ def process_vk_attachments(attachments, vk_session):
                 else:
                     file_url = attach_data.get('player')
                     file_name = f"video_{attach_id}" if attach_id else 'video'
+                logger.info(f"Создана ссылка на видео: {file_url}")
             
             # --- ОБРАБОТКА АУДИО ---
             elif attach_type == 'audio':
@@ -365,6 +385,7 @@ def process_vk_attachments(attachments, vk_session):
                 else:
                     file_url = attach_data.get('url')
                     file_name = f"audio_{attach_id}.mp3" if attach_id else 'audio.mp3'
+                logger.info(f"Создана ссылка на аудио: {file_url}")
             
             # --- ОБРАБОТКА ССЫЛОК ---
             elif attach_type == 'link':
@@ -409,6 +430,7 @@ def process_vk_attachments(attachments, vk_session):
             # Если не удалось получить URL, добавляем ID как ссылку
             if attach_id:
                 text_parts.append(f"📎 Вложение: {attach_id}")
+                logger.warning(f"Не удалось получить URL для вложения: {attach}")
     
     logger.info(f"Обработано файлов: {len(saved_files)}")
     

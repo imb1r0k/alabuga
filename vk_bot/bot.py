@@ -35,9 +35,11 @@ def send_notification_worker(vk, settings):
     while True:
         try:
             notifications = get_pending_notifications(limit=10)
+            logger.info(f"Получено {len(notifications)} уведомлений для отправки")
             for notif in notifications:
                 try:
                     if notif.get('vk_id'):
+                        logger.info(f"Отправка уведомления пользователю VK ID {notif['vk_id']}: {notif['message'][:50]}...")
                         vk.messages.send(
                             user_id=notif['vk_id'],
                             message=notif['message'],
@@ -45,6 +47,8 @@ def send_notification_worker(vk, settings):
                         )
                         mark_notification_sent(notif['id'])
                         logger.info(f"Уведомление отправлено пользователю VK ID {notif['vk_id']}")
+                    else:
+                        logger.warning(f"Уведомление {notif['id']} без VK ID, пропускаем")
                     time.sleep(0.5)
                 except Exception as e:
                     logger.error(f"Ошибка отправки уведомления: {e}")
@@ -164,7 +168,9 @@ def main():
                         if key.startswith('attach') and not key.endswith('_type'):
                             attach_type_key = f"{key}_type"
                             attach_type = attachments.get(attach_type_key, 'unknown')
-                            logger.info(f"  {key}: {attach_type} -> {value}")
+                            logger.info(f"  {key}: тип={attach_type}, значение={value}")
+                            if isinstance(value, dict):
+                                logger.info(f"    Ключи value: {value.keys()}")
                 elif isinstance(attachments, list):
                     logger.info(f"Количество вложений: {len(attachments)}")
                     for i, attach in enumerate(attachments):
