@@ -169,15 +169,37 @@ export const AdminVkBotPage: React.FC = () => {
     }
   };
 
+  // Функция для получения медиафайлов через API
+  const fetchReportMedia = async (reportId: number): Promise<MediaFile[]> => {
+    try {
+      // Используем API для получения медиафайлов
+      const response = await fetch(`/api/admin/vk-bot/reports/media?report_id=${reportId}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        return Array.isArray(data) ? data : [];
+      }
+      return [];
+    } catch (err) {
+      console.error('Ошибка загрузки медиа:', err);
+      return [];
+    }
+  };
+
   const loadReports = async (st: string) => {
     try {
       const data = await getVkBotReports(st);
       const reportsData = Array.isArray(data) ? data : [];
       setReports(reportsData);
+      
       // Загружаем медиа для каждого отчета
-      reportsData.forEach(report => {
-        loadReportMedia(report.id);
-      });
+      for (const report of reportsData) {
+        await loadReportMedia(report.id);
+      }
     } catch (err) {
       console.error('Ошибка загрузки отчетов:', err);
       setReports([]);
@@ -187,13 +209,11 @@ export const AdminVkBotPage: React.FC = () => {
   const loadReportMedia = async (reportId: number) => {
     setLoadingMedia(prev => ({ ...prev, [reportId]: true }));
     try {
-      // Здесь должен быть API запрос для получения медиафайлов
-      // В реальном проекте будет API: getReportMedia(reportId)
-      // Пока используем мок-данные для демонстрации
-      const mockMedia: MediaFile[] = [];
-      setReportMedia(prev => ({ ...prev, [reportId]: mockMedia }));
+      const mediaFiles = await fetchReportMedia(reportId);
+      setReportMedia(prev => ({ ...prev, [reportId]: mediaFiles }));
     } catch (err) {
       console.error('Ошибка загрузки медиа:', err);
+      setReportMedia(prev => ({ ...prev, [reportId]: [] }));
     } finally {
       setLoadingMedia(prev => ({ ...prev, [reportId]: false }));
     }
@@ -391,6 +411,15 @@ export const AdminVkBotPage: React.FC = () => {
     if (status === 'pending') return { label: 'На рассмотрении', color: '#f59e0b', bg: '#fef3c7' };
     if (status === 'approved') return { label: 'Принято ✅', color: '#16a34a', bg: '#dcfce7' };
     return { label: 'Отклонено ❌', color: '#dc2626', bg: '#fee2e2' };
+  };
+
+  // Определение типа файла по ссылке VK
+  const getFileTypeFromUrl = (url: string): string => {
+    if (url.includes('/photo')) return 'image';
+    if (url.includes('/video')) return 'video';
+    if (url.includes('/doc')) return 'document';
+    if (url.includes('/audio')) return 'audio';
+    return 'file';
   };
 
   return (
@@ -809,123 +838,145 @@ export const AdminVkBotPage: React.FC = () => {
                         </div>
 
                         {/* Медиафайлы */}
-                        {isLoadingMedia ? (
-                          <div style={{ display: 'flex', gap: '8px', padding: '8px 0' }}>
-                            <div style={{ width: '80px', height: '80px', borderRadius: '8px', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              <span style={{ fontSize: '12px', color: '#94a3b8' }}>Загрузка...</span>
+                        <div style={{ marginBottom: '12px' }}>
+                          {isLoadingMedia ? (
+                            <div style={{ display: 'flex', gap: '8px', padding: '8px 0' }}>
+                              <div style={{ width: '80px', height: '80px', borderRadius: '8px', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <span style={{ fontSize: '12px', color: '#94a3b8' }}>Загрузка...</span>
+                              </div>
                             </div>
-                          </div>
-                        ) : mediaFiles.length > 0 ? (
-                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
-                            {mediaFiles.map((media, idx) => {
-                              const isImage = media.file_type === 'image' || 
-                                media.original_name.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i);
-                              
-                              return (
-                                <div key={idx} style={{
-                                  width: '80px',
-                                  height: '80px',
-                                  borderRadius: '8px',
-                                  border: '1px solid #e2e8f0',
-                                  overflow: 'hidden',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  backgroundColor: '#f1f5f9',
-                                  position: 'relative',
-                                  cursor: isImage ? 'pointer' : 'default',
-                                  transition: 'transform 0.2s',
-                                  ':hover': isImage ? { transform: 'scale(1.05)' } : {}
-                                }}
-                                onClick={() => isImage && setLightboxImage(media.file_url)}
-                                >
-                                  {isImage ? (
-                                    <img 
-                                      src={media.file_url} 
-                                      alt={media.original_name}
-                                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                      onError={(e) => {
-                                        (e.target as HTMLImageElement).style.display = 'none';
-                                        (e.target as HTMLImageElement).parentElement!.innerHTML = `
-                                          <div style="text-align:center;padding:8px;">
-                                            <File size={24} color="#94a3b8" />
-                                            <span style="font-size:8px;color:#94a3b8;display:block;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${media.original_name}</span>
-                                          </div>
-                                        `;
-                                      }}
-                                    />
-                                  ) : (
-                                    <div style={{ textAlign: 'center', padding: '8px' }}>
-                                      {getFileIcon(media.file_type, media.original_name)}
-                                      <span style={{ fontSize: '8px', color: '#64748b', display: 'block', maxWidth: '60px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        {media.original_name}
-                                      </span>
-                                    </div>
-                                  )}
+                          ) : mediaFiles.length > 0 ? (
+                            <div>
+                              <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '8px' }}>
+                                📎 Прикрепленные файлы ({mediaFiles.length}):
+                              </div>
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                {mediaFiles.map((media, idx) => {
+                                  const isImage = media.file_type === 'image' || 
+                                    media.original_name?.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i) ||
+                                    media.file_url?.includes('/photo');
                                   
-                                  {/* Кнопка скачивания */}
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleDownloadFile(media.file_url, media.original_name);
-                                    }}
-                                    style={{
-                                      position: 'absolute',
-                                      bottom: '4px',
-                                      right: '4px',
-                                      background: 'rgba(0,0,0,0.7)',
-                                      border: 'none',
-                                      borderRadius: '4px',
-                                      color: '#fff',
-                                      padding: '4px',
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      opacity: 0,
-                                      transition: 'opacity 0.2s',
-                                      ':hover': { opacity: 1 }
-                                    }}
-                                    onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
-                                    onMouseLeave={(e) => e.currentTarget.style.opacity = '0'}
-                                  >
-                                    <Download size={12} />
-                                  </button>
-                                  
-                                  {isImage && (
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setLightboxImage(media.file_url);
-                                      }}
+                                  return (
+                                    <div 
+                                      key={idx} 
                                       style={{
-                                        position: 'absolute',
-                                        top: '4px',
-                                        right: '4px',
-                                        background: 'rgba(0,0,0,0.7)',
-                                        border: 'none',
-                                        borderRadius: '4px',
-                                        color: '#fff',
-                                        padding: '4px',
-                                        cursor: 'pointer',
+                                        width: '100px',
+                                        height: '100px',
+                                        borderRadius: '8px',
+                                        border: '1px solid #e2e8f0',
+                                        overflow: 'hidden',
                                         display: 'flex',
                                         alignItems: 'center',
                                         justifyContent: 'center',
-                                        opacity: 0,
-                                        transition: 'opacity 0.2s',
-                                        ':hover': { opacity: 1 }
+                                        backgroundColor: '#f1f5f9',
+                                        position: 'relative',
+                                        cursor: isImage ? 'pointer' : 'default',
+                                        transition: 'transform 0.2s',
                                       }}
-                                      onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
-                                      onMouseLeave={(e) => e.currentTarget.style.opacity = '0'}
+                                      onMouseEnter={(e) => {
+                                        if (isImage) {
+                                          e.currentTarget.style.transform = 'scale(1.05)';
+                                        }
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.transform = 'scale(1)';
+                                      }}
+                                      onClick={() => isImage && setLightboxImage(media.file_url)}
                                     >
-                                      <ZoomIn size={12} />
-                                    </button>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : null}
+                                      {isImage ? (
+                                        <img 
+                                          src={media.file_url} 
+                                          alt={media.original_name || 'Фото'}
+                                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                          onError={(e) => {
+                                            // Если фото не загрузилось, показываем иконку
+                                            const target = e.target as HTMLImageElement;
+                                            target.style.display = 'none';
+                                            const parent = target.parentElement;
+                                            if (parent) {
+                                              const iconDiv = document.createElement('div');
+                                              iconDiv.style.textAlign = 'center';
+                                              iconDiv.style.padding = '8px';
+                                              iconDiv.innerHTML = `
+                                                <div style="font-size:32px;">📷</div>
+                                                <span style="font-size:8px;color:#94a3b8;display:block;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${media.original_name || 'Фото'}</span>
+                                              `;
+                                              parent.appendChild(iconDiv);
+                                            }
+                                          }}
+                                        />
+                                      ) : (
+                                        <div style={{ textAlign: 'center', padding: '8px' }}>
+                                          {getFileIcon(media.file_type, media.original_name || '')}
+                                          <span style={{ fontSize: '8px', color: '#64748b', display: 'block', maxWidth: '80px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {media.original_name || 'Файл'}
+                                          </span>
+                                        </div>
+                                      )}
+                                      
+                                      {/* Кнопка скачивания */}
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleDownloadFile(media.file_url, media.original_name || 'file');
+                                        }}
+                                        style={{
+                                          position: 'absolute',
+                                          bottom: '4px',
+                                          right: '4px',
+                                          background: 'rgba(0,0,0,0.7)',
+                                          border: 'none',
+                                          borderRadius: '4px',
+                                          color: '#fff',
+                                          padding: '4px',
+                                          cursor: 'pointer',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          opacity: 0,
+                                          transition: 'opacity 0.2s',
+                                        }}
+                                        onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+                                        onMouseLeave={(e) => e.currentTarget.style.opacity = '0'}
+                                      >
+                                        <Download size={14} />
+                                      </button>
+                                      
+                                      {isImage && (
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setLightboxImage(media.file_url);
+                                          }}
+                                          style={{
+                                            position: 'absolute',
+                                            top: '4px',
+                                            right: '4px',
+                                            background: 'rgba(0,0,0,0.7)',
+                                            border: 'none',
+                                            borderRadius: '4px',
+                                            color: '#fff',
+                                            padding: '4px',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            opacity: 0,
+                                            transition: 'opacity 0.2s',
+                                          }}
+                                          onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+                                          onMouseLeave={(e) => e.currentTarget.style.opacity = '0'}
+                                        >
+                                          <ZoomIn size={14} />
+                                        </button>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
 
                         {/* Действия */}
                         {r.status === 'pending' && (
@@ -1024,12 +1075,13 @@ export const AdminVkBotPage: React.FC = () => {
                 cursor: 'pointer',
                 zIndex: 10,
                 opacity: 0.7,
-                ':hover': { opacity: 1 }
               }}
               onClick={(e) => {
                 e.stopPropagation();
                 setLightboxImage(null);
               }}
+              onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+              onMouseLeave={(e) => e.currentTarget.style.opacity = '0.7'}
             >
               <XCircle size={36} />
             </button>
@@ -1061,7 +1113,6 @@ export const AdminVkBotPage: React.FC = () => {
                 gap: '8px',
                 fontSize: '14px',
                 backdropFilter: 'blur(10px)',
-                ':hover': { background: 'rgba(255,255,255,0.3)' }
               }}
               onClick={(e) => {
                 e.stopPropagation();
@@ -1072,6 +1123,8 @@ export const AdminVkBotPage: React.FC = () => {
                 link.click();
                 document.body.removeChild(link);
               }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.3)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.2)'}
             >
               <Download size={18} /> Скачать
             </button>
