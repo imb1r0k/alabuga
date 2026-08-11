@@ -20,7 +20,8 @@ from database import (
     get_user_tickets,
     get_pending_notifications,
     mark_notification_sent,
-    get_user_by_vk_id
+    get_user_by_vk_id,
+    add_notification
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -34,27 +35,56 @@ def send_notification_worker(vk, settings):
     """Фоновый поток для отправки уведомлений"""
     while True:
         try:
-            notifications = get_pending_notifications(limit=10)
-            logger.info(f"Получено {len(notifications)} уведомлений для отправки")
-            for notif in notifications:
-                try:
-                    if notif.get('vk_id'):
-                        logger.info(f"Отправка уведомления пользователю VK ID {notif['vk_id']}: {notif['message'][:50]}...")
-                        vk.messages.send(
-                            user_id=notif['vk_id'],
-                            message=notif['message'],
-                            random_id=0
-                        )
-                        mark_notification_sent(notif['id'])
-                        logger.info(f"Уведомление отправлено пользователю VK ID {notif['vk_id']}")
-                    else:
-                        logger.warning(f"Уведомление {notif['id']} без VK ID, пропускаем")
-                    time.sleep(0.5)
-                except Exception as e:
-                    logger.error(f"Ошибка отправки уведомления: {e}")
+            notifications = get_pending_notifications(limit=20)
+            if notifications:
+                logger.info(f"Получено {len(notifications)} уведомлений для отправки")
+                for notif in notifications:
+                    try:
+                        if notif.get('vk_id'):
+                            logger.info(f"Отправка уведомления пользователю VK ID {notif['vk_id']}: {notif['message'][:50]}...")
+                            vk.messages.send(
+                                user_id=notif['vk_id'],
+                                message=notif['message'],
+                                random_id=0
+                            )
+                            mark_notification_sent(notif['id'])
+                            logger.info(f"Уведомление отправлено пользователю VK ID {notif['vk_id']}")
+                        else:
+                            logger.warning(f"Уведомление {notif['id']} без VK ID, пропускаем")
+                        time.sleep(0.5)
+                    except vk_api.exceptions.ApiError as e:
+                        logger.error(f"VK API ошибка при отправке уведомления: {e}")
+                        # Если ошибка связана с тем, что пользователь заблокировал бота, отмечаем как отправленное
+                        if 'message' in str(e) and ('blocked' in str(e) or 'disabled' in str(e)):
+                            logger.warning(f"Пользователь {notif['vk_id']} недоступен, отмечаем как отправленное")
+                            mark_notification_sent(notif['id'])
+                    except Exception as e:
+                        logger.error(f"Ошибка отправки уведомления: {e}")
+            else:
+                # Если нет уведомлений, спим дольше
+                time.sleep(5)
         except Exception as e:
             logger.error(f"Ошибка в потоке уведомлений: {e}")
-        time.sleep(5)
+            time.sleep(5)
+
+
+def send_notification_now(vk, user_id, message):
+    """Немедленная отправка уведомления пользователю"""
+    try:
+        if user_id:
+            vk.messages.send(
+                user_id=user_id,
+                message=message,
+                random_id=0
+            )
+            logger.info(f"Уведомление отправлено пользователю VK ID {user_id}")
+            return True
+    except vk_api.exceptions.ApiError as e:
+        logger.error(f"VK API ошибка при отправке уведомления: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Ошибка отправки уведомления: {e}")
+        return False
 
 
 def create_main_keyboard(active_group, site_url=''):
@@ -171,7 +201,6 @@ def main():
                         msg_attachments = message_data['items'][0].get('attachments', [])
                         logger.info(f"Вложения из messages.getById: {msg_attachments}")
                         
-                        # Если есть более полная информация, преобразуем вложения
                         if msg_attachments:
                             new_attachments = {}
                             for i, att in enumerate(msg_attachments):
