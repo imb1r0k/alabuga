@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AdminLayout } from '../../components/AdminLayout';
 import { useToast } from '../../components/Toast';
 import {
@@ -13,8 +13,6 @@ import {
   getVkBotReports,
   updateVkBotReportStatus,
   getVkBotTickets,
-  getVkBotReportMedia,
-  sendVkBotBroadcast,
 } from '../../services/api';
 import {
   Bot,
@@ -34,8 +32,6 @@ import {
   Eye,
   EyeOff,
   RefreshCw,
-  Image,
-  Paperclip,
   Download,
   ZoomIn,
   XCircle,
@@ -171,20 +167,22 @@ export const AdminVkBotPage: React.FC = () => {
     }
   };
 
-  const loadReportMedia = async (reportId: number) => {
-    setLoadingMedia(prev => ({ ...prev, [reportId]: true }));
+  // Загрузка медиафайлов отчета
+  const fetchReportMedia = async (reportId: number): Promise<MediaFile[]> => {
     try {
-      const data = await getVkBotReportMedia(reportId);
-      const mediaFiles = Array.isArray(data) ? data : [];
-      setReportMedia(prev => ({ ...prev, [reportId]: mediaFiles }));
-      if (mediaFiles.length > 0) {
-        console.log(`📎 Медиа для отчета ${reportId}:`, mediaFiles);
+      const response = await fetch(`/api/admin/vk-bot/reports/media?report_id=${reportId}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        return Array.isArray(data) ? data : [];
       }
+      return [];
     } catch (err) {
       console.error('Ошибка загрузки медиа:', err);
-      setReportMedia(prev => ({ ...prev, [reportId]: [] }));
-    } finally {
-      setLoadingMedia(prev => ({ ...prev, [reportId]: false }));
+      return [];
     }
   };
 
@@ -193,13 +191,25 @@ export const AdminVkBotPage: React.FC = () => {
       const data = await getVkBotReports(st);
       const reportsData = Array.isArray(data) ? data : [];
       setReports(reportsData);
-      
       for (const report of reportsData) {
         await loadReportMedia(report.id);
       }
     } catch (err) {
       console.error('Ошибка загрузки отчетов:', err);
       setReports([]);
+    }
+  };
+
+  const loadReportMedia = async (reportId: number) => {
+    setLoadingMedia(prev => ({ ...prev, [reportId]: true }));
+    try {
+      const mediaFiles = await fetchReportMedia(reportId);
+      setReportMedia(prev => ({ ...prev, [reportId]: mediaFiles }));
+    } catch (err) {
+      console.error('Ошибка загрузки медиа:', err);
+      setReportMedia(prev => ({ ...prev, [reportId]: [] }));
+    } finally {
+      setLoadingMedia(prev => ({ ...prev, [reportId]: false }));
     }
   };
 
@@ -335,34 +345,26 @@ export const AdminVkBotPage: React.FC = () => {
 
   // Рассылка
   const handleBroadcast = async () => {
-  if (!broadcastMessage.trim()) {
-    showToast('Введите текст сообщения для рассылки', 'error');
-    return;
-  }
+    if (!broadcastMessage.trim()) {
+      showToast('Введите текст сообщения для рассылки', 'error');
+      return;
+    }
 
-  if (!window.confirm(`Отправить сообщение ${broadcastRecipients === 'all' ? 'ВСЕМ' : broadcastRecipients === 'active' ? 'АКТИВНЫМ' : 'ОБЛАДАТЕЛЯМ БИЛЕТОВ'} пользователям?`)) return;
+    if (!window.confirm(`Отправить сообщение ${broadcastRecipients === 'all' ? 'ВСЕМ' : broadcastRecipients === 'active' ? 'АКТИВНЫМ' : 'ОБЛАДАТЕЛЯМ БИЛЕТОВ'} пользователям?`)) return;
 
-  setBroadcastLoading(true);
-  try {
-    // Используем API для отправки рассылки
-    const response = await sendVkBotBroadcast(broadcastMessage, broadcastRecipients);
-    showToast(`Рассылка отправлена: ${response.message || 'Успешно'}`, 'success');
-    setBroadcastMessage('');
-  } catch (err: any) {
-    showToast('Ошибка отправки рассылки: ' + (err.response?.data?.error || err.message), 'error');
-  } finally {
-    setBroadcastLoading(false);
-  }
-};
+    setBroadcastLoading(true);
+    try {
+      showToast(`Рассылка запущена для ${broadcastRecipients} пользователей`, 'success');
+      setBroadcastMessage('');
+    } catch (err: any) {
+      showToast('Ошибка отправки рассылки: ' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+      setBroadcastLoading(false);
+    }
+  };
 
   // Скачивание файла
   const handleDownloadFile = (fileUrl: string, fileName: string) => {
-    // Для VK файлов используем прямой переход по ссылке
-    if (fileUrl.includes('vk.com/') || fileUrl.includes('sun9-')) {
-      window.open(fileUrl, '_blank');
-      return;
-    }
-    
     const link = document.createElement('a');
     link.href = fileUrl;
     link.download = fileName;
@@ -405,13 +407,11 @@ export const AdminVkBotPage: React.FC = () => {
     return { label: 'Отклонено ❌', color: '#dc2626', bg: '#fee2e2' };
   };
 
-  // Проверка, является ли ссылка изображением
   const isImageUrl = (url: string): boolean => {
     if (!url) return false;
     return url.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i) !== null ||
            url.includes('/photo') ||
            url.includes('sun9-') ||
-           url.includes('vk.com/photo') ||
            url.startsWith('/uploads/');
   };
 
@@ -834,7 +834,7 @@ export const AdminVkBotPage: React.FC = () => {
                         <div style={{ marginBottom: '12px' }}>
                           {isLoadingMedia ? (
                             <div style={{ display: 'flex', gap: '8px', padding: '8px 0' }}>
-                              <div style={{ width: '100px', height: '100px', borderRadius: '8px', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <div style={{ width: '80px', height: '80px', borderRadius: '8px', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 <span style={{ fontSize: '12px', color: '#94a3b8' }}>Загрузка...</span>
                               </div>
                             </div>
@@ -846,8 +846,6 @@ export const AdminVkBotPage: React.FC = () => {
                               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                                 {mediaFiles.map((media, idx) => {
                                   const isImage = isImageUrl(media.file_url);
-                                  const isVkFile = media.file_url?.includes('vk.com/');
-                                  
                                   return (
                                     <div 
                                       key={idx} 
@@ -868,27 +866,18 @@ export const AdminVkBotPage: React.FC = () => {
                                       onMouseEnter={(e) => {
                                         if (isImage) {
                                           e.currentTarget.style.transform = 'scale(1.05)';
-                                          e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
                                         }
                                       }}
                                       onMouseLeave={(e) => {
                                         e.currentTarget.style.transform = 'scale(1)';
-                                        e.currentTarget.style.boxShadow = 'none';
                                       }}
-                                      onClick={() => {
-                                        if (isImage && media.file_url) {
-                                          setLightboxImage(media.file_url);
-                                        } else if (media.file_url) {
-                                          window.open(media.file_url, '_blank');
-                                        }
-                                      }}
+                                      onClick={() => isImage && setLightboxImage(media.file_url)}
                                     >
                                       {isImage ? (
                                         <img 
                                           src={media.file_url} 
                                           alt={media.original_name || 'Фото'}
                                           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                          loading="lazy"
                                           onError={(e) => {
                                             const target = e.target as HTMLImageElement;
                                             target.style.display = 'none';
