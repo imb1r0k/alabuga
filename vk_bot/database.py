@@ -264,8 +264,7 @@ def process_vk_attachments(attachments, vk_session):
     saved_files = []
     text_parts = []
     
-    # attachments может быть словарем { 'attach1': 'type', 'attach1_type': 'photo', ... }
-    # или списком
+    # attachments может быть словарем { 'attach1': 'id', 'attach1_type': 'photo', ... }
     attach_list = []
     
     if isinstance(attachments, dict):
@@ -276,7 +275,7 @@ def process_vk_attachments(attachments, vk_session):
                 attach_type = attachments.get(attach_type_key, 'unknown')
                 attach_list.append({
                     'type': attach_type,
-                    'data': value
+                    'id': value  # Это может быть строка с ID
                 })
     elif isinstance(attachments, list):
         attach_list = attachments
@@ -286,113 +285,151 @@ def process_vk_attachments(attachments, vk_session):
     logger.info(f"Обработка {len(attach_list)} вложений")
     
     for attach in attach_list:
-        # Получаем данные вложения
-        if isinstance(attach, dict):
-            attach_type = attach.get('type', 'unknown')
-            attach_data = attach.get('data', {})
-            if not attach_data:
-                attach_data = attach
-        elif isinstance(attach, str):
-            try:
-                attach = json.loads(attach)
-                attach_type = attach.get('type', 'unknown')
-                attach_data = attach.get('data', {})
-            except:
-                text_parts.append(f"📎 {attach}")
-                continue
-        else:
-            continue
-        
-        # Получаем ссылку на файл
         file_url = None
         file_name = None
         file_size = 0
         
-        # --- ОБРАБОТКА ФОТО ---
-        if attach_type == 'photo':
-            sizes = attach_data.get('sizes', [])
-            if sizes:
-                # Берем самую большую
-                sizes.sort(key=lambda x: x.get('width', 0) * x.get('height', 0), reverse=True)
-                file_url = sizes[0].get('url')
-                photo_id = attach_data.get('id', 'unknown')
-                file_name = f"photo_{photo_id}.jpg"
+        # Если attach - строка с ID
+        if isinstance(attach, str):
+            # Пробуем получить данные через API по ID
+            try:
+                # Парсим ID вида "473566088_457255481"
+                parts = attach.split('_')
+                if len(parts) == 2:
+                    owner_id = int(parts[0])
+                    media_id = int(parts[1])
+                    
+                    # Пробуем определить тип по контексту
+                    # Для фото
+                    try:
+                        photo_info = vk_session.get_api().photos.getById(
+                            photos=f"{owner_id}_{media_id}",
+                            photo_sizes=1
+                        )
+                        if photo_info and len(photo_info) > 0:
+                            sizes = photo_info[0].get('sizes', [])
+                            if sizes:
+                                sizes.sort(key=lambda x: x.get('width', 0) * x.get('height', 0), reverse=True)
+                                file_url = sizes[0].get('url')
+                                file_name = f"photo_{media_id}.jpg"
+                                text_parts.append(f"🖼️ Фото {media_id}")
+                    except:
+                        pass
+                    
+                    # Если не фото, пробуем документ
+                    if not file_url:
+                        try:
+                            doc_info = vk_session.get_api().docs.getById(
+                                docs=f"{owner_id}_{media_id}"
+                            )
+                            if doc_info and len(doc_info) > 0:
+                                file_url = doc_info[0].get('url')
+                                file_name = doc_info[0].get('title', f"doc_{media_id}")
+                                text_parts.append(f"📄 {file_name}")
+                        except:
+                            pass
+            except Exception as e:
+                logger.error(f"Ошибка получения данных по ID: {e}")
+                text_parts.append(f"📎 {attach}")
+                continue
+        
+        # Если attach - словарь
+        elif isinstance(attach, dict):
+            attach_type = attach.get('type', 'unknown')
+            attach_data = attach.get('data', {})
+            if not attach_data:
+                attach_data = attach
+            
+            # Получаем ссылку на файл
+            file_url = None
+            file_name = None
+            file_size = 0
+            
+            # --- ОБРАБОТКА ФОТО ---
+            if attach_type == 'photo':
+                sizes = attach_data.get('sizes', [])
+                if sizes:
+                    sizes.sort(key=lambda x: x.get('width', 0) * x.get('height', 0), reverse=True)
+                    file_url = sizes[0].get('url')
+                    photo_id = attach_data.get('id', 'unknown')
+                    file_name = f"photo_{photo_id}.jpg"
+                else:
+                    for key in ['photo_2560', 'photo_1280', 'photo_807', 'photo_604', 'photo_130', 'photo_75']:
+                        if attach_data.get(key):
+                            file_url = attach_data[key]
+                            photo_id = attach_data.get('id', 'unknown')
+                            file_name = f"photo_{photo_id}.jpg"
+                            break
+            
+            # --- ОБРАБОТКА ВИДЕО ---
+            elif attach_type == 'video':
+                file_url = attach_data.get('player')
+                if not file_url:
+                    file_url = attach_data.get('video', {}).get('player')
+                video_id = attach_data.get('id', 'unknown')
+                file_name = f"video_{video_id}"
+            
+            # --- ОБРАБОТКА ДОКУМЕНТОВ ---
+            elif attach_type == 'doc':
+                file_url = attach_data.get('url')
+                if not file_url:
+                    file_url = attach_data.get('doc', {}).get('url')
+                original_name = attach_data.get('title', 'document')
+                ext = attach_data.get('ext', '')
+                if not ext:
+                    ext = attach_data.get('doc', {}).get('ext', '')
+                file_name = f"{original_name}.{ext}" if ext else original_name
+                file_size = attach_data.get('size', 0)
+                if not file_size:
+                    file_size = attach_data.get('doc', {}).get('size', 0)
+            
+            # --- ОБРАБОТКА АУДИО ---
+            elif attach_type == 'audio':
+                file_url = attach_data.get('url')
+                if not file_url:
+                    file_url = attach_data.get('audio', {}).get('url')
+                audio_id = attach_data.get('id', 'unknown')
+                file_name = f"audio_{audio_id}.mp3"
+            
+            # --- ОБРАБОТКА ССЫЛОК ---
+            elif attach_type == 'link':
+                url = attach_data.get('url', '')
+                if not url:
+                    url = attach_data.get('link', {}).get('url', '')
+                text_parts.append(f"🔗 Ссылка: {url}")
+                continue
+            
+            # --- ОБРАБОТКА ЗАПИСЕЙ НА СТЕНЕ ---
+            elif attach_type == 'wall':
+                owner_id = attach_data.get('owner_id', '')
+                wall_id = attach_data.get('id', '')
+                text_parts.append(f"🔗 Запись на стене: https://vk.com/wall{owner_id}_{wall_id}")
+                continue
+            
             else:
-                # Пробуем другие поля
-                for key in ['photo_2560', 'photo_1280', 'photo_807', 'photo_604', 'photo_130', 'photo_75']:
-                    if attach_data.get(key):
-                        file_url = attach_data[key]
-                        photo_id = attach_data.get('id', 'unknown')
-                        file_name = f"photo_{photo_id}.jpg"
-                        break
+                logger.warning(f"Неизвестный тип вложения: {attach_type}")
+                continue
         
-        # --- ОБРАБОТКА ВИДЕО ---
-        elif attach_type == 'video':
-            file_url = attach_data.get('player')
-            if not file_url:
-                file_url = attach_data.get('video', {}).get('player')
-            video_id = attach_data.get('id', 'unknown')
-            file_name = f"video_{video_id}"
-        
-        # --- ОБРАБОТКА ДОКУМЕНТОВ ---
-        elif attach_type == 'doc':
-            file_url = attach_data.get('url')
-            if not file_url:
-                file_url = attach_data.get('doc', {}).get('url')
-            original_name = attach_data.get('title', 'document')
-            ext = attach_data.get('ext', '')
-            if not ext:
-                ext = attach_data.get('doc', {}).get('ext', '')
-            file_name = f"{original_name}.{ext}" if ext else original_name
-            file_size = attach_data.get('size', 0)
-            if not file_size:
-                file_size = attach_data.get('doc', {}).get('size', 0)
-        
-        # --- ОБРАБОТКА АУДИО ---
-        elif attach_type == 'audio':
-            file_url = attach_data.get('url')
-            if not file_url:
-                file_url = attach_data.get('audio', {}).get('url')
-            audio_id = attach_data.get('id', 'unknown')
-            file_name = f"audio_{audio_id}.mp3"
-        
-        # --- ОБРАБОТКА ССЫЛОК ---
-        elif attach_type == 'link':
-            url = attach_data.get('url', '')
-            if not url:
-                url = attach_data.get('link', {}).get('url', '')
-            text_parts.append(f"🔗 Ссылка: {url}")
-            continue
-        
-        # --- ОБРАБОТКА ЗАПИСЕЙ НА СТЕНЕ ---
-        elif attach_type == 'wall':
-            owner_id = attach_data.get('owner_id', '')
-            wall_id = attach_data.get('id', '')
-            text_parts.append(f"🔗 Запись на стене: https://vk.com/wall{owner_id}_{wall_id}")
-            continue
-        
-        else:
-            logger.warning(f"Неизвестный тип вложения: {attach_type}")
-            continue
-        
+        # Если файл найден, сохраняем ссылку
         if file_url:
             saved_files.append({
-                'file_type': attach_type,
+                'file_type': attach_type if isinstance(attach, dict) else 'photo',
                 'file_url': file_url,
                 'original_name': file_name or 'file',
                 'file_size': file_size
             })
             
-            # Добавляем информацию о файле в текст
-            file_type_emoji = {
-                'photo': '🖼️',
-                'video': '🎬',
-                'audio': '🎵',
-                'doc': '📄',
-                'file': '📎'
-            }
-            emoji = file_type_emoji.get(attach_type, '📎')
-            text_parts.append(f"{emoji} {file_name}")
+            # Добавляем информацию о файле в текст (если еще не добавлена)
+            if not text_parts or not any(file_name in tp for tp in text_parts):
+                file_type_emoji = {
+                    'photo': '🖼️',
+                    'video': '🎬',
+                    'audio': '🎵',
+                    'doc': '📄',
+                    'file': '📎'
+                }
+                emoji = file_type_emoji.get(attach_type if isinstance(attach, dict) else 'photo', '📎')
+                text_parts.append(f"{emoji} {file_name}")
     
     logger.info(f"Обработано файлов: {len(saved_files)}")
     
