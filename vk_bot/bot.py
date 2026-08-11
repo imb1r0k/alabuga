@@ -164,7 +164,7 @@ def main():
                         if key.startswith('attach') and not key.endswith('_type'):
                             attach_type_key = f"{key}_type"
                             attach_type = attachments.get(attach_type_key, 'unknown')
-                            logger.info(f"  {key}: {attach_type} -> {value[:100] if isinstance(value, str) else value}")
+                            logger.info(f"  {key}: {attach_type} -> {value}")
                 elif isinstance(attachments, list):
                     logger.info(f"Количество вложений: {len(attachments)}")
                     for i, attach in enumerate(attachments):
@@ -238,6 +238,10 @@ def main():
                         saved_files, attachment_text = process_vk_attachments(attachments, vk_session)
                         if attachment_text:
                             text = f"{text}\n\n📎 Прикрепленные файлы:\n{attachment_text}" if text else f"📎 Прикрепленные файлы:\n{attachment_text}"
+                        if saved_files:
+                            logger.info(f"Сохранено файлов: {len(saved_files)}")
+                            for f in saved_files:
+                                logger.info(f"  Файл: {f['original_name']} -> {f['file_url']}")
                     except Exception as e:
                         logger.error(f"Ошибка обработки вложений: {e}")
 
