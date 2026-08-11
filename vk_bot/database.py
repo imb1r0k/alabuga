@@ -303,6 +303,7 @@ def process_vk_attachments(attachments, vk_session):
         attach_type = 'unknown'
         attach_id = None
         owner_id = None
+        access_key = None
         
         # Если attach - строка с ID (приходит как "473566088_457255481")
         if isinstance(attach, str):
@@ -314,45 +315,21 @@ def process_vk_attachments(attachments, vk_session):
                     owner_id = parts[0]
                     media_id = parts[1]
                     
-                    # Пробуем получить прямую ссылку на фото через API
+                    # Пробуем получить информацию о вложении через API
                     try:
-                        logger.info(f"Получение фото через API: {owner_id}_{media_id}")
-                        photo_response = api.photos.getById(
-                            photos=f"{owner_id}_{media_id}",
-                            photo_sizes=1
-                        )
-                        if photo_response and len(photo_response) > 0:
-                            sizes = photo_response[0].get('sizes', [])
-                            if sizes:
-                                # Сортируем по размеру (берем самую большую)
-                                sizes.sort(key=lambda x: x.get('width', 0) * x.get('height', 0), reverse=True)
-                                file_url = sizes[0].get('url')
-                                file_name = f"photo_{media_id}.jpg"
-                                logger.info(f"Получена прямая ссылка на фото: {file_url}")
+                        # Получаем полную информацию о сообщении
+                        # Для этого нужно сохранить message_id в bot.py
+                        # Пока просто создаем ссылку на страницу
+                        file_url = f"https://vk.com/{attach_type}{owner_id}_{media_id}"
+                        file_name = f"{attach_type}_{media_id}"
+                        text_parts.append(f"🔗 {attach_type}: {file_url}")
                     except Exception as e:
-                        logger.error(f"Ошибка получения фото через API: {e}")
-                    
-                    # Если не получили прямую ссылку, пробуем документ
-                    if not file_url:
-                        try:
-                            logger.info(f"Попытка получить документ через API: {owner_id}_{media_id}")
-                            doc_response = api.docs.getById(
-                                docs=f"{owner_id}_{media_id}"
-                            )
-                            if doc_response and len(doc_response) > 0:
-                                file_url = doc_response[0].get('url')
-                                file_name = doc_response[0].get('title', f"doc_{media_id}")
-                                file_size = doc_response[0].get('size', 0)
-                                attach_type = 'doc'
-                                logger.info(f"Получена прямая ссылка на документ: {file_url}")
-                        except Exception as e:
-                            logger.error(f"Ошибка получения документа через API: {e}")
+                        logger.error(f"Ошибка получения данных: {e}")
                     
                     # Если не получили URL, создаем ссылку на страницу VK
                     if not file_url:
-                        file_url = f"https://vk.com/photo{owner_id}_{media_id}"
-                        file_name = f"photo_{media_id}.jpg"
-                        text_parts.append(f"🖼️ Фото: {file_url}")
+                        file_url = f"https://vk.com/{attach_type}{owner_id}_{media_id}"
+                        file_name = f"{attach_type}_{media_id}"
             except Exception as e:
                 logger.error(f"Ошибка парсинга ID: {e}")
                 text_parts.append(f"📎 {attach}")
@@ -367,6 +344,7 @@ def process_vk_attachments(attachments, vk_session):
             
             attach_id = attach_data.get('id', '')
             owner_id = attach_data.get('owner_id', '')
+            access_key = attach_data.get('access_key', '')
             
             # Если owner_id нет, но есть в attach_id с подчеркиванием
             if not owner_id and attach_id and '_' in str(attach_id):
@@ -375,7 +353,7 @@ def process_vk_attachments(attachments, vk_session):
                     owner_id = parts[0]
                     attach_id = parts[1]
             
-            logger.info(f"Обработка вложения: тип={attach_type}, id={attach_id}, owner={owner_id}")
+            logger.info(f"Обработка вложения: тип={attach_type}, id={attach_id}, owner={owner_id}, access_key={access_key}")
             
             # --- ОБРАБОТКА ФОТО ---
             if attach_type == 'photo':
@@ -390,9 +368,14 @@ def process_vk_attachments(attachments, vk_session):
                     # Пробуем получить прямую ссылку через API
                     try:
                         if owner_id and attach_id:
-                            logger.info(f"Получение фото через API: {owner_id}_{attach_id}")
+                            # Формируем строку фото с access_key если есть
+                            photo_str = f"{owner_id}_{attach_id}"
+                            if access_key:
+                                photo_str = f"{owner_id}_{attach_id}_{access_key}"
+                            
+                            logger.info(f"Получение фото через API: {photo_str}")
                             photo_response = api.photos.getById(
-                                photos=f"{owner_id}_{attach_id}",
+                                photos=photo_str,
                                 photo_sizes=1
                             )
                             if photo_response and len(photo_response) > 0:
@@ -424,14 +407,19 @@ def process_vk_attachments(attachments, vk_session):
                 # Пробуем получить прямую ссылку через API
                 try:
                     if owner_id and attach_id:
-                        logger.info(f"Получение документа через API: {owner_id}_{attach_id}")
+                        doc_str = f"{owner_id}_{attach_id}"
+                        if access_key:
+                            doc_str = f"{owner_id}_{attach_id}_{access_key}"
+                        
+                        logger.info(f"Получение документа через API: {doc_str}")
                         doc_response = api.docs.getById(
-                            docs=f"{owner_id}_{attach_id}"
+                            docs=doc_str
                         )
                         if doc_response and len(doc_response) > 0:
                             file_url = doc_response[0].get('url')
                             file_name = doc_response[0].get('title', f"doc_{attach_id}")
                             file_size = doc_response[0].get('size', 0)
+                            attach_type = 'doc'
                             logger.info(f"Получена прямая ссылка на документ: {file_url}")
                 except Exception as e:
                     logger.error(f"Ошибка получения документа через API: {e}")
@@ -451,9 +439,13 @@ def process_vk_attachments(attachments, vk_session):
                 # Пробуем получить ссылку через API
                 try:
                     if owner_id and attach_id:
-                        logger.info(f"Получение видео через API: {owner_id}_{attach_id}")
+                        video_str = f"{owner_id}_{attach_id}"
+                        if access_key:
+                            video_str = f"{owner_id}_{attach_id}_{access_key}"
+                        
+                        logger.info(f"Получение видео через API: {video_str}")
                         video_response = api.video.get(
-                            videos=f"{owner_id}_{attach_id}"
+                            videos=video_str
                         )
                         if video_response and 'items' in video_response and len(video_response['items']) > 0:
                             file_url = video_response['items'][0].get('player')
@@ -475,9 +467,13 @@ def process_vk_attachments(attachments, vk_session):
             elif attach_type == 'audio':
                 try:
                     if owner_id and attach_id:
-                        logger.info(f"Получение аудио через API: {owner_id}_{attach_id}")
+                        audio_str = f"{owner_id}_{attach_id}"
+                        if access_key:
+                            audio_str = f"{owner_id}_{attach_id}_{access_key}"
+                        
+                        logger.info(f"Получение аудио через API: {audio_str}")
                         audio_response = api.audio.getById(
-                            audios=f"{owner_id}_{attach_id}"
+                            audios=audio_str
                         )
                         if audio_response and len(audio_response) > 0:
                             file_url = audio_response[0].get('url')

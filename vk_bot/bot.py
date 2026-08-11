@@ -162,25 +162,38 @@ def main():
                 attachments = event.attachments
                 logger.info(f"=== ВЛОЖЕНИЯ ПОЛУЧЕНЫ ===")
                 logger.info(f"Тип attachments: {type(attachments)}")
-                if isinstance(attachments, dict):
-                    logger.info(f"Ключи: {list(attachments.keys())}")
-                    for key, value in attachments.items():
-                        if key.startswith('attach') and not key.endswith('_type'):
-                            attach_type_key = f"{key}_type"
-                            attach_type = attachments.get(attach_type_key, 'unknown')
-                            logger.info(f"  {key}: тип={attach_type}, значение={value}")
-                            if isinstance(value, dict):
-                                logger.info(f"    Ключи value: {value.keys()}")
-                elif isinstance(attachments, list):
-                    logger.info(f"Количество вложений: {len(attachments)}")
-                    for i, attach in enumerate(attachments):
-                        logger.info(f"Вложение {i}: {attach}")
-                        if isinstance(attach, dict):
-                            logger.info(f"  Ключи: {attach.keys()}")
-                            if 'type' in attach:
-                                logger.info(f"  Тип: {attach['type']}")
-                                attach_data = attach.get(attach['type'], {})
-                                logger.info(f"  Данные: {attach_data}")
+                
+                # Получаем полную информацию о сообщении для access_key
+                try:
+                    message_data = vk.messages.getById(message_ids=event.message_id)
+                    logger.info(f"Полная информация о сообщении: {message_data}")
+                    if message_data and 'items' in message_data and len(message_data['items']) > 0:
+                        msg_attachments = message_data['items'][0].get('attachments', [])
+                        logger.info(f"Вложения из messages.getById: {msg_attachments}")
+                        
+                        # Если есть более полная информация, преобразуем вложения
+                        if msg_attachments:
+                            new_attachments = {}
+                            for i, att in enumerate(msg_attachments):
+                                att_type = att.get('type')
+                                att_data = att.get(att_type, {})
+                                att_id = att_data.get('id')
+                                att_owner_id = att_data.get('owner_id')
+                                att_access_key = att_data.get('access_key', '')
+                                
+                                new_attachments[f'attach{i+1}'] = {
+                                    'type': att_type,
+                                    'id': att_id,
+                                    'owner_id': att_owner_id,
+                                    'access_key': att_access_key,
+                                    'data': att_data
+                                }
+                                new_attachments[f'attach{i+1}_type'] = att_type
+                            
+                            attachments = new_attachments
+                            logger.info(f"Преобразованные вложения: {list(attachments.keys())}")
+                except Exception as e:
+                    logger.error(f"Ошибка получения полной информации о сообщении: {e}")
 
             try:
                 user_info = vk.users.get(user_ids=vk_id)[0]
@@ -259,7 +272,7 @@ def main():
                 for file_info in saved_files:
                     save_report_media(
                         report_id,
-                        file_info['file_url'],  # Сохраняем ссылку VK
+                        file_info['file_url'],
                         file_info['file_type'],
                         file_info['original_name'],
                         file_info.get('file_size', 0)
