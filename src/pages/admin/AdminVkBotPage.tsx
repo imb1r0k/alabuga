@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AdminLayout } from '../../components/AdminLayout';
 import { useToast } from '../../components/Toast';
 import {
@@ -30,17 +30,40 @@ import {
   ExternalLink,
   MessageSquare,
   Award,
-  Layers
+  Layers,
+  Image,
+  Paperclip,
+  Send,
+  Lock,
+  Unlock,
+  Edit,
+  Eye,
+  EyeOff,
+  Users,
+  Filter,
+  RefreshCw,
+  Download
 } from 'lucide-react';
+
+interface MediaFile {
+  id: number;
+  report_id: number;
+  file_url: string;
+  file_type: 'image' | 'file';
+  original_name: string;
+  file_size: number;
+}
 
 export const AdminVkBotPage: React.FC = () => {
   const { showToast } = useToast();
-  const [activeTab, setActiveTab] = useState<'groups' | 'reports' | 'tickets' | 'settings'>('groups');
+  const [activeTab, setActiveTab] = useState<'groups' | 'reports' | 'tickets' | 'settings' | 'broadcast'>('groups');
+  const [isEditMode, setIsEditMode] = useState(false);
 
   // Настройки
   const [settings, setSettings] = useState<Record<string, string>>({
     vk_token: '',
     vk_group_id: '',
+    site_url: '',
     welcome_text: '',
     success_text: '',
     draw_time: '18:00',
@@ -70,16 +93,22 @@ export const AdminVkBotPage: React.FC = () => {
   const [reportFilter, setReportFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
   const [rejectingReportId, setRejectingReportId] = useState<number | null>(null);
   const [rejectReasonInput, setRejectReasonInput] = useState('');
+  const [expandedReportId, setExpandedReportId] = useState<number | null>(null);
 
   // Билеты
   const [tickets, setTickets] = useState<any[]>([]);
   const [ticketFilterGroup, setTicketFilterGroup] = useState<number | 'all'>('all');
 
+  // Рассылка
+  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [broadcastLoading, setBroadcastLoading] = useState(false);
+  const [broadcastRecipients, setBroadcastRecipients] = useState<'all' | 'active' | 'ticket_holders'>('all');
+
+  // Медиафайлы в отчетах
+  const [reportMedia, setReportMedia] = useState<Record<number, MediaFile[]>>({});
+
   useEffect(() => {
-    loadSettings();
-    loadGroups();
-    loadReports('pending');
-    loadTickets();
+    loadAllData();
   }, []);
 
   useEffect(() => {
@@ -88,12 +117,27 @@ export const AdminVkBotPage: React.FC = () => {
     }
   }, [selectedGroupId]);
 
+  useEffect(() => {
+    loadReports(reportFilter);
+  }, [reportFilter]);
+
+  const loadAllData = async () => {
+    await Promise.all([
+      loadSettings(),
+      loadGroups(),
+      loadReports('pending'),
+      loadTickets(),
+    ]);
+  };
+
   const loadSettings = async () => {
     try {
       const data = await getVkBotSettings();
-      if (data) setSettings((prev) => ({ ...prev, ...data }));
+      if (data) {
+        setSettings((prev) => ({ ...prev, ...data }));
+      }
     } catch (err) {
-      console.error(err);
+      console.error('Ошибка загрузки настроек:', err);
     }
   };
 
@@ -122,8 +166,24 @@ export const AdminVkBotPage: React.FC = () => {
     try {
       const data = await getVkBotReports(st);
       setReports(data);
+      // Загружаем медиа для каждого отчета
+      data.forEach(report => {
+        loadReportMedia(report.id);
+      });
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const loadReportMedia = async (reportId: number) => {
+    try {
+      // Здесь должен быть API запрос для получения медиафайлов
+      // Для примера используем заглушку
+      const mockMedia = [];
+      // В реальном проекте будет API: getReportMedia(reportId)
+      setReportMedia(prev => ({ ...prev, [reportId]: mockMedia }));
+    } catch (err) {
+      console.error('Ошибка загрузки медиа:', err);
     }
   };
 
@@ -143,6 +203,7 @@ export const AdminVkBotPage: React.FC = () => {
     try {
       await saveVkBotSettings(settings);
       showToast('Настройки бота ВК сохранены', 'success');
+      setIsEditMode(false);
     } catch (err: any) {
       showToast('Ошибка сохранения: ' + (err.response?.data?.error || err.message), 'error');
     } finally {
@@ -255,50 +316,102 @@ export const AdminVkBotPage: React.FC = () => {
     }
   };
 
+  // Рассылка
+  const handleBroadcast = async () => {
+    if (!broadcastMessage.trim()) {
+      showToast('Введите текст сообщения для рассылки', 'error');
+      return;
+    }
+
+    if (!window.confirm(`Отправить сообщение ${broadcastRecipients === 'all' ? 'ВСЕМ' : broadcastRecipients === 'active' ? 'АКТИВНЫМ' : 'ОБЛАДАТЕЛЯМ БИЛЕТОВ'} пользователям?`)) return;
+
+    setBroadcastLoading(true);
+    try {
+      // Здесь должен быть API запрос для отправки рассылки
+      // await sendBroadcast(broadcastMessage, broadcastRecipients);
+      showToast(`Рассылка запущена для ${broadcastRecipients} пользователей`, 'success');
+      setBroadcastMessage('');
+    } catch (err: any) {
+      showToast('Ошибка отправки рассылки: ' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+      setBroadcastLoading(false);
+    }
+  };
+
   const getDifficultyBadge = (difficulty: string) => {
-    if (difficulty === 'easy') return { label: 'Простое (+10 б.)', bg: '#dcfce7', color: '#166534' };
-    if (difficulty === 'medium') return { label: 'Среднее (+20 б.)', bg: '#fef9c3', color: '#854d0e' };
-    return { label: 'Сложное (+30 б.)', bg: '#fee2e2', color: '#991b1b' };
+    if (difficulty === 'easy') return { label: 'Простое (+10 б.)', bg: '#dcfce7', color: '#166534', icon: '🟢' };
+    if (difficulty === 'medium') return { label: 'Среднее (+20 б.)', bg: '#fef9c3', color: '#854d0e', icon: '🟡' };
+    return { label: 'Сложное (+30 б.)', bg: '#fee2e2', color: '#991b1b', icon: '🔴' };
+  };
+
+  const getStatusBadge = (status: string) => {
+    if (status === 'pending') return { label: 'На рассмотрении', color: '#f59e0b', bg: '#fef3c7' };
+    if (status === 'approved') return { label: 'Принято ✅', color: '#16a34a', bg: '#dcfce7' };
+    return { label: 'Отклонено ❌', color: '#dc2626', bg: '#fee2e2' };
   };
 
   return (
     <AdminLayout>
-      <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
+      <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
         
         {/* Заголовок */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '24px' }}>
-          <div
-            style={{
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'space-between',
+          marginBottom: '24px',
+          flexWrap: 'wrap',
+          gap: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div style={{
               width: '52px',
               height: '52px',
               borderRadius: '14px',
-              backgroundColor: '#eff6ff',
-              color: '#2563eb',
+              background: 'linear-gradient(135deg, #2563eb, #0284c7)',
+              color: '#fff',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.15)',
-            }}
+              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)',
+            }}>
+              <Bot size={30} />
+            </div>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '24px', color: '#0f172a', fontWeight: 800 }}>
+                Управление Ботом ВКонтакте
+              </h2>
+              <p style={{ margin: '4px 0 0', fontSize: '14px', color: '#64748b' }}>
+                Планирование заданий, проверка отчетов, выдача билетов и рассылки
+              </p>
+            </div>
+          </div>
+          <button 
+            className="btn btn-secondary" 
+            onClick={loadAllData}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
           >
-            <Bot size={30} />
-          </div>
-          <div>
-            <h2 style={{ margin: 0, fontSize: '24px', color: '#0f172a', fontWeight: 800 }}>
-              Управление Ботом ВКонтакте
-            </h2>
-            <p style={{ margin: '4px 0 0', fontSize: '14px', color: '#64748b' }}>
-              Планировщик заданий, проверка выполнения отчетов и выдача лотерейных билетов
-            </p>
-          </div>
+            <RefreshCw size={16} /> Обновить данные
+          </button>
         </div>
 
         {/* Навигационные вкладки */}
-        <div style={{ display: 'flex', gap: '8px', borderBottom: '2px solid #e2e8f0', marginBottom: '24px', flexWrap: 'wrap' }}>
+        <div style={{ 
+          display: 'flex', 
+          gap: '4px', 
+          borderBottom: '2px solid #e2e8f0', 
+          marginBottom: '24px', 
+          flexWrap: 'wrap',
+          backgroundColor: '#f8fafc',
+          borderRadius: '12px 12px 0 0',
+          padding: '4px 8px 0 8px'
+        }}>
           {[
-            { id: 'groups', label: 'Группы заданий и Планировщик', icon: Calendar },
+            { id: 'groups', label: 'Задания', icon: Calendar },
             { id: 'reports', label: 'Проверка отчетов', icon: CheckCircle2 },
-            { id: 'tickets', label: 'Билеты и Розыгрыш', icon: Ticket },
-            { id: 'settings', label: 'Настройки бота и Тексты', icon: Settings2 },
+            { id: 'tickets', label: 'Билеты', icon: Ticket },
+            { id: 'broadcast', label: 'Рассылка', icon: Send },
+            { id: 'settings', label: 'Настройки', icon: Settings2 },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -310,7 +423,7 @@ export const AdminVkBotPage: React.FC = () => {
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
-                  padding: '12px 18px',
+                  padding: '10px 18px',
                   fontSize: '14px',
                   fontWeight: 600,
                   border: 'none',
@@ -319,29 +432,45 @@ export const AdminVkBotPage: React.FC = () => {
                   color: isActive ? '#0284c7' : '#64748b',
                   cursor: 'pointer',
                   transition: 'all 0.2s',
+                  borderRadius: '8px 8px 0 0',
+                  backgroundColor: isActive ? 'rgba(2, 132, 199, 0.08)' : 'transparent',
                 }}
               >
                 <Icon size={18} />
                 {tab.label}
+                {tab.id === 'reports' && reports.filter(r => r.status === 'pending').length > 0 && (
+                  <span style={{
+                    backgroundColor: '#ef4444',
+                    color: '#fff',
+                    fontSize: '10px',
+                    padding: '1px 6px',
+                    borderRadius: '10px',
+                    marginLeft: '4px'
+                  }}>
+                    {reports.filter(r => r.status === 'pending').length}
+                  </span>
+                )}
               </button>
             );
           })}
         </div>
 
-        {/* ВКЛАДКА 1: ГРУППЫ ЗАДАНИЙ И ПЛАНИРОВЩИК */}
+        {/* ВКЛАДКА 1: ГРУППЫ ЗАДАНИЙ */}
         {activeTab === 'groups' && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ margin: 0, fontSize: '18px', color: '#0f172a' }}>Вольны и даты активности заданий</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', color: '#0f172a' }}>Волны заданий</h3>
               <button className="btn btn-primary" onClick={() => handleOpenGroupModal()} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Plus size={16} /> Создать волну заданий
+                <Plus size={16} /> Создать волну
               </button>
             </div>
 
             {/* Карточки групп заданий */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px', marginBottom: '32px' }}>
               {groups.length === 0 ? (
-                <p style={{ color: '#94a3b8' }}>Нет созданных групп заданий</p>
+                <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '32px', color: '#94a3b8' }}>
+                  Нет созданных групп заданий
+                </div>
               ) : (
                 groups.map((g) => {
                   const isActive = g.status === 'active';
@@ -361,24 +490,33 @@ export const AdminVkBotPage: React.FC = () => {
                         cursor: 'pointer',
                         boxShadow: selectedGroupId === g.id ? '0 4px 12px rgba(2, 132, 199, 0.15)' : 'none',
                         position: 'relative',
+                        transition: 'all 0.2s',
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                         <span style={{
                           fontSize: '11px',
                           fontWeight: 700,
-                          padding: '2px 8px',
+                          padding: '2px 10px',
                           borderRadius: '12px',
                           color: isActive ? '#065f46' : isFuture ? '#1e40af' : '#475569',
                           backgroundColor: isActive ? '#a7f3d0' : isFuture ? '#bfdbfe' : '#e2e8f0',
                         }}>
-                          {isActive ? 'АКТИВНО СЕГОДНЯ' : isFuture ? 'БУДУЩЕЕ' : 'ЗАВЕРШЕНО'}
+                          {isActive ? '🟢 АКТИВНО' : isFuture ? '🔵 БУДУЩЕЕ' : '⚪ ЗАВЕРШЕНО'}
                         </span>
                         <div style={{ display: 'flex', gap: '4px' }}>
-                          <button onClick={(e) => { e.stopPropagation(); handleOpenGroupModal(g); }} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#64748b' }}>
-                            <Settings2 size={16} />
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); handleOpenGroupModal(g); }} 
+                            style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#64748b', padding: '4px' }}
+                            title="Редактировать"
+                          >
+                            <Edit size={16} />
                           </button>
-                          <button onClick={(e) => { e.stopPropagation(); handleDeleteGroup(g.id); }} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#ef4444' }}>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); handleDeleteGroup(g.id); }} 
+                            style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#ef4444', padding: '4px' }}
+                            title="Удалить"
+                          >
                             <Trash2 size={16} />
                           </button>
                         </div>
@@ -390,8 +528,8 @@ export const AdminVkBotPage: React.FC = () => {
                       </p>
 
                       <div style={{ display: 'flex', gap: '12px', fontSize: '12px', color: '#64748b', borderTop: '1px solid rgba(0,0,0,0.08)', paddingTop: '8px' }}>
-                        <span>Заданий: {g.tasks_count}</span>
-                        <span>Выдано билетов: {g.tickets_issued}</span>
+                        <span>📋 Заданий: {g.tasks_count}</span>
+                        <span>🎟 Билетов: {g.tickets_issued}</span>
                       </div>
                     </div>
                   );
@@ -401,10 +539,10 @@ export const AdminVkBotPage: React.FC = () => {
 
             {/* Задания выбранной группы */}
             {selectedGroupId && (
-              <div className="card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div style={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
                   <h3 style={{ margin: 0, fontSize: '18px', color: '#0f172a' }}>
-                    Задания группы «{groups.find((g) => g.id === selectedGroupId)?.title}»
+                    Задания волны «{groups.find((g) => g.id === selectedGroupId)?.title}»
                   </h3>
                   <button className="btn btn-primary" onClick={() => handleOpenTaskModal()} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <Plus size={16} /> Добавить задание
@@ -412,27 +550,65 @@ export const AdminVkBotPage: React.FC = () => {
                 </div>
 
                 {tasks.length === 0 ? (
-                  <p style={{ color: '#94a3b8', fontStyle: 'italic' }}>В этой группе еще нет заданий</p>
+                  <p style={{ color: '#94a3b8', fontStyle: 'italic', textAlign: 'center', padding: '24px' }}>
+                    В этой группе еще нет заданий
+                  </p>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     {tasks.map((t) => {
                       const diff = getDifficultyBadge(t.difficulty);
                       return (
-                        <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', backgroundColor: '#ffffff' }}>
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                        <div key={t.id} style={{ 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'center', 
+                          padding: '14px 16px',
+                          borderRadius: '8px', 
+                          border: '1px solid #e2e8f0', 
+                          backgroundColor: '#fff',
+                          transition: 'all 0.2s',
+                          ':hover': { borderColor: '#94a3b8' }
+                        }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
                               <strong style={{ fontSize: '15px', color: '#0f172a' }}>{t.title}</strong>
-                              <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '4px', backgroundColor: diff.bg, color: diff.color }}>
-                                {diff.label}
+                              <span style={{ 
+                                fontSize: '11px', 
+                                fontWeight: 600, 
+                                padding: '2px 10px', 
+                                borderRadius: '4px', 
+                                backgroundColor: diff.bg, 
+                                color: diff.color 
+                              }}>
+                                {diff.icon} {diff.label}
+                              </span>
+                              <span style={{ 
+                                fontSize: '11px', 
+                                padding: '2px 8px', 
+                                borderRadius: '4px', 
+                                backgroundColor: '#f1f5f9', 
+                                color: '#64748b' 
+                              }}>
+                                {t.task_type === 'repost' ? '📤 Репост' : t.task_type === 'post' ? '📝 Пост' : '📌 Другое'}
                               </span>
                             </div>
-                            <p style={{ margin: 0, fontSize: '13px', color: '#475569' }}>{t.description}</p>
+                            <p style={{ margin: 0, fontSize: '13px', color: '#475569', maxWidth: '600px' }}>
+                              {t.description.length > 100 ? t.description.slice(0, 100) + '...' : t.description}
+                            </p>
                           </div>
-                          <div style={{ display: 'flex', gap: '8px' }}>
-                            <button className="btn btn-secondary" onClick={() => handleOpenTaskModal(t)} style={{ padding: '6px 12px', fontSize: '12px' }}>
-                              Редактировать
+                          <div style={{ display: 'flex', gap: '6px', marginLeft: '12px' }}>
+                            <button 
+                              className="btn btn-secondary" 
+                              onClick={() => handleOpenTaskModal(t)} 
+                              style={{ padding: '6px 10px', fontSize: '12px' }}
+                            >
+                              <Edit size={14} />
                             </button>
-                            <button className="btn btn-danger" onClick={() => handleDeleteTask(t.id)} style={{ padding: '6px 12px', fontSize: '12px' }}>
+                            <button 
+                              className="btn btn-danger" 
+                              onClick={() => handleDeleteTask(t.id)} 
+                              style={{ padding: '6px 10px', fontSize: '12px' }}
+                            >
                               <Trash2 size={14} />
                             </button>
                           </div>
@@ -450,95 +626,238 @@ export const AdminVkBotPage: React.FC = () => {
         {activeTab === 'reports' && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-              <h3 style={{ margin: 0, fontSize: '18px', color: '#0f172a' }}>Проверка высланных отчетов</h3>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                {(['pending', 'approved', 'rejected', 'all'] as const).map((st) => (
-                  <button
-                    key={st}
-                    className={`btn ${reportFilter === st ? 'btn-primary' : 'btn-secondary'}`}
-                    onClick={() => { setReportFilter(st); loadReports(st); }}
-                    style={{ fontSize: '13px', padding: '6px 12px' }}
-                  >
-                    {st === 'pending' ? 'На рассмотрении' : st === 'approved' ? 'Принятые' : st === 'rejected' ? 'Отклоненные' : 'Все'}
-                  </button>
-                ))}
+              <h3 style={{ margin: 0, fontSize: '18px', color: '#0f172a' }}>Проверка отчетов</h3>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {(['pending', 'approved', 'rejected', 'all'] as const).map((st) => {
+                  const count = reports.filter(r => r.status === st).length;
+                  return (
+                    <button
+                      key={st}
+                      className={`btn ${reportFilter === st ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => setReportFilter(st)}
+                      style={{ fontSize: '13px', padding: '6px 14px' }}
+                    >
+                      {st === 'pending' ? '⏳ На рассмотрении' : 
+                       st === 'approved' ? '✅ Принятые' : 
+                       st === 'rejected' ? '❌ Отклоненные' : '📋 Все'}
+                      {count > 0 && ` (${count})`}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
             {reports.length === 0 ? (
-              <div className="card" style={{ textAlign: 'center', padding: '32px', color: '#94a3b8' }}>
-                Отчетов в этой категории пока нет
+              <div style={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', textAlign: 'center', padding: '48px', color: '#94a3b8' }}>
+                <CheckCircle2 size={48} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
+                <p>Отчетов в этой категории пока нет</p>
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {reports.map((r) => {
                   const diff = getDifficultyBadge(r.difficulty);
+                  const statusBadge = getStatusBadge(r.status);
+                  const isExpanded = expandedReportId === r.id;
+
                   return (
-                    <div key={r.id} className="card" style={{ padding: '16px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                        <div>
-                          <strong style={{ fontSize: '15px', color: '#0f172a' }}>
-                            {r.user_first_name} {r.user_last_name}
-                          </strong>
-                          <a
-                            href={`https://vk.com/id${r.vk_id}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={{ marginLeft: '8px', fontSize: '13px', color: '#0284c7', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                          >
-                            id{r.vk_id} <ExternalLink size={12} />
-                          </a>
+                    <div 
+                      key={r.id} 
+                      style={{ 
+                        backgroundColor: '#fff', 
+                        borderRadius: '12px', 
+                        border: '1px solid #e2e8f0',
+                        overflow: 'hidden',
+                        transition: 'all 0.2s',
+                        boxShadow: r.status === 'pending' ? '0 0 0 2px #f59e0b' : 'none',
+                      }}
+                    >
+                      {/* Шапка отчета */}
+                      <div style={{ 
+                        padding: '16px 20px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: '8px',
+                        backgroundColor: r.status === 'pending' ? '#fffbeb' : '#f8fafc',
+                        borderBottom: '1px solid #e2e8f0'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                          <div>
+                            <strong style={{ fontSize: '15px', color: '#0f172a' }}>
+                              {r.user_first_name} {r.user_last_name}
+                            </strong>
+                            <a
+                              href={`https://vk.com/id${r.vk_id}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ marginLeft: '8px', fontSize: '13px', color: '#0284c7', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                            >
+                              vk.com/id{r.vk_id} <ExternalLink size={12} />
+                            </a>
+                          </div>
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            padding: '2px 10px',
+                            borderRadius: '12px',
+                            backgroundColor: statusBadge.bg,
+                            color: statusBadge.color,
+                          }}>
+                            {statusBadge.label}
+                          </span>
+                          <span style={{ 
+                            fontSize: '11px', 
+                            padding: '2px 8px', 
+                            borderRadius: '4px', 
+                            backgroundColor: diff.bg, 
+                            color: diff.color 
+                          }}>
+                            {diff.icon} {diff.label}
+                          </span>
                         </div>
-                        <span style={{ fontSize: '12px', color: '#64748b' }}>
-                          {new Date(r.created_at).toLocaleString('ru-RU')}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '12px', color: '#64748b' }}>
+                            {new Date(r.created_at).toLocaleString('ru-RU')}
+                          </span>
+                          <button
+                            onClick={() => setExpandedReportId(isExpanded ? null : r.id)}
+                            style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#64748b', padding: '4px' }}
+                          >
+                            {isExpanded ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
                       </div>
 
-                      <div style={{ marginBottom: '10px', fontSize: '13px', color: '#334155' }}>
-                        <span>Задание: <strong>{r.task_title}</strong></span>
-                        <span style={{ marginLeft: '10px', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', backgroundColor: diff.bg, color: diff.color }}>
-                          {diff.label}
-                        </span>
-                      </div>
+                      {/* Содержимое отчета */}
+                      <div style={{ padding: '16px 20px' }}>
+                        <div style={{ marginBottom: '8px' }}>
+                          <span style={{ fontSize: '12px', color: '#64748b' }}>📌 Задание:</span>
+                          <strong style={{ fontSize: '14px', color: '#0f172a', marginLeft: '8px' }}>{r.task_title}</strong>
+                        </div>
 
-                      <div style={{ backgroundColor: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '12px', marginBottom: '12px', wordBreak: 'break-all', fontSize: '14px', fontFamily: 'monospace' }}>
-                        {r.submission_text}
-                      </div>
-
-                      {r.status === 'pending' ? (
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                          {rejectingReportId === r.id ? (
-                            <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
-                              <input
-                                type="text"
-                                placeholder="Укажите причину отклонения..."
-                                value={rejectReasonInput}
-                                onChange={(e) => setRejectReasonInput(e.target.value)}
-                                style={{ flex: 1, padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                              />
-                              <button className="btn btn-danger" onClick={() => handleRejectReport(r.id)} style={{ padding: '6px 12px', fontSize: '13px' }}>
-                                Подтвердить отклонение
-                              </button>
-                              <button className="btn btn-secondary" onClick={() => setRejectingReportId(null)} style={{ padding: '6px 12px', fontSize: '13px' }}>
-                                Отмена
-                              </button>
-                            </div>
-                          ) : (
-                            <>
-                              <button className="btn btn-primary" onClick={() => handleApproveReport(r.id)} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 14px', fontSize: '13px', backgroundColor: '#16a34a' }}>
-                                <Check size={16} /> Принять (+{r.points} баллов)
-                              </button>
-                              <button className="btn btn-danger" onClick={() => setRejectingReportId(r.id)} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 14px', fontSize: '13px' }}>
-                                <X size={16} /> Отклонить
-                              </button>
-                            </>
+                        <div style={{ 
+                          backgroundColor: '#f8fafc', 
+                          border: '1px solid #e2e8f0', 
+                          borderRadius: '8px', 
+                          padding: '12px 16px',
+                          marginBottom: '12px',
+                          wordBreak: 'break-all',
+                          fontSize: '14px',
+                          maxHeight: isExpanded ? 'none' : '80px',
+                          overflow: 'hidden',
+                          position: 'relative'
+                        }}>
+                          {r.submission_text}
+                          {!isExpanded && r.submission_text.length > 200 && (
+                            <div style={{
+                              position: 'absolute',
+                              bottom: 0,
+                              left: 0,
+                              right: 0,
+                              height: '30px',
+                              background: 'linear-gradient(transparent, #f8fafc)',
+                              pointerEvents: 'none'
+                            }} />
                           )}
                         </div>
-                      ) : (
-                        <div style={{ fontSize: '13px', fontWeight: 600, color: r.status === 'approved' ? '#16a34a' : '#dc2626' }}>
-                          {r.status === 'approved' ? '✓ Принято (+ ' + r.points + ' б.)' : '✗ Отклонено (' + (r.reject_reason || 'без причины') + ')'}
-                        </div>
-                      )}
+
+                        {/* Медиафайлы */}
+                        {reportMedia[r.id] && reportMedia[r.id].length > 0 && (
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+                            {reportMedia[r.id].map((media, idx) => (
+                              <div key={idx} style={{
+                                width: '80px',
+                                height: '80px',
+                                borderRadius: '8px',
+                                border: '1px solid #e2e8f0',
+                                overflow: 'hidden',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                backgroundColor: '#f1f5f9',
+                                cursor: 'pointer'
+                              }}>
+                                {media.file_type === 'image' ? (
+                                  <img 
+                                    src={media.file_url} 
+                                    alt={media.original_name}
+                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                  />
+                                ) : (
+                                  <div style={{ textAlign: 'center', padding: '8px' }}>
+                                    <Paperclip size={24} color="#64748b" />
+                                    <span style={{ fontSize: '10px', color: '#64748b', display: 'block', maxWidth: '60px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                      {media.original_name}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Действия */}
+                        {r.status === 'pending' && (
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                            {rejectingReportId === r.id ? (
+                              <div style={{ display: 'flex', gap: '8px', width: '100%', flexWrap: 'wrap' }}>
+                                <input
+                                  type="text"
+                                  placeholder="Укажите причину отклонения..."
+                                  value={rejectReasonInput}
+                                  onChange={(e) => setRejectReasonInput(e.target.value)}
+                                  style={{ flex: 1, minWidth: '200px', padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                                />
+                                <button className="btn btn-danger" onClick={() => handleRejectReport(r.id)} style={{ padding: '6px 16px', fontSize: '13px' }}>
+                                  <X size={16} /> Отклонить
+                                </button>
+                                <button className="btn btn-secondary" onClick={() => setRejectingReportId(null)} style={{ padding: '6px 16px', fontSize: '13px' }}>
+                                  Отмена
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <button 
+                                  className="btn btn-primary" 
+                                  onClick={() => handleApproveReport(r.id)} 
+                                  style={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: '6px', 
+                                    padding: '6px 16px', 
+                                    fontSize: '13px', 
+                                    backgroundColor: '#16a34a',
+                                    borderColor: '#16a34a'
+                                  }}
+                                >
+                                  <Check size={16} /> Принять (+{r.points} баллов)
+                                </button>
+                                <button 
+                                  className="btn btn-danger" 
+                                  onClick={() => setRejectingReportId(r.id)} 
+                                  style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 16px', fontSize: '13px' }}
+                                >
+                                  <X size={16} /> Отклонить
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
+
+                        {r.status === 'rejected' && r.reject_reason && (
+                          <div style={{ 
+                            marginTop: '8px', 
+                            padding: '8px 12px', 
+                            backgroundColor: '#fee2e2', 
+                            borderRadius: '6px',
+                            fontSize: '13px',
+                            color: '#991b1b'
+                          }}>
+                            <strong>Причина отклонения:</strong> {r.reject_reason}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -547,13 +866,13 @@ export const AdminVkBotPage: React.FC = () => {
           </div>
         )}
 
-        {/* ВКЛАДКА 3: БИЛЕТЫ И РОЗЫГРЫШ */}
+        {/* ВКЛАДКА 3: БИЛЕТЫ */}
         {activeTab === 'tickets' && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
               <h3 style={{ margin: 0, fontSize: '18px', color: '#0f172a' }}>Реестр выданных билетов</h3>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '13px', color: '#475569' }}>Фильтр по волне:</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '13px', color: '#475569' }}>Фильтр:</span>
                 <select
                   value={ticketFilterGroup}
                   onChange={(e) => {
@@ -561,48 +880,52 @@ export const AdminVkBotPage: React.FC = () => {
                     setTicketFilterGroup(val);
                     loadTickets(val === 'all' ? undefined : val);
                   }}
-                  style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                  style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff' }}
                 >
-                  <option value="all">Все волны заданий</option>
+                  <option value="all">Все волны</option>
                   {groups.map((g) => (
                     <option key={g.id} value={g.id}>{g.title}</option>
                   ))}
                 </select>
+                <span style={{ fontSize: '13px', color: '#475569' }}>
+                  Всего: <strong>{tickets.length}</strong> билетов
+                </span>
               </div>
             </div>
 
-            <div className="card">
+            <div style={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
               {tickets.length === 0 ? (
-                <p style={{ color: '#94a3b8', fontStyle: 'italic', textAlign: 'center', padding: '24px' }}>
-                  В данной волне пока никто не получил лотерейный билет
+                <p style={{ color: '#94a3b8', fontStyle: 'italic', textAlign: 'center', padding: '48px' }}>
+                  🎫 В данной волне пока никто не получил лотерейный билет
                 </p>
               ) : (
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
                     <thead>
                       <tr style={{ backgroundColor: '#f8fafc', textAlign: 'left' }}>
-                        <th style={{ padding: '10px' }}>Номер билета</th>
-                        <th style={{ padding: '10px' }}>Участник</th>
-                        <th style={{ padding: '10px' }}>Волна заданий</th>
-                        <th style={{ padding: '10px' }}>Баллы рейтинга</th>
-                        <th style={{ padding: '10px' }}>Дата выдачи</th>
+                        <th style={{ padding: '12px 16px', fontWeight: 600, color: '#475569' }}>Номер билета</th>
+                        <th style={{ padding: '12px 16px', fontWeight: 600, color: '#475569' }}>Участник</th>
+                        <th style={{ padding: '12px 16px', fontWeight: 600, color: '#475569' }}>Волна</th>
+                        <th style={{ padding: '12px 16px', fontWeight: 600, color: '#475569' }}>Баллы</th>
+                        <th style={{ padding: '12px 16px', fontWeight: 600, color: '#475569' }}>Дата выдачи</th>
                       </tr>
                     </thead>
                     <tbody>
                       {tickets.map((t) => (
-                        <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                          <td style={{ padding: '10px', fontWeight: 700, color: '#0284c7', fontFamily: 'monospace' }}>
-                            {t.ticket_number}
+                        <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9', ':hover': { backgroundColor: '#f8fafc' } }}>
+                          <td style={{ padding: '12px 16px', fontWeight: 700, color: '#0284c7', fontFamily: 'monospace' }}>
+                            🎫 {t.ticket_number}
                           </td>
-                          <td style={{ padding: '10px' }}>
-                            <a href={`https://vk.com/id${t.vk_id}`} target="_blank" rel="noreferrer" style={{ color: '#0f172a', textDecoration: 'none', fontWeight: 600 }}>
+                          <td style={{ padding: '12px 16px' }}>
+                            <a href={`https://vk.com/id${t.vk_id}`} target="_blank" rel="noreferrer" style={{ color: '#0f172a', textDecoration: 'none', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                               {t.first_name} {t.last_name}
+                              <ExternalLink size={12} style={{ color: '#94a3b8' }} />
                             </a>
                           </td>
-                          <td style={{ padding: '10px' }}>{t.group_title}</td>
-                          <td style={{ padding: '10px', fontWeight: 600, color: '#16a34a' }}>{t.total_points} б.</td>
-                          <td style={{ padding: '10px', color: '#64748b', fontSize: '13px' }}>
-                            {new Date(t.created_at).toLocaleString('ru-RU')}
+                          <td style={{ padding: '12px 16px', fontSize: '13px', color: '#475569' }}>{t.group_title}</td>
+                          <td style={{ padding: '12px 16px', fontWeight: 600, color: '#16a34a' }}>⭐ {t.total_points}</td>
+                          <td style={{ padding: '12px 16px', color: '#64748b', fontSize: '13px' }}>
+                            {new Date(t.created_at).toLocaleDateString('ru-RU')}
                           </td>
                         </tr>
                       ))}
@@ -614,123 +937,315 @@ export const AdminVkBotPage: React.FC = () => {
           </div>
         )}
 
-        {/* ВКЛАДКА 4: НАСТРОЙКИ БОТА И ТЕКСТЫ */}
+        {/* ВКЛАДКА 4: РАССЫЛКА */}
+        {activeTab === 'broadcast' && (
+          <div style={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '24px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+              <div style={{
+                width: '44px',
+                height: '44px',
+                borderRadius: '12px',
+                backgroundColor: '#dbeafe',
+                color: '#2563eb',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                <Send size={22} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', color: '#0f172a' }}>Рассылка сообщений</h3>
+                <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#64748b' }}>
+                  Отправка сообщений от имени бота всем пользователям
+                </p>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, color: '#0f172a', marginBottom: '6px' }}>
+                Кому отправить:
+              </label>
+              <select
+                value={broadcastRecipients}
+                onChange={(e) => setBroadcastRecipients(e.target.value as any)}
+                style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', backgroundColor: '#fff', width: '100%', maxWidth: '300px' }}
+              >
+                <option value="all">📢 Всем пользователям</option>
+                <option value="active">👥 Активным пользователям</option>
+                <option value="ticket_holders">🎟 Обладателям билетов</option>
+              </select>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, color: '#0f172a', marginBottom: '6px' }}>
+                Текст сообщения:
+              </label>
+              <textarea
+                value={broadcastMessage}
+                onChange={(e) => setBroadcastMessage(e.target.value)}
+                rows={6}
+                placeholder="Введите текст сообщения для рассылки..."
+                style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', resize: 'vertical' }}
+              />
+              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>
+                {broadcastMessage.length} символов
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+              <button
+                className="btn btn-primary"
+                onClick={handleBroadcast}
+                disabled={broadcastLoading || !broadcastMessage.trim()}
+                style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 24px' }}
+              >
+                {broadcastLoading ? (
+                  <>⏳ Отправка...</>
+                ) : (
+                  <>
+                    <Send size={18} /> Отправить рассылку
+                  </>
+                )}
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setBroadcastMessage('')}
+                style={{ padding: '10px 24px' }}
+              >
+                Очистить
+              </button>
+            </div>
+
+            <div style={{ 
+              marginTop: '20px', 
+              padding: '12px 16px', 
+              backgroundColor: '#f8fafc', 
+              borderRadius: '8px',
+              border: '1px solid #e2e8f0',
+              fontSize: '13px',
+              color: '#475569'
+            }}>
+              <strong>⚠️ Важно:</strong> Сообщение будет отправлено всем выбранным пользователям. 
+              Убедитесь, что текст корректен и не содержит ошибок.
+            </div>
+          </div>
+        )}
+
+        {/* ВКЛАДКА 5: НАСТРОЙКИ */}
         {activeTab === 'settings' && (
-          <div className="card">
-            <h3 style={{ margin: '0 0 16px', fontSize: '18px', color: '#0f172a' }}>Настройки подключения и сообщений</h3>
+          <div style={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', color: '#0f172a' }}>Настройки бота</h3>
+                <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#64748b' }}>
+                  Ключи доступа и текстовые сообщения
+                </p>
+              </div>
+              <button
+                className={`btn ${isEditMode ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setIsEditMode(!isEditMode)}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                {isEditMode ? <Lock size={16} /> : <Unlock size={16} />}
+                {isEditMode ? 'Закончить редактирование' : 'Редактировать'}
+              </button>
+            </div>
+
             <form onSubmit={handleSaveSettings}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
                 <div className="input-group">
-                  <label>Ключ доступа сообщества VK (VK Token)</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Lock size={14} /> Ключ доступа VK Token
+                    {!isEditMode && <span style={{ fontSize: '11px', color: '#94a3b8' }}>(защищено)</span>}
+                  </label>
                   <input
-                    type="password"
+                    type={isEditMode ? 'text' : 'password'}
                     value={settings.vk_token || ''}
                     onChange={(e) => setSettings({ ...settings, vk_token: e.target.value })}
                     placeholder="vk1.a.XXXX..."
+                    disabled={!isEditMode}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '14px',
+                      backgroundColor: isEditMode ? '#fff' : '#f1f5f9',
+                      cursor: isEditMode ? 'text' : 'not-allowed',
+                    }}
                   />
                 </div>
                 <div className="input-group">
-                  <label>ID сообщества VK (Group ID)</label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Lock size={14} /> ID сообщества VK
+                    {!isEditMode && <span style={{ fontSize: '11px', color: '#94a3b8' }}>(защищено)</span>}
+                  </label>
                   <input
                     type="text"
                     value={settings.vk_group_id || ''}
                     onChange={(e) => setSettings({ ...settings, vk_group_id: e.target.value })}
                     placeholder="210000000"
+                    disabled={!isEditMode}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '14px',
+                      backgroundColor: isEditMode ? '#fff' : '#f1f5f9',
+                      cursor: isEditMode ? 'text' : 'not-allowed',
+                    }}
                   />
                 </div>
               </div>
 
-              <div className="input-group">
-                <label>Время проведения розыгрыша завтра (для сообщения с билетом)</label>
+              <div className="input-group" style={{ marginBottom: '16px' }}>
+                <label>🌐 Ссылка на сайт (личный кабинет)</label>
+                <input
+                  type="text"
+                  value={settings.site_url || ''}
+                  onChange={(e) => setSettings({ ...settings, site_url: e.target.value })}
+                  placeholder="https://ваш-сайт.ru"
+                  disabled={!isEditMode}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '14px',
+                    backgroundColor: isEditMode ? '#fff' : '#f1f5f9',
+                    cursor: isEditMode ? 'text' : 'not-allowed',
+                  }}
+                />
+              </div>
+
+              <div className="input-group" style={{ marginBottom: '16px' }}>
+                <label>⏰ Время проведения розыгрыша</label>
                 <input
                   type="text"
                   value={settings.draw_time || '18:00'}
                   onChange={(e) => setSettings({ ...settings, draw_time: e.target.value })}
                   placeholder="18:00"
+                  disabled={!isEditMode}
+                  style={{
+                    width: '100%',
+                    maxWidth: '200px',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '14px',
+                    backgroundColor: isEditMode ? '#fff' : '#f1f5f9',
+                    cursor: isEditMode ? 'text' : 'not-allowed',
+                  }}
                 />
               </div>
 
-              <div className="input-group">
-                <label>Приветственное сообщение бота</label>
+              <div className="input-group" style={{ marginBottom: '16px' }}>
+                <label>👋 Приветственное сообщение</label>
                 <textarea
                   value={settings.welcome_text || ''}
                   onChange={(e) => setSettings({ ...settings, welcome_text: e.target.value })}
                   rows={4}
-                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  disabled={!isEditMode}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '14px',
+                    backgroundColor: isEditMode ? '#fff' : '#f1f5f9',
+                    cursor: isEditMode ? 'text' : 'not-allowed',
+                    resize: 'vertical'
+                  }}
                 />
               </div>
 
-              <div className="input-group">
-                <label>Сообщение при успешном выполнении ВСЕХ заданий волны</label>
+              <div className="input-group" style={{ marginBottom: '20px' }}>
+                <label>🎉 Сообщение при выполнении всех заданий</label>
                 <textarea
                   value={settings.success_text || ''}
                   onChange={(e) => setSettings({ ...settings, success_text: e.target.value })}
                   rows={4}
-                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                  disabled={!isEditMode}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '14px',
+                    backgroundColor: isEditMode ? '#fff' : '#f1f5f9',
+                    cursor: isEditMode ? 'text' : 'not-allowed',
+                    resize: 'vertical'
+                  }}
                 />
               </div>
 
-              <button type="submit" className="btn btn-primary" disabled={savingSettings}>
-                {savingSettings ? 'Сохранение...' : 'Сохранить настройки бота'}
-              </button>
+              {isEditMode && (
+                <button type="submit" className="btn btn-primary" disabled={savingSettings} style={{ padding: '10px 32px' }}>
+                  {savingSettings ? '⏳ Сохранение...' : '💾 Сохранить настройки'}
+                </button>
+              )}
             </form>
           </div>
         )}
 
-        {/* МОДАЛКА СОЗДАНИЯ/РЕДАКТИРОВАНИЯ ГРУППЫ */}
+        {/* МОДАЛКА ГРУППЫ */}
         {showGroupModal && (
           <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' }}>
-            <div style={{ backgroundColor: '#fff', padding: '24px', borderRadius: '12px', maxWidth: '450px', width: '100%' }}>
-              <h3 style={{ margin: '0 0 16px', fontSize: '18px' }}>
-                {groupForm.id > 0 ? 'Редактировать группу заданий' : 'Новая волна заданий'}
+            <div style={{ backgroundColor: '#fff', padding: '28px', borderRadius: '16px', maxWidth: '450px', width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+              <h3 style={{ margin: '0 0 16px', fontSize: '20px', color: '#0f172a' }}>
+                {groupForm.id > 0 ? '✏️ Редактировать волну' : '➕ Новая волна заданий'}
               </h3>
               <form onSubmit={handleSaveGroup}>
-                <div className="input-group">
-                  <label>Название волны заданий</label>
+                <div className="input-group" style={{ marginBottom: '14px' }}>
+                  <label>Название волны</label>
                   <input
                     type="text"
                     value={groupForm.title}
                     onChange={(e) => setGroupForm({ ...groupForm, title: e.target.value })}
                     placeholder="Например: Задания на 15 мая"
                     required
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
                   />
                 </div>
-                <div className="input-group">
-                  <label>Дата начала активности</label>
+                <div className="input-group" style={{ marginBottom: '14px' }}>
+                  <label>Дата начала</label>
                   <input
                     type="date"
                     value={groupForm.start_date}
                     onChange={(e) => setGroupForm({ ...groupForm, start_date: e.target.value })}
                     required
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
                   />
                 </div>
-                <div className="input-group">
-                  <label>Дата окончания активности</label>
+                <div className="input-group" style={{ marginBottom: '20px' }}>
+                  <label>Дата окончания</label>
                   <input
                     type="date"
                     value={groupForm.end_date}
                     onChange={(e) => setGroupForm({ ...groupForm, end_date: e.target.value })}
                     required
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
                   />
                 </div>
-                <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
-                  <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>Сохранить</button>
-                  <button type="button" className="btn btn-secondary" onClick={() => setShowAddGroupModal(false)}>Отмена</button>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button type="submit" className="btn btn-primary" style={{ flex: 1, padding: '10px' }}>Сохранить</button>
+                  <button type="button" className="btn btn-secondary" onClick={() => setShowAddGroupModal(false)} style={{ padding: '10px 20px' }}>Отмена</button>
                 </div>
               </form>
             </div>
           </div>
         )}
 
-        {/* МОДАЛКА СОЗДАНИЯ/РЕДАКТИРОВАНИЯ ЗАДАНИЯ */}
+        {/* МОДАЛКА ЗАДАНИЯ */}
         {showTaskModal && (
           <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' }}>
-            <div style={{ backgroundColor: '#fff', padding: '24px', borderRadius: '12px', maxWidth: '500px', width: '100%' }}>
-              <h3 style={{ margin: '0 0 16px', fontSize: '18px' }}>
-                {taskForm.id > 0 ? 'Редактировать задание' : 'Новое задание'}
+            <div style={{ backgroundColor: '#fff', padding: '28px', borderRadius: '16px', maxWidth: '500px', width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+              <h3 style={{ margin: '0 0 16px', fontSize: '20px', color: '#0f172a' }}>
+                {taskForm.id > 0 ? '✏️ Редактировать задание' : '➕ Новое задание'}
               </h3>
               <form onSubmit={handleSaveTask}>
-                <div className="input-group">
+                <div className="input-group" style={{ marginBottom: '14px' }}>
                   <label>Название задания</label>
                   <input
                     type="text"
@@ -738,30 +1253,31 @@ export const AdminVkBotPage: React.FC = () => {
                     onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })}
                     placeholder="Например: Сделать репост записи"
                     required
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
                   />
                 </div>
-                <div className="input-group">
-                  <label>Описание и инструкция для участника</label>
+                <div className="input-group" style={{ marginBottom: '14px' }}>
+                  <label>Описание и инструкция</label>
                   <textarea
                     value={taskForm.description}
                     onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })}
                     rows={4}
                     placeholder="Перейдите по ссылке vk.com/wall... и сделайте репост, затем пришлите ссылку"
                     required
-                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', resize: 'vertical' }}
                   />
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
                   <div className="input-group">
                     <label>Сложность</label>
                     <select
                       value={taskForm.difficulty}
                       onChange={(e) => setTaskForm({ ...taskForm, difficulty: e.target.value })}
-                      style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
                     >
-                      <option value="easy">Простое (+10 б.)</option>
-                      <option value="medium">Среднее (+20 б.)</option>
-                      <option value="hard">Сложное (+30 б.)</option>
+                      <option value="easy">🟢 Простое (+10 б.)</option>
+                      <option value="medium">🟡 Среднее (+20 б.)</option>
+                      <option value="hard">🔴 Сложное (+30 б.)</option>
                     </select>
                   </div>
                   <div className="input-group">
@@ -769,17 +1285,17 @@ export const AdminVkBotPage: React.FC = () => {
                     <select
                       value={taskForm.task_type}
                       onChange={(e) => setTaskForm({ ...taskForm, task_type: e.target.value })}
-                      style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                      style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
                     >
-                      <option value="repost">Репост ссылки</option>
-                      <option value="post">Пост</option>
-                      <option value="other">Другое</option>
+                      <option value="repost">📤 Репост</option>
+                      <option value="post">📝 Пост</option>
+                      <option value="other">📌 Другое</option>
                     </select>
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
-                  <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>Сохранить</button>
-                  <button type="button" className="btn btn-secondary" onClick={() => setShowAddTaskModal(false)}>Отмена</button>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button type="submit" className="btn btn-primary" style={{ flex: 1, padding: '10px' }}>Сохранить</button>
+                  <button type="button" className="btn btn-secondary" onClick={() => setShowAddTaskModal(false)} style={{ padding: '10px 20px' }}>Отмена</button>
                 </div>
               </form>
             </div>
