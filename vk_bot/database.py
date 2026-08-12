@@ -101,7 +101,7 @@ def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
                     if user.get('vk_id') != vk_id:
                         cursor.execute("""
                             UPDATE users 
-                            SET vk_id = %s, agreement_accepted_at = NULL 
+                            SET vk_id = %s
                             WHERE id = %s
                         """, (vk_id, user['id']))
                         logger.info(f"Обновлен vk_id для пользователя {user['id']}")
@@ -115,7 +115,7 @@ def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
                     if user.get('vk_url') != vk_url:
                         cursor.execute("""
                             UPDATE users 
-                            SET vk_url = %s, agreement_accepted_at = NULL 
+                            SET vk_url = %s
                             WHERE id = %s
                         """, (vk_url, user['id']))
                         logger.info(f"Обновлен vk_url для пользователя {user['id']}")
@@ -132,7 +132,7 @@ def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
                 if user:
                     cursor.execute("""
                         UPDATE users 
-                        SET vk_id = %s, vk_url = %s, agreement_accepted_at = NULL 
+                        SET vk_id = %s, vk_url = %s
                         WHERE id = %s
                     """, (vk_id, vk_url, user['id']))
                     logger.info(f"Связан пользователь {first_name} {last_name} с VK ID {vk_id}")
@@ -887,10 +887,7 @@ def set_user_agreement(user_id):
                 logger.error(f"set_user_agreement: Пользователь {user_id} не найден")
                 return False
             
-            # Если уже есть дата, возвращаем True
-            if user.get('agreement_accepted_at') is not None:
-                logger.info(f"set_user_agreement: Пользователь {user_id} уже согласился с правилами {user.get('agreement_accepted_at')}")
-                return True
+            logger.info(f"set_user_agreement: Текущее значение agreement_accepted_at = {user.get('agreement_accepted_at')}")
             
             # Обновляем согласие - ставим текущую дату
             cursor.execute("""
