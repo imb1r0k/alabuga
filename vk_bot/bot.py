@@ -176,21 +176,28 @@ def build_tasks_keyboard(tasks, user_id):
     def add_task_buttons(task_list, prefix, emoji):
         for t in task_list:
             status = get_user_task_status(user_id, t['id'])
-            # Формируем название с префиксом сложности
-            label = f"{emoji} {prefix}: {t['title']}"
+    
+            # VK ограничение длины кнопки — 40 символов, обрезаем длинные заголовки
+            prefix_part = f" {prefix}: "
+            max_title_len = 40 - len(emoji) - len(prefix_part)
+            title_display = t['title']
+            if len(title_display) > max_title_len:
+                title_display = t['title'][:max_title_len].rstrip() + '…'
+    
+            label = f"{emoji}{prefix_part}{title_display}"
             color = VkKeyboardColor.PRIMARY
-            
+    
             if status:
                 if status == 'approved':
-                    label = f"✅ {prefix}: {t['title']}"
+                    label = f"✅{prefix_part}{title_display}"
                     color = VkKeyboardColor.POSITIVE
                 elif status == 'pending':
-                    label = f"⏳ {prefix}: {t['title']}"
+                    label = f"⏳{prefix_part}{title_display}"
                     color = VkKeyboardColor.SECONDARY
                 elif status == 'rejected':
-                    label = f"❌ {prefix}: {t['title']}"
+                    label = f"❌{prefix_part}{title_display}"
                     color = VkKeyboardColor.NEGATIVE
-            
+    
             keyboard.add_button(label, color=color)
             keyboard.add_line()
     
@@ -285,10 +292,15 @@ def get_task_from_button(text, tasks):
     
     # Ищем задание по названию
     for t in tasks:
-        if t['title'].strip() == clean_text:
+        full_title = t['title'].strip()
+        if full_title == clean_text:
             return t
-        # Проверяем частичное совпадение
-        if clean_text in t['title'] or t['title'] in clean_text:
+        # Частичное совпадение
+        if clean_text in full_title or full_title in clean_text:
+            return t
+        # Кнопка могла быть обрезана VK (лимит 40 символов) — сопоставляем по началу
+        clean_part = clean_text.rstrip('…').rstrip()
+        if clean_part and full_title.startswith(clean_part):
             return t
     
     # Если не нашли по точному названию, пробуем найти по ID
