@@ -979,5 +979,6 @@ def main():
                         keyboard=create_main_keyboard(active_group, site_url)
                     )
 
+
 if __name__ == '__main__':
     main()
