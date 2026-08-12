@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Хост: localhost
--- Время создания: Авг 12 2026 г., 21:50
+-- Время создания: Авг 12 2026 г., 23:05
 -- Версия сервера: 5.7.27-30-log
 -- Версия PHP: 8.3.31
 
@@ -215,8 +215,8 @@ CREATE TABLE `users` (
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `rating` int(11) NOT NULL DEFAULT '0',
   `completed_tasks` int(11) NOT NULL DEFAULT '0',
-  `agreement_accepted` tinyint(1) DEFAULT '0',
-  `agreement_accepted_at` timestamp NULL DEFAULT NULL
+  `agreement_accepted_at` timestamp NULL DEFAULT NULL,
+  `bot_registered` tinyint(1) DEFAULT '0'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
