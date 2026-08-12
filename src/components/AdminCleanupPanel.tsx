@@ -2,12 +2,13 @@ import React, { useState } from 'react';
 import { FileDown, Archive, Users, Download, Trash2, MessageSquare } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useToast } from './Toast';
-import { getExportBookings, getExportLayouts, archiveAllBookings, archiveAllUsers, clearAllTeamChats } from '../services/api';
+import { getExportBookings, getExportLayouts, getExportUsers, archiveAllBookings, archiveAllUsers, clearAllTeamChats } from '../services/api';
 
 export const AdminCleanupPanel: React.FC = () => {
   const { showToast } = useToast();
   const [exportingBookings, setExportingBookings] = useState(false);
   const [exportingLayouts, setExportingLayouts] = useState(false);
+  const [exportingUsers, setExportingUsers] = useState(false);
   const [archivingBookings, setArchivingBookings] = useState(false);
   const [archivingUsers, setArchivingUsers] = useState(false);
   const [clearingChats, setClearingChats] = useState(false);
@@ -121,6 +122,47 @@ export const AdminCleanupPanel: React.FC = () => {
     }
   };
 
+  // ─── Экспорт пользователей в Excel ───────────────────────────────────────
+
+  const handleExportUsers = async () => {
+    setExportingUsers(true);
+    try {
+      const users = await getExportUsers();
+
+      const rows = users.map((u: any, index: number) => ({
+        '№': index + 1,
+        'Фамилия': u.last_name || '',
+        'Имя': u.first_name || '',
+        'Отчество': u.patronymic || '',
+        'Телефон': u.phone || '',
+        'Логин': u.login || '',
+        'Корпус': u.booking_building || '',
+        'Этаж': u.booking_floor || '',
+        'Комната': u.booking_room || '',
+        'ВК': u.social_vk || '',
+        'Telegram': u.social_telegram || '',
+        'Instagram': u.social_instagram || '',
+        'Max': u.social_max || '',
+        'Ссылка на профиль': u.public_profile_url || '',
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Пользователи');
+
+      worksheet['!cols'] = Object.keys(rows[0] || {}).map((key) => ({
+        wch: Math.min(Math.max(key.length * 2, 12), 35),
+      }));
+
+      XLSX.writeFile(workbook, `users_export_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      showToast(`Экспортировано пользователей: ${users.length}`, 'success');
+    } catch (err: any) {
+      showToast('Ошибка экспорта: ' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+      setExportingUsers(false);
+    }
+  };
+
   // ─── Архивация всех бронирований ─────────────────────────────────────────
 
   const handleArchiveBookings = async () => {
@@ -196,6 +238,15 @@ export const AdminCleanupPanel: React.FC = () => {
           >
             <FileDown size={16} />
             {exportingLayouts ? 'Экспорт...' : 'Экспорт макетов корпусов'}
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={handleExportUsers}
+            disabled={exportingUsers}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px' }}
+          >
+            <FileDown size={16} />
+            {exportingUsers ? 'Экспорт...' : 'Экспорт пользователей'}
           </button>
         </div>
       </div>

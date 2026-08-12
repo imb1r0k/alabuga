@@ -80,14 +80,19 @@ if ($uri === 'admin/export/users') {
             SELECT b.user_id,
                    bu.name as building_name,
                    f.floor_number,
-                   r.room_number,
-                   ROW_NUMBER() OVER (PARTITION BY b.user_id ORDER BY b.updated_at DESC, b.id DESC) as rn
+                   r.room_number
             FROM bookings b
             JOIN rooms r ON b.room_id = r.id
             JOIN buildings bu ON r.building_id = bu.id
             JOIN floors f ON r.floor_id = f.id
             WHERE b.status IN ('approved', 'approved_bot')
-        ) b_room ON b_room.user_id = u.id AND b_room.rn = 1
+              AND b.id = (
+                  SELECT MAX(b2.id)
+                  FROM bookings b2
+                  WHERE b2.user_id = b.user_id
+                    AND b2.status IN ('approved', 'approved_bot')
+              )
+        ) b_room ON b_room.user_id = u.id
         WHERE u.role <> 'admin'
         ORDER BY u.last_name ASC, u.first_name ASC
     ");

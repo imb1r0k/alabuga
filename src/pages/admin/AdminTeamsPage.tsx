@@ -19,6 +19,7 @@ import {
   deleteAdminTeamEvent,
 } from '../../services/api';
 import { Users, MessageSquare, Calendar, Trash2, Plus, Save, UserPlus, UserMinus, Eraser, ShieldCheck, Search, Image as ImageIcon, X } from 'lucide-react';
+import { resolveUploadUrl } from '../../utils/resolveUploadUrl';
 
 export const AdminTeamsPage: React.FC = () => {
   const [teams, setTeams] = useState<any[]>([]);
@@ -568,7 +569,7 @@ export const AdminTeamsPage: React.FC = () => {
                     {calendarEvents.map((ev) => (
                       <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 12px', backgroundColor: '#ffffff' }}>
                         {ev.image_url && (
-                          <img src={ev.image_url} alt={ev.title} style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '6px', flexShrink: 0, border: '1px solid #cbd5e1' }} />
+                          <img src={resolveUploadUrl(ev.image_url)} alt={ev.title} style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '6px', flexShrink: 0, border: '1px solid #cbd5e1' }} />
                         )}
                         <div style={{ flex: 1 }}>
                           <strong style={{ fontSize: '14px', color: '#0f172a' }}>{ev.title}</strong>

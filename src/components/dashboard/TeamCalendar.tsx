@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CalendarDays, Clock } from 'lucide-react';
 import { getMyTeamCalendar } from '../../services/api';
+import { resolveUploadUrl } from '../../utils/resolveUploadUrl';
 
 interface Event {
   id: number;
@@ -45,7 +46,7 @@ export const TeamCalendar: React.FC<{ teamId: number }> = ({ teamId }) => {
             <div key={ev.id} style={{ padding: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
               {ev.image_url && (
                 <img
-                  src={ev.image_url}
+                  src={resolveUploadUrl(ev.image_url)}
                   alt={ev.title}
                   style={{ width: '64px', height: '64px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #cbd5e1', flexShrink: 0 }}
                 />
