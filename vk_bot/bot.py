@@ -185,18 +185,18 @@ def build_tasks_keyboard(tasks, user_id):
             if len(title_display) > max_title_len:
                 title_display = t['title'][:max_title_len].rstrip() + '…'
     
-            label = f"{emoji}{prefix_part}{title_display}"
+            label = f"{emoji}#{t['id']} {prefix_part}{title_display}"
             color = VkKeyboardColor.PRIMARY
-    
+
             if status:
                 if status == 'approved':
-                    label = f"✅{prefix_part}{title_display}"
+                    label = f"✅#{t['id']} {prefix_part}{title_display}"
                     color = VkKeyboardColor.POSITIVE
                 elif status == 'pending':
-                    label = f"⏳{prefix_part}{title_display}"
+                    label = f"⏳#{t['id']} {prefix_part}{title_display}"
                     color = VkKeyboardColor.SECONDARY
                 elif status == 'rejected':
-                    label = f"❌{prefix_part}{title_display}"
+                    label = f"❌#{t['id']} {prefix_part}{title_display}"
                     color = VkKeyboardColor.NEGATIVE
     
             keyboard.add_button(label, color=color)
