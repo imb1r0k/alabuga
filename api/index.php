@@ -230,8 +230,15 @@ function processAutoApproveBookings($pdo) {
         return ['executed' => false, 'message' => 'Автоодобрение отключено в настройках', 'approved_count' => 0];
     }
 
+    // Режим автозаселения
+    $modeStmt = $pdo->prepare("SELECT `value` FROM settings WHERE `key` = 'auto-book-mode'");
+    $modeStmt->execute();
+    $modeVal = $modeStmt->fetchColumn();
+    $checkVkDuplicate = ($modeVal === 'gender_and_vk_duplicate');
+
     $stmt = $pdo->query("
         SELECT b.id, b.user_id, b.room_id, u.last_name, u.first_name, u.name,
+               u.vk_url, u.bot_registered,
                r.gender as room_gender, f.gender as floor_gender, bu.gender as building_gender
         FROM bookings b
         JOIN users u ON b.user_id = u.id
@@ -245,14 +252,33 @@ function processAutoApproveBookings($pdo) {
     $approvedCount = 0;
     $updateStmt = $pdo->prepare("UPDATE bookings SET status = 'approved_bot', comment = 'Одобрено автоматически ботом' WHERE id = ?");
 
+    // Проверка на дубликат заявки по ФИО
+    $dupStmt = $pdo->prepare("
+        SELECT COUNT(*) FROM bookings db
+        JOIN users du ON db.user_id = du.id
+        WHERE du.last_name = ? AND du.first_name = ?
+          AND db.status IN ('pending', 'approved', 'approved_bot')
+          AND du.id != ?
+    ");
+
     foreach ($pendingList as $row) {
         $roomEff = $row['room_gender'] !== 'DEFAULT' ? $row['room_gender'] : ($row['floor_gender'] !== 'DEFAULT' ? $row['floor_gender'] : $row['building_gender']);
         $userGender = detectGenderByLastName($row['last_name'] ?: $row['name']);
 
-        if ($roomEff === 'MIXED' || $roomEff === 'DEFAULT' || $userGender === null || $roomEff === $userGender) {
-            $updateStmt->execute([$row['id']]);
-            $approvedCount++;
+        // Дубликат заявки с теми же ФИО — пропускаем
+        $dupStmt->execute([$row['last_name'], $row['first_name'], $row['user_id']]);
+        if ((int)$dupStmt->fetchColumn() > 0) continue;
+
+        if (!($roomEff === 'MIXED' || $roomEff === 'DEFAULT' || $userGender === null || $roomEff === $userGender)) continue;
+
+        // Режим "по полу + VK": только для аккаунтов, созданных ботом ВК
+        if ($checkVkDuplicate) {
+            $isVkUser = !empty($row['vk_url']) && (int)$row['bot_registered'] === 1;
+            if (!$isVkUser) continue;
         }
+
+        $updateStmt->execute([$row['id']]);
+        $approvedCount++;
     }
 
     return ['executed' => true, 'approved_count' => $approvedCount];
