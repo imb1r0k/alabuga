@@ -735,11 +735,18 @@ def main():
                     if has_attachments:
                         response_msg += f"\n📎 Прикреплено файлов: {len(saved_files)}"
 
+                    # Сразу показываем обновлённый список заданий, чтобы был виден новый статус «⏳ На рассмотрении»
+                    if active_group:
+                        tasks = get_tasks_for_group(active_group['id'])
+                        keyboard = build_tasks_keyboard(tasks, db_user['id'])
+                    else:
+                        keyboard = create_main_keyboard(active_group, site_url)
+
                     vk.messages.send(
                         user_id=vk_id,
                         message=response_msg,
                         random_id=0,
-                        keyboard=create_main_keyboard(active_group, site_url)
+                        keyboard=keyboard
                     )
                     continue
 
