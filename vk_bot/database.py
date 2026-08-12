@@ -820,6 +820,34 @@ def get_last_request_message(request_id):
         conn.close()
 
 
+def update_report_has_attachments(report_id, count):
+    """Обновляет количество вложений в отчёте"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                UPDATE vk_bot_reports
+                SET has_attachments = %s
+                WHERE id = %s
+            """, (count, report_id))
+    finally:
+        conn.close()
+
+
+def update_report_text(report_id, text):
+    """Обновляет текст отчёта"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                UPDATE vk_bot_reports
+                SET submission_text = %s
+                WHERE id = %s
+            """, (text, report_id))
+    finally:
+        conn.close()
+
+
 def update_report_status(report_id, status, reject_reason=''):
     """Обновляет статус отчета, начисляет баллы, выдает билеты"""
     conn = get_db_connection()
