@@ -9,6 +9,7 @@ import string
 import os
 import json
 from urllib.parse import urlparse
+from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -133,11 +134,11 @@ def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
 
             cursor.execute("""
                 INSERT INTO users
-                (vk_id, vk_url, first_name, last_name, name, login, phone, password, role, status, rating, completed_tasks, social_vk)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (vk_id, vk_url, first_name, last_name, name, login, phone, password, role, status, rating, completed_tasks, social_vk, agreement_accepted)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 vk_id, vk_url, first_name, last_name, full_name,
-                login, '', hashed_password, 'user', 'active', 0, 0, vk_url
+                login, '', hashed_password, 'user', 'active', 0, 0, vk_url, 0
             ))
 
             user_id = cursor.lastrowid
@@ -841,3 +842,51 @@ def verify_password(plain_password, hashed_password):
         return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
     except Exception:
         return False
+
+
+def check_user_agreement(user_id):
+    """Проверяет, согласился ли пользователь с правилами"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT agreement_accepted FROM users WHERE id = %s", (user_id,))
+            result = cursor.fetchone()
+            return result and result.get('agreement_accepted') == 1
+    except Exception as e:
+        logger.error(f"Ошибка проверки согласия пользователя: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def set_user_agreement(user_id):
+    """Устанавливает отметку о согласии пользователя с правилами"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                UPDATE users 
+                SET agreement_accepted = 1, agreement_accepted_at = NOW() 
+                WHERE id = %s
+            """, (user_id,))
+        logger.info(f"Пользователь {user_id} подтвердил согласие с правилами")
+    except Exception as e:
+        logger.error(f"Ошибка установки согласия пользователя: {e}")
+        raise
+    finally:
+        conn.close()
+
+
+def get_user_agreement_status(user_id):
+    """Получает статус согласия пользователя с правилами"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT agreement_accepted, agreement_accepted_at 
+                FROM users 
+                WHERE id = %s
+            """, (user_id,))
+            return cursor.fetchone()
+    finally:
+        conn.close()

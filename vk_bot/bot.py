@@ -2,10 +2,13 @@ import time
 import vk_api
 from vk_api.longpoll import VkLongPoll, VkEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+from vk_api.upload import VkUpload
 import threading
 import logging
 import re
 import os
+import requests
+from io import BytesIO
 
 from database import (
     get_bot_settings,
@@ -30,6 +33,8 @@ from database import (
     get_all_requests_for_admin,
     get_last_request_message,
     get_request_by_id,
+    check_user_agreement,
+    set_user_agreement,
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -167,7 +172,7 @@ def build_tasks_keyboard(tasks, user_id):
     hard_tasks = [t for t in tasks if t['difficulty'] == 'hard']
     
     def add_task_buttons(task_list, difficulty):
-        emoji_map = {'easy': '🔵', 'medium': '🟡', 'hard': '🔴'}
+        emoji_map = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}
         for t in task_list:
             report = get_user_task_report(user_id, t['id'])
             # Используем название задания в тексте кнопки
@@ -190,24 +195,34 @@ def build_tasks_keyboard(tasks, user_id):
             keyboard.add_button(label, color=color)
             keyboard.add_line()
     
-    # Добавляем разделители для группировки
+    # Добавляем задания с группировкой по сложности
     if easy_tasks:
-        keyboard.add_button("🟢 Простые задания", color=VkKeyboardColor.SECONDARY)
-        keyboard.add_line()
-        add_task_buttons(easy_tasks, 'easy')
+        if len(easy_tasks) > 0:
+            keyboard.add_button("🟢 Простые", color=VkKeyboardColor.SECONDARY)
+            keyboard.add_line()
+            add_task_buttons(easy_tasks, 'easy')
     
     if medium_tasks:
-        keyboard.add_button("🟡 Средние задания", color=VkKeyboardColor.SECONDARY)
-        keyboard.add_line()
-        add_task_buttons(medium_tasks, 'medium')
+        if len(medium_tasks) > 0:
+            keyboard.add_button("🟡 Средние", color=VkKeyboardColor.SECONDARY)
+            keyboard.add_line()
+            add_task_buttons(medium_tasks, 'medium')
     
     if hard_tasks:
-        keyboard.add_button("🔴 Сложные задания", color=VkKeyboardColor.SECONDARY)
-        keyboard.add_line()
-        add_task_buttons(hard_tasks, 'hard')
+        if len(hard_tasks) > 0:
+            keyboard.add_button("🔴 Сложные", color=VkKeyboardColor.SECONDARY)
+            keyboard.add_line()
+            add_task_buttons(hard_tasks, 'hard')
     
     keyboard.add_button("🔙 Назад в меню", color=VkKeyboardColor.SECONDARY)
     
+    return keyboard.get_keyboard()
+
+
+def create_agreement_keyboard():
+    """Создает клавиатуру для согласия с правилами"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("✅ Подтверждаю", color=VkKeyboardColor.POSITIVE)
     return keyboard.get_keyboard()
 
 
@@ -260,7 +275,7 @@ def get_task_from_button(text, tasks):
     """Определяет задание по тексту кнопки"""
     # Убираем эмодзи статусов и сложности
     status_emoji = ['✅', '⏳', '❌']
-    diff_emoji = ['🔵', '🟡', '🔴', '📌']
+    diff_emoji = ['🟢', '🟡', '🔴', '📌']
     
     clean_text = text
     for emoji in status_emoji + diff_emoji:
@@ -365,6 +380,92 @@ def format_task_message(task, report=None):
     return msg
 
 
+def send_agreement_document(vk, user_id, document_path='Положение_о_проведении_форумной_линейки_Орбиты_будущего_2.docx'):
+    """Отправляет документ с правилами и просит подтвердить согласие"""
+    try:
+        # Проверяем существование файла
+        if not os.path.exists(document_path):
+            logger.error(f"Файл с правилами не найден: {document_path}")
+            # Отправляем текстовое сообщение с правилами
+            rules_text = (
+                "📋 Правила пребывания на Форуме\n\n"
+                "1. Участник обязан соблюдать правила пребывания.\n"
+                "2. Постоянно носить именной бейдж.\n"
+                "3. Соблюдать требования санитарных норм.\n"
+                "4. Быть взаимно вежливым и дисциплинированным.\n"
+                "5. Присутствовать на всех мероприятиях согласно программе.\n"
+                "6. Выполнять указания Организатора.\n"
+                "7. Бережно относиться к имуществу.\n"
+                "8. Соблюдать комендантский час с 22:00 до 06:00.\n"
+                "9. Сообщать о недомоганиях.\n"
+                "10. Соблюдать правила личной гигиены.\n\n"
+                "⚠️ За нарушение правил предусмотрена дисквалификация.\n\n"
+                "✅ Подтвердите, что ознакомлены с правилами и обязуетесь их соблюдать."
+            )
+            vk.messages.send(
+                user_id=user_id,
+                message=rules_text,
+                random_id=0,
+                keyboard=create_agreement_keyboard()
+            )
+            return
+        
+        # Загружаем файл на сервер VK
+        upload = VkUpload(vk)
+        
+        # Отправляем документ
+        doc = upload.document(
+            document=document_path,
+            title="Правила пребывания на Форуме",
+            tags="правила, форум"
+        )
+        
+        # Получаем attachment
+        attachment = f"doc{doc['owner_id']}_{doc['id']}"
+        
+        # Отправляем сообщение с документом
+        message = (
+            "📋 Для участия в Форуме необходимо ознакомиться с правилами пребывания.\n\n"
+            "Пожалуйста, скачайте и прочитайте прикрепленный документ.\n\n"
+            "После ознакомления нажмите кнопку '✅ Подтверждаю'."
+        )
+        
+        vk.messages.send(
+            user_id=user_id,
+            message=message,
+            attachment=attachment,
+            random_id=0,
+            keyboard=create_agreement_keyboard()
+        )
+        
+        logger.info(f"Документ с правилами отправлен пользователю {user_id}")
+        
+    except Exception as e:
+        logger.error(f"Ошибка отправки документа: {e}")
+        # Отправляем текстовое сообщение с правилами
+        rules_text = (
+            "📋 Правила пребывания на Форуме\n\n"
+            "1. Участник обязан соблюдать правила пребывания.\n"
+            "2. Постоянно носить именной бейдж.\n"
+            "3. Соблюдать требования санитарных норм.\n"
+            "4. Быть взаимно вежливым и дисциплинированным.\n"
+            "5. Присутствовать на всех мероприятиях согласно программе.\n"
+            "6. Выполнять указания Организатора.\n"
+            "7. Бережно относиться к имуществу.\n"
+            "8. Соблюдать комендантский час с 22:00 до 06:00.\n"
+            "9. Сообщать о недомоганиях.\n"
+            "10. Соблюдать правила личной гигиены.\n\n"
+            "⚠️ За нарушение правил предусмотрена дисквалификация.\n\n"
+            "✅ Подтвердите, что ознакомлены с правилами и обязуетесь их соблюдать."
+        )
+        vk.messages.send(
+            user_id=user_id,
+            message=rules_text,
+            random_id=0,
+            keyboard=create_agreement_keyboard()
+        )
+
+
 def main():
     logger.info("🚀 Запуск бота ВКонтакте...")
 
@@ -451,6 +552,29 @@ def main():
                 vk_url = f"https://vk.com/id{vk_id}"
 
                 db_user = find_or_create_user(vk_id, first_name, last_name, vk_url)
+
+                # Проверяем, согласился ли пользователь с правилами
+                if not check_user_agreement(db_user['id']):
+                    # Если пользователь только что создан и еще не согласился
+                    if db_user.get('generated_password'):
+                        login_msg = (
+                            f"👋 Привет, {first_name}!\n\n"
+                            f"Для тебя создан аккаунт на сайте:\n"
+                            f"🔑 Логин: {db_user['login']}\n"
+                            f"🔐 Пароль: {db_user['generated_password']}\n\n"
+                            f"🌐 Перейти на сайт: {site_url}\n\n"
+                            f"⚠️ Рекомендуем изменить пароль после первого входа!"
+                        )
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message=login_msg,
+                            random_id=0
+                        )
+                        logger.info(f"Создан новый пользователь: {first_name} {last_name}, логин: {db_user['login']}")
+                    
+                    # Отправляем правила
+                    send_agreement_document(vk, vk_id)
+                    continue
 
                 if db_user.get('generated_password'):
                     login_msg = (
@@ -623,6 +747,25 @@ def main():
                         keyboard=create_main_keyboard(active_group, site_url)
                     )
                     continue
+
+            # --- Обработка команды согласия с правилами ---
+            if text == "✅ Подтверждаю":
+                if not check_user_agreement(db_user['id']):
+                    set_user_agreement(db_user['id'])
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="✅ Спасибо! Вы подтвердили согласие с правилами пребывания на Форуме.\n\nТеперь вам доступны все функции бота.",
+                        random_id=0,
+                        keyboard=create_main_keyboard(active_group, site_url)
+                    )
+                else:
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="Вы уже подтвердили согласие с правилами.",
+                        random_id=0,
+                        keyboard=create_main_keyboard(active_group, site_url)
+                    )
+                continue
 
             # --- Обработка команд ---
             if text in ["📋 Задания", "/start", "Начать", "Старт"]:
