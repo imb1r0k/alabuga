@@ -11,6 +11,7 @@ from database import (
     get_bot_settings,
     find_or_create_user,
     get_active_task_group,
+    get_active_task_groups,
     get_tasks_for_group,
     get_user_task_report,
     get_user_task_status,
@@ -145,7 +146,7 @@ def check_request_messages_worker(vk, settings):
         time.sleep(10)
 
 
-def create_main_keyboard(active_group, site_url=''):
+def create_main_keyboard(active_groups, site_url=''):
     """Создает главную клавиатуру"""
     keyboard = VkKeyboard(one_time=False)
     keyboard.add_button("📋 Задания", color=VkKeyboardColor.PRIMARY)
@@ -272,6 +273,17 @@ def create_category_keyboard():
     keyboard.add_button("🔙 Назад", color=VkKeyboardColor.SECONDARY)
     return keyboard.get_keyboard()
 
+
+def get_all_tasks_for_groups(groups):
+    """Собирает все задания из переданных групп, добавляя информацию о группе"""
+    all_tasks = []
+    for g in groups:
+        tasks = get_tasks_for_group(g['id'])
+        for t in tasks:
+            t['group_title'] = g['title']
+            t['group_id'] = g['id']
+        all_tasks.extend(tasks)
+    return all_tasks
 
 def get_task_from_button(text, tasks):
     """Определяет задание по тексту кнопки"""
@@ -532,7 +544,7 @@ def main():
                             user_id=vk_id,
                             message="✅ Спасибо! Вы подтвердили согласие с правилами пребывания на Форуме.\n\nТеперь вам доступны все функции бота.",
                             random_id=0,
-                            keyboard=create_main_keyboard(active_group, site_url)
+                            keyboard=create_main_keyboard(active_groups, site_url)
                         )
                         logger.info(f"Главное меню отправлено пользователю {vk_id}")
                         continue
@@ -600,7 +612,7 @@ def main():
 
             settings = get_bot_settings()
             site_url = settings.get('site_url', '')
-            active_group = get_active_task_group()
+            active_groups = get_active_task_groups()
 
             # --- Обработка состояния пользователя ---
             if vk_id in user_states:
@@ -736,11 +748,11 @@ def main():
                         response_msg += f"\n📎 Прикреплено файлов: {len(saved_files)}"
 
                     # Сразу показываем обновлённый список заданий, чтобы был виден новый статус «⏳ На рассмотрении»
-                    if active_group:
-                        tasks = get_tasks_for_group(active_group['id'])
+                    if active_groups:
+                        tasks = get_all_tasks_for_groups(active_groups)
                         keyboard = build_tasks_keyboard(tasks, db_user['id'])
                     else:
-                        keyboard = create_main_keyboard(active_group, site_url)
+                        keyboard = create_main_keyboard(active_groups, site_url)
 
                     vk.messages.send(
                         user_id=vk_id,
@@ -752,17 +764,21 @@ def main():
 
             # --- Обработка команд ---
             if text in ["📋 Задания", "/start", "Начать", "Старт"]:
-                if not active_group:
+                if not active_groups:
                     vk.messages.send(
                         user_id=vk_id,
                         message="📢 В данный момент нет активных заданий.\n\nСледите за обновлениями!",
                         random_id=0,
-                        keyboard=create_main_keyboard(active_group, site_url)
+                        keyboard=create_main_keyboard(active_groups, site_url)
                     )
                 else:
-                    tasks = get_tasks_for_group(active_group['id'])
+                    tasks = get_all_tasks_for_groups(active_groups)
                     welcome = settings.get('welcome_text', 'Привет! Выполняй задания и получай билеты! 🎫')
-                    welcome += f"\n\n⏰ Задания действуют до: {active_group['end_date']}"
+                    # Перечисляем все активные волны
+                    waves_info = ", ".join([g['title'] for g in active_groups])
+                    welcome += f"\n\n🌊 Активные волны: {waves_info}"
+                    for g in active_groups:
+                        welcome += f"\n⏰ «{g['title']}» действует до: {g['end_date']}"
                     welcome += "\n📎 Для подтверждения прикрепляйте фото, файлы или ссылки!"
 
                     vk.messages.send(
@@ -795,7 +811,7 @@ def main():
                     user_id=vk_id,
                     message=msg,
                     random_id=0,
-                    keyboard=create_main_keyboard(active_group, site_url)
+                    keyboard=create_main_keyboard(active_groups, site_url)
                 )
 
             elif text == "📋 Заявки":
@@ -881,8 +897,8 @@ def main():
                             continue
 
                 # --- Обработка нажатия на кнопку задания ---
-                if active_group:
-                    tasks = get_tasks_for_group(active_group['id'])
+                if active_groups:
+                    tasks = get_all_tasks_for_groups(active_groups)
                     matched_task = get_task_from_button(text, tasks)
 
                     if matched_task:
@@ -901,16 +917,16 @@ def main():
                     else:
                         vk.messages.send(
                             user_id=vk_id,
-                            message="🤖 Воспользуйтесь кнопками меню:",
+                            message="🤖 Воспользуйтесь кбатками меню:",
                             random_id=0,
-                            keyboard=create_main_keyboard(active_group, site_url)
+                            keyboard=create_main_keyboard(active_groups, site_url)
                         )
                 else:
                     vk.messages.send(
                         user_id=vk_id,
                         message="📢 Сейчас нет активных заданий. Загляните позже!",
                         random_id=0,
-                        keyboard=create_main_keyboard(active_group, site_url)
+                        keyboard=create_main_keyboard(active_groups, site_url)
                     )
 
 

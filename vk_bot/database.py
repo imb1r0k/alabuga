@@ -179,16 +179,30 @@ def get_user_by_vk_id(vk_id):
 
 
 def get_active_task_group():
-    """Получает активную группу заданий"""
+    """Получает активную группу заданий (первую)"""
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT * FROM vk_bot_task_groups 
+                SELECT * FROM vk_bot_task_groups
                 WHERE start_date <= CURDATE() AND end_date >= CURDATE()
                 ORDER BY start_date ASC LIMIT 1
             """)
             return cursor.fetchone()
+    finally:
+        conn.close()
+
+def get_active_task_groups():
+    """Получает все активные группы заданий"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT * FROM vk_bot_task_groups
+                WHERE start_date <= CURDATE() AND end_date >= CURDATE()
+                ORDER BY start_date ASC
+            """)
+            return cursor.fetchall()
     finally:
         conn.close()
 
