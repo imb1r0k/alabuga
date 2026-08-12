@@ -27,6 +27,9 @@ from database import (
     get_user_request_by_id,
     get_request_messages,
     add_request_message,
+    get_all_requests_for_admin,
+    get_last_request_message,
+    get_request_by_id,
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -71,6 +74,69 @@ def send_notification_worker(vk, settings):
             time.sleep(5)
 
 
+def check_request_messages_worker(vk, settings):
+    """Фоновый поток для проверки новых сообщений в заявках"""
+    last_checked = {}
+    
+    while True:
+        try:
+            # Получаем все открытые заявки
+            requests = get_all_requests_for_admin('open')
+            requests += get_all_requests_for_admin('in_progress')
+            
+            for req in requests:
+                request_id = req['id']
+                user_vk_id = req.get('vk_id')
+                
+                if not user_vk_id:
+                    continue
+                
+                # Получаем последнее сообщение
+                last_msg = get_last_request_message(request_id)
+                if not last_msg:
+                    continue
+                
+                # Проверяем, не отправил ли сообщение сам пользователь
+                if last_msg['user_id'] == req['user_id']:
+                    continue
+                
+                # Проверяем, не отправляли ли уже это сообщение
+                msg_key = f"{request_id}_{last_msg['id']}"
+                if last_checked.get(msg_key):
+                    continue
+                
+                # Отправляем уведомление пользователю
+                try:
+                    sender_name = last_msg.get('first_name', 'Администратор')
+                    msg_text = f"📋 Новое сообщение по заявке #{request_id}\n"
+                    msg_text += f"📝 {req['subject']}\n"
+                    msg_text += "━" * 30 + "\n\n"
+                    msg_text += f"💬 {sender_name}: {last_msg['message']}\n\n"
+                    msg_text += "🔗 Чтобы ответить, перейдите в раздел '📋 Заявки' в боте."
+                    
+                    vk.messages.send(
+                        user_id=user_vk_id,
+                        message=msg_text,
+                        random_id=0
+                    )
+                    last_checked[msg_key] = True
+                    logger.info(f"Уведомление о новом сообщении в заявке #{request_id} отправлено пользователю VK ID {user_vk_id}")
+                    
+                except Exception as e:
+                    logger.error(f"Ошибка отправки уведомления о сообщении в заявке #{request_id}: {e}")
+                
+                time.sleep(0.5)
+            
+            # Очищаем старые записи (старше 1 часа)
+            if len(last_checked) > 1000:
+                last_checked.clear()
+                
+        except Exception as e:
+            logger.error(f"Ошибка в потоке проверки заявок: {e}")
+        
+        time.sleep(10)
+
+
 def create_main_keyboard(active_group, site_url=''):
     """Создает главную клавиатуру"""
     keyboard = VkKeyboard(one_time=False)
@@ -87,7 +153,10 @@ def create_main_keyboard(active_group, site_url=''):
 
 
 def build_tasks_keyboard(tasks, user_id):
-    """Создает клавиатуру с заданиями, сгруппированными по сложности"""
+    """
+    Создает клавиатуру с заданиями, сгруппированными по сложности.
+    Каждая кнопка на отдельной строке.
+    """
     keyboard = VkKeyboard(one_time=False)
     
     easy_tasks = [t for t in tasks if t['difficulty'] == 'easy']
@@ -123,7 +192,6 @@ def build_tasks_keyboard(tasks, user_id):
     if hard_tasks:
         add_task_buttons(hard_tasks, 'hard')
     
-    keyboard.add_line()
     keyboard.add_button("⬅ Назад", color=VkKeyboardColor.SECONDARY)
     
     return keyboard.get_keyboard()
@@ -143,7 +211,6 @@ def create_requests_keyboard(requests):
         keyboard.add_button(label, color=VkKeyboardColor.PRIMARY)
         keyboard.add_line()
     
-    keyboard.add_line()
     keyboard.add_button("➕ Создать заявку", color=VkKeyboardColor.POSITIVE)
     keyboard.add_line()
     keyboard.add_button("⬅ Назад", color=VkKeyboardColor.SECONDARY)
@@ -198,6 +265,27 @@ def get_task_from_button(text, tasks):
     return None
 
 
+def get_status_label(status):
+    """Возвращает метку статуса с эмодзи"""
+    labels = {
+        'open': '🟡 Открыта',
+        'in_progress': '🔵 В работе',
+        'resolved': '✅ Решена',
+        'rejected': '❌ Отклонена'
+    }
+    return labels.get(status, status)
+
+
+def get_category_label(category):
+    """Возвращает метку категории с эмодзи"""
+    labels = {
+        'site': '🌐 Сайт',
+        'bot': '🤖 Бот ВК',
+        'housing': '🏠 Жильё'
+    }
+    return labels.get(category, category)
+
+
 def main():
     logger.info("🚀 Запуск бота ВКонтакте...")
 
@@ -217,12 +305,22 @@ def main():
     vk = vk_session.get_api()
     longpoll = VkLongPoll(vk_session)
 
+    # Запускаем поток для отправки уведомлений
     notification_thread = threading.Thread(
         target=send_notification_worker,
         args=(vk, settings),
         daemon=True
     )
     notification_thread.start()
+
+    # Запускаем поток для проверки новых сообщений в заявках
+    request_thread = threading.Thread(
+        target=check_request_messages_worker,
+        args=(vk, settings),
+        daemon=True
+    )
+    request_thread.start()
+    logger.info("✅ Поток проверки заявок запущен!")
 
     logger.info("✅ Бот успешно подключен к ВКонтакте и ожидает сообщений!")
 
@@ -646,27 +744,6 @@ def main():
                         random_id=0,
                         keyboard=create_main_keyboard(active_group, site_url)
                     )
-
-
-def get_status_label(status):
-    """Возвращает метку статуса с эмодзи"""
-    labels = {
-        'open': '🟡 Открыта',
-        'in_progress': '🔵 В работе',
-        'resolved': '✅ Решена',
-        'rejected': '❌ Отклонена'
-    }
-    return labels.get(status, status)
-
-
-def get_category_label(category):
-    """Возвращает метку категории с эмодзи"""
-    labels = {
-        'site': '🌐 Сайт',
-        'bot': '🤖 Бот ВК',
-        'housing': '🏠 Жильё'
-    }
-    return labels.get(category, category)
 
 
 if __name__ == '__main__':

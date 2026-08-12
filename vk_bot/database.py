@@ -718,6 +718,40 @@ def get_all_requests_for_admin(status=None):
         conn.close()
 
 
+def get_request_by_id(request_id):
+    """Получает заявку по ID (без проверки пользователя)"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT r.*, u.vk_id, u.first_name, u.last_name
+                FROM vk_bot_requests r
+                JOIN users u ON r.user_id = u.id
+                WHERE r.id = %s
+            """, (request_id,))
+            return cursor.fetchone()
+    finally:
+        conn.close()
+
+
+def get_last_request_message(request_id):
+    """Получает последнее сообщение по заявке"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT m.*, u.first_name, u.last_name, u.vk_id
+                FROM vk_bot_request_messages m
+                JOIN users u ON m.user_id = u.id
+                WHERE m.request_id = %s
+                ORDER BY m.created_at DESC
+                LIMIT 1
+            """, (request_id,))
+            return cursor.fetchone()
+    finally:
+        conn.close()
+
+
 def update_report_status(report_id, status, reject_reason=''):
     """Обновляет статус отчета, начисляет баллы, выдает билеты"""
     conn = get_db_connection()
