@@ -500,7 +500,23 @@ def main():
                 # Проверяем, согласился ли пользователь с правилами (по наличию даты)
                 if not check_user_agreement(db_user['id']):
                     logger.info(f"Пользователь {vk_id} еще не согласился с правилами")
-                    
+
+                    # Если пользователь нажал кнопку подтверждения — записываем согласие
+                    if text == "✅ Подтверждаю":
+                        logger.info(f"Пользователь {vk_id} нажал кнопку подтверждения")
+                        success = set_user_agreement(db_user['id'])
+                        logger.info(f"Сохранение согласия: {'успешно' if success else 'ОШИБКА'}")
+                        if vk_id in agreement_sent:
+                            agreement_sent.remove(vk_id)
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message="✅ Спасибо! Вы подтвердили согласие с правилами пребывания на Форуме.\n\nТеперь вам доступны все функции бота.",
+                            random_id=0,
+                            keyboard=create_main_keyboard(active_group, site_url)
+                        )
+                        logger.info(f"Главное меню отправлено пользователю {vk_id}")
+                        continue
+
                     # Если пользователь только что создан, отправляем логин/пароль
                     if db_user.get('generated_password'):
                         login_msg = (
@@ -706,48 +722,6 @@ def main():
                         keyboard=create_main_keyboard(active_group, site_url)
                     )
                     continue
-
-            # --- Обработка команды согласия с правилами ---
-            if text == "✅ Подтверждаю":
-                logger.info(f"Пользователь {vk_id} нажал кнопку подтверждения")
-                logger.info(f"ID пользователя в БД: {db_user['id']}")
-                
-                # Проверяем текущий статус (по наличию даты)
-                current_status = check_user_agreement(db_user['id'])
-                logger.info(f"Текущий статус согласия для пользователя {vk_id}: {current_status}")
-                
-                if not current_status:
-                    logger.info(f"Пользователь {vk_id} еще не соглашался с правилами")
-                    
-                    # Отмечаем согласие в БД - ставим текущую дату
-                    logger.info(f"Попытка сохранить согласие для пользователя {vk_id} (ID в БД: {db_user['id']})")
-                    success = set_user_agreement(db_user['id'])
-                    
-                    if success:
-                        logger.info(f"✅ Согласие пользователя {vk_id} успешно сохранено в БД")
-                        # Удаляем из множества отправленных
-                        if vk_id in agreement_sent:
-                            agreement_sent.remove(vk_id)
-                    else:
-                        logger.error(f"❌ Не удалось сохранить согласие пользователя {vk_id} в БД")
-                    
-                    # Отправляем подтверждение и показываем главное меню
-                    vk.messages.send(
-                        user_id=vk_id,
-                        message="✅ Спасибо! Вы подтвердили согласие с правилами пребывания на Форуме.\n\nТеперь вам доступны все функции бота.",
-                        random_id=0,
-                        keyboard=create_main_keyboard(active_group, site_url)
-                    )
-                    logger.info(f"Главное меню отправлено пользователю {vk_id}")
-                else:
-                    logger.info(f"Пользователь {vk_id} уже соглашался с правилами")
-                    vk.messages.send(
-                        user_id=vk_id,
-                        message="Вы уже подтвердили согласие с правилами.",
-                        random_id=0,
-                        keyboard=create_main_keyboard(active_group, site_url)
-                    )
-                continue
 
             # --- Обработка команд ---
             if text in ["📋 Задания", "/start", "Начать", "Старт"]:
