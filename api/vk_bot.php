@@ -271,9 +271,12 @@ if ($uri === 'admin/vk-bot/reports') {
                 $stmt = $pdo->prepare("UPDATE users SET rating = rating + ?, completed_tasks = completed_tasks + 1 WHERE id = ?");
                 $stmt->execute([$points, $report['user_id']]);
 
+                // Базовое сообщение об одобрении
+                $message = "✅ Ваше задание \"" . $report['title'] . "\" одобрено! Получено +{$points} баллов.";
+
                 // Проверяем, все ли задания выполнены
                 $totalStmt = $pdo->prepare("
-                    SELECT COUNT(*) as total FROM vk_bot_tasks 
+                    SELECT COUNT(*) as total FROM vk_bot_tasks
                     WHERE group_id = ?
                 ");
                 $totalStmt->execute([$report['group_id']]);
@@ -282,7 +285,7 @@ if ($uri === 'admin/vk-bot/reports') {
                 $doneStmt = $pdo->prepare("
                     SELECT COUNT(DISTINCT r.task_id) as done
                     FROM vk_bot_reports r
-                    WHERE r.user_id = ? 
+                    WHERE r.user_id = ?
                     AND r.task_id IN (SELECT id FROM vk_bot_tasks WHERE group_id = ?)
                     AND r.status = 'approved'
                 ");
@@ -308,8 +311,6 @@ if ($uri === 'admin/vk-bot/reports') {
                         $message .= "\n\n🎉 Поздравляем! Вы выполнили все задания волны — вам выдан лотерейный билет!\n🎫 Номер билета: {$ticketNum}";
                     }
                 }
-
-                $message = "✅ Ваше задание \"" . $report['title'] . "\" одобрено! Получено +{$points} баллов.";
 
             } elseif ($status === 'rejected') {
                 $message = "❌ Ваше задание \"" . $report['title'] . "\" отклонено. Причина: " . ($reason ?: 'Не выполнено учение') . ". Отправьте отчет заново.";

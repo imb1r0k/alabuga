@@ -579,15 +579,16 @@ def process_vk_attachments(attachments, vk_session):
 
 
 def get_user_tickets(user_id):
-    """Получает все билеты пользователя"""
+    """Получает билеты пользователя за последние 30 дней"""
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT tk.*, g.title as group_title 
+                SELECT tk.*, g.title as group_title
                 FROM vk_bot_tickets tk
                 JOIN vk_bot_task_groups g ON tk.group_id = g.id
                 WHERE tk.user_id = %s
+                AND tk.created_at >= NOW() - INTERVAL 30 DAY
                 ORDER BY tk.created_at DESC
             """, (user_id,))
             return cursor.fetchall()
