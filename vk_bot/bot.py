@@ -380,9 +380,8 @@ def format_task_message(task, report=None):
     return msg
 
 
-def send_agreement_document(vk, user_id, document_path='Положение_о_проведении_форумной_линейки_Орбиты_будущего_2.docx'):
-    """Отправляет правила и просит подтвердить согласие"""
-    # Формируем сообщение с правилами
+def send_agreement_rules(vk, user_id):
+    """Отправляет правила и просит подтвердить согласие (только текст)"""
     rules_text = (
         "📋 ПРАВИЛА ПРЕБЫВАНИЯ НА ФОРУМЕ\n\n"
         "1. Участник обязан соблюдать правила пребывания.\n"
@@ -398,13 +397,6 @@ def send_agreement_document(vk, user_id, document_path='Положение_о_п
         "⚠️ ЗА НАРУШЕНИЕ ПРАВИЛ ПРЕДУСМОТРЕНА ДИСКВАЛИФИКАЦИЯ!\n\n"
         "✅ Для продолжения работы в боте нажмите кнопку 'Подтверждаю'."
     )
-    
-    # Проверяем, есть ли файл на сервере
-    if os.path.exists(document_path):
-        # Добавляем информацию о файле
-        file_url = f"https://{os.uname().nodename}/alabuga/vk_bot/{document_path}"  # Замените на ваш URL
-        rules_text += f"\n\n📄 Полный текст правил доступен по ссылке:\n{file_url}"
-        logger.info(f"Добавлена ссылка на файл: {file_url}")
     
     vk.messages.send(
         user_id=user_id,
@@ -529,7 +521,7 @@ def main():
                     # Отправляем правила только если не отправляли ранее
                     if vk_id not in agreement_sent:
                         logger.info(f"Отправка правил пользователю {vk_id}")
-                        send_agreement_document(vk, vk_id)
+                        send_agreement_rules(vk, vk_id)
                         agreement_sent.add(vk_id)
                     else:
                         logger.info(f"Правила уже отправлены пользователю {vk_id}, ожидаем подтверждения")
