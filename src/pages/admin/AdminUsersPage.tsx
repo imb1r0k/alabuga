@@ -2,10 +2,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Skeleton } from '../../components/Skeleton';
 import { AdminLayout } from '../../components/AdminLayout';
 import { useToast } from '../../components/Toast';
-import { getAdminUsers, updateAdminUser, getUserDetails, getAdminTeams } from '../../services/api';
+import { getAdminUsers, updateAdminUser, getUserDetails, getAdminTeams, getExportUsers } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { Link } from 'react-router-dom';
-import { QrCode, X, Shield, CheckSquare, Square, Search, Filter, RotateCcw } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import { QrCode, X, Shield, CheckSquare, Square, Search, Filter, RotateCcw, ArrowUp, ArrowDown, Download } from 'lucide-react';
 
 function setCookie(name: string, value: string, days = 30) {
   const d = new Date();
@@ -32,6 +33,18 @@ export const AdminUsersPage: React.FC = () => {
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [userDetails, setUserDetails] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Сортировка
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
+
+  const handleSort = (key: string) => {
+    setSortConfig((prev) => {
+      if (prev?.key === key) {
+        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, direction: 'desc' };
+    });
+  };
 
   // Фильтры
   const [showFiltersModal, setShowFiltersModal] = useState(false);
@@ -138,8 +151,32 @@ export const AdminUsersPage: React.FC = () => {
       });
     }
 
-    return result;
-  }, [users, onlyActive, roleFilter, teamFilter, searchTerm]);
+    // Сортировка
+        if (sortConfig) {
+          const { key, direction } = sortConfig;
+          const dir = direction === 'asc' ? 1 : -1;
+          result = [...result].sort((a, b) => {
+            let av: any = a[key];
+            let bv: any = b[key];
+            // Для дат
+            if (key === 'created_at' || key === 'date_joined') {
+              av = a.created_at ? new Date(a.created_at).getTime() : 0;
+              bv = b.created_at ? new Date(b.created_at).getTime() : 0;
+            }
+            // Для чисел
+            if (typeof av === 'number' && typeof bv === 'number') {
+              return (av - bv) * dir;
+            }
+            av = String(av ?? '').toLowerCase();
+            bv = String(bv ?? '').toLowerCase();
+            if (av < bv) return -1 * dir;
+            if (av > bv) return 1 * dir;
+            return 0;
+          });
+        }
+    
+        return result;
+      }, [users, onlyActive, roleFilter, teamFilter, searchTerm, sortConfig]);
 
   const handleSelectUser = async (u: any) => {
     setSelectedUser(u);
@@ -216,6 +253,38 @@ export const AdminUsersPage: React.FC = () => {
     setSelectedForQr(u);
   };
 
+  const handleExportExcel = async () => {
+    try {
+      const data = await getExportUsers();
+      if (!Array.isArray(data) || data.length === 0) {
+        showToast('Нет данных для экспорта', 'info');
+        return;
+      }
+      // Заголовки на русском
+      const rows = data.map((u: any) => ({
+        'Фамилия': u.last_name,
+        'Имя': u.first_name,
+        'Отчество': u.patronymic,
+        'Номер телефона': u.phone,
+        'Корпус': u.booking_building,
+        'Этаж': u.booking_floor,
+        'Комната': u.booking_room,
+        'VK': u.social_vk,
+        'Telegram': u.social_telegram,
+        'Instagram': u.social_instagram,
+        'Max': u.social_max,
+        'Ссылка на публичный профиль': u.public_profile_url,
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Пользователи');
+      XLSX.writeFile(wb, `users_export_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      showToast('Экспорт выполнен', 'success');
+    } catch (err: any) {
+      showToast('Ошибка экспорта: ' + (err.response?.data?.error || err.message), 'error');
+    }
+  };
+
   const getPublicProfileUrl = (login: string) => {
     return `${window.location.origin}/public_profile/${login}`;
   };
@@ -246,19 +315,38 @@ export const AdminUsersPage: React.FC = () => {
 
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button
-              className="btn btn-secondary"
-              onClick={() => setShowFiltersModal(!showFiltersModal)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                fontSize: '13px',
-                backgroundColor: isFiltered ? '#e0f2fe' : '#f1f5f9',
-                borderColor: isFiltered ? '#0284c7' : '#cbd5e1',
-                color: isFiltered ? '#0284c7' : '#334155',
-                fontWeight: 600,
-              }}
-            >
+                          className="btn btn-secondary"
+                          onClick={handleExportExcel}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            fontSize: '13px',
+                            backgroundColor: '#ecfdf5',
+                            borderColor: '#10b981',
+                            color: '#065f46',
+                            fontWeight: 600,
+                          }}
+                          title="Экспортировать пользователей в Excel"
+                        >
+                          <Download size={16} />
+                          <span>Экспорт в Excel</span>
+                        </button>
+            
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => setShowFiltersModal(!showFiltersModal)}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            fontSize: '13px',
+                            backgroundColor: isFiltered ? '#e0f2fe' : '#f1f5f9',
+                            borderColor: isFiltered ? '#0284c7' : '#cbd5e1',
+                            color: isFiltered ? '#0284c7' : '#334155',
+                            fontWeight: 600,
+                          }}
+                        >
               <Filter size={16} />
               <span>Фильтры</span>
               {isFiltered && <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#0284c7' }} />}
@@ -370,22 +458,35 @@ export const AdminUsersPage: React.FC = () => {
             <div style={{ overflowX: 'auto', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
                 <thead>
-                  <tr style={{ backgroundColor: '#f8f9fa', borderBottom: '2px solid #ddd' }}>
-                    <th style={{ padding: '10px' }}>#</th>
-                    <th style={{ padding: '10px' }}>ФИО</th>
-                    <th style={{ padding: '10px' }}>Логин</th>
-                    <th style={{ padding: '10px' }}>Телефон</th>
-                    <th style={{ padding: '10px' }}>Роль</th>
-                                        <th style={{ padding: '10px' }}>Статус</th>
-                                        <th style={{ padding: '10px' }}>Рейтинг</th>
-                                        <th style={{ padding: '10px' }}>Команда</th>
-                    <th style={{ padding: '10px' }}>Действия</th>
-                  </tr>
-                </thead>
+                                  <tr style={{ backgroundColor: '#f8f9fa', borderBottom: '2px solid #ddd' }}>
+                                    <th style={{ padding: '10px' }}>#</th>
+                                    <th style={{ padding: '10px' }}>ФИО</th>
+                                    <th style={{ padding: '10px' }}>Логин</th>
+                                    <th style={{ padding: '10px' }}>Телефон</th>
+                                    <th style={{ padding: '10px' }}>Роль</th>
+                                    <th style={{ padding: '10px' }}>Статус</th>
+                                    <th
+                                      style={{ padding: '10px', cursor: 'pointer', userSelect: 'none' }}
+                                      onClick={() => handleSort('rating')}
+                                      title="Сортировать по рейтингу"
+                                    >
+                                      Рейтинг {sortConfig?.key === 'rating' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} style={{ verticalAlign: 'middle' }} /> : <ArrowDown size={14} style={{ verticalAlign: 'middle' }} />) : null}
+                                    </th>
+                                    <th
+                                      style={{ padding: '10px', cursor: 'pointer', userSelect: 'none' }}
+                                      onClick={() => handleSort('created_at')}
+                                      title="Сортировать по дате регистрации"
+                                    >
+                                      Дата регистрации {sortConfig?.key === 'created_at' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} style={{ verticalAlign: 'middle' }} /> : <ArrowDown size={14} style={{ verticalAlign: 'middle' }} />) : null}
+                                    </th>
+                                    <th style={{ padding: '10px' }}>Команда</th>
+                                    <th style={{ padding: '10px' }}>Действия</th>
+                                  </tr>
+                                </thead>
                 <tbody>
                   {filteredUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={9} style={{ padding: '24px', textAlign: 'center', color: '#94a3b8' }}>
+                      <td colSpan={10} style={{ padding: '24px', textAlign: 'center', color: '#94a3b8' }}>
                         Пользователи не найдены
                       </td>
                     </tr>
@@ -420,8 +521,11 @@ export const AdminUsersPage: React.FC = () => {
                                                       </span>
                                                     </td>
                                                     <td style={{ padding: '10px', fontWeight: 600, color: '#2563eb' }}>
-                                                      ⭐ {u.rating ?? 0}
-                                                    </td>
+                                                                                ⭐ {u.rating ?? 0}
+                                                                              </td>
+                                                                              <td style={{ padding: '10px', color: '#64748b', fontSize: '13px' }}>
+                                                                                {u.created_at ? new Date(u.created_at).toLocaleDateString('ru-RU') : '-'}
+                                                                              </td>
                                                     <td style={{ padding: '10px' }}>
                             {isCuratorRole ? (
                               u.curator_team_ids?.includes(0) ? (

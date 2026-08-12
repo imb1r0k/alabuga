@@ -1,6 +1,7 @@
 import React from 'react';
-import { Users, ShieldCheck } from 'lucide-react';
+import { Users, ShieldCheck, Star } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useSettings } from '../../contexts/SettingsContext';
 
 interface Member {
   id: number;
@@ -9,6 +10,7 @@ interface Member {
   name: string;
   login: string;
   role: string;
+  rating?: number;
   user_role?: string;
 }
 
@@ -19,6 +21,17 @@ interface Team {
 }
 
 export const TeamSection: React.FC<{ team: Team | null; members: Member[] }> = ({ team, members }) => {
+  const { showRating } = useSettings();
+
+  // Сортировка: кураторы/модераторы сверху, затем по убыванию рейтинга
+  const sortedMembers = [...members].sort((a, b) => {
+    const aIsCurator = a.role === 'curator' || a.user_role === 'curator' || a.user_role === 'moderator';
+    const bIsCurator = b.role === 'curator' || b.user_role === 'curator' || b.user_role === 'moderator';
+    if (aIsCurator && !bIsCurator) return -1;
+    if (!aIsCurator && bIsCurator) return 1;
+    return (b.rating ?? 0) - (a.rating ?? 0);
+  });
+
   if (!team) {
     return (
       <div className="card" style={{ marginBottom: '24px' }}>
@@ -38,7 +51,7 @@ export const TeamSection: React.FC<{ team: Team | null; members: Member[] }> = (
       {team.description && <p style={{ color: '#64748b', marginBottom: '16px' }}>{team.description}</p>}
       <h4 style={{ fontSize: '15px', marginBottom: '10px', color: '#334155' }}>Участники ({members.length})</h4>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {members.map((m) => {
+        {sortedMembers.map((m) => {
           const isCurator = m.role === 'curator' || m.user_role === 'curator' || m.user_role === 'moderator';
 
           return (
@@ -77,8 +90,13 @@ export const TeamSection: React.FC<{ team: Team | null; members: Member[] }> = (
                 {(m.last_name?.[0] || m.name?.[0] || '?').toUpperCase()}
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600, fontSize: '14px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ fontWeight: 600, fontSize: '14px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                   <span>{m.last_name} {m.first_name || m.name}</span>
+                  {showRating && (
+                    <span style={{ backgroundColor: '#dbeafe', color: '#1e40af', padding: '1px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                      <Star size={12} /> {m.rating ?? 0}
+                    </span>
+                  )}
                   {isCurator && (
                     <span style={{ fontSize: '11px', backgroundColor: '#2563eb', color: '#fff', padding: '2px 6px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
                       <ShieldCheck size={12} /> Куратор

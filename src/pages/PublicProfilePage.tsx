@@ -1,13 +1,20 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Users, MapPin, ShieldCheck } from 'lucide-react';
-import { getPublicProfile } from '../services/api';
+import { ArrowLeft, Users, MapPin, ShieldCheck, Star } from 'lucide-react';
+import { getPublicProfile, getSettings } from '../services/api';
 
 export const PublicProfilePage: React.FC = () => {
   const { login } = useParams<{ login: string }>();
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showRating, setShowRating] = useState(true);
+
+  useEffect(() => {
+    getSettings().then((data) => {
+      setShowRating(data?.show_rating === '1' || data?.show_rating === 'true');
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!login) return;
@@ -55,8 +62,13 @@ export const PublicProfilePage: React.FC = () => {
             {(user.last_name?.[0] || user.name?.[0] || '?').toUpperCase()}
           </div>
           <div>
-            <h2 style={{ margin: 0, fontSize: '22px', color: '#0f172a' }}>
+            <h2 style={{ margin: 0, fontSize: '22px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
               {user.last_name} {user.first_name || user.name}
+              {showRating && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', backgroundColor: '#dbeafe', color: '#1e40af', padding: '2px 10px', borderRadius: '16px', fontSize: '13px', fontWeight: 600 }}>
+                  <Star size={14} /> {user.rating ?? 0}
+                </span>
+              )}
             </h2>
             <div style={{ color: '#64748b', fontSize: '14px' }}>@{user.login}</div>
           </div>
@@ -115,8 +127,13 @@ export const PublicProfilePage: React.FC = () => {
                     {(m.last_name?.[0] || m.name?.[0] || '?').toUpperCase()}
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: '14px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ fontWeight: 600, fontSize: '14px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                       <span>{m.last_name} {m.first_name || m.name}</span>
+                      {showRating && (
+                        <span style={{ backgroundColor: '#dbeafe', color: '#1e40af', padding: '1px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                          <Star size={12} /> {m.rating ?? 0}
+                        </span>
+                      )}
                       {isCurator && (
                         <span style={{ fontSize: '11px', backgroundColor: '#2563eb', color: '#fff', padding: '2px 6px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
                           <ShieldCheck size={12} /> Куратор

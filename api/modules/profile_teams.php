@@ -44,7 +44,7 @@ if ($uri === 'my-team') {
         jsonResponse(['team' => null, 'members' => []]);
     }
     $membersStmt = $pdo->prepare("
-        SELECT u.id, u.first_name, u.last_name, u.name, u.login, u.role as user_role,
+        SELECT u.id, u.first_name, u.last_name, u.name, u.login, u.rating, u.role as user_role,
                COALESCE(tm.role, CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 'curator' ELSE 'member' END) as role
         FROM users u
         LEFT JOIN team_members tm ON tm.user_id = u.id AND tm.team_id = ?
@@ -53,7 +53,7 @@ if ($uri === 'my-team') {
                SELECT user_id FROM curator_teams WHERE team_id = ? OR team_id = 0
            )))
            AND u.status = 'active'
-        ORDER BY CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 0 ELSE 1 END, u.last_name ASC
+        ORDER BY CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 0 ELSE 1 END, u.rating DESC, u.last_name ASC
     ");
     $membersStmt->execute([$teamId, $teamId, $teamId]);
     $members = $membersStmt->fetchAll();
@@ -130,7 +130,7 @@ if ($uri === 'public/profile') {
         $team = $teamStmt->fetch();
 
         $membersStmt = $pdo->prepare("
-            SELECT u.id, u.first_name, u.last_name, u.name, u.login, u.role as user_role,
+            SELECT u.id, u.first_name, u.last_name, u.name, u.login, u.rating, u.role as user_role,
                    COALESCE(tm.role, CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 'curator' ELSE 'member' END) as role
             FROM users u
             LEFT JOIN team_members tm ON tm.user_id = u.id AND tm.team_id = ?
@@ -139,7 +139,7 @@ if ($uri === 'public/profile') {
                    SELECT user_id FROM curator_teams WHERE team_id = ? OR team_id = 0
                )))
                AND u.status = 'active'
-            ORDER BY CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 0 ELSE 1 END, u.last_name ASC
+            ORDER BY CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 0 ELSE 1 END, u.rating DESC, u.last_name ASC
         ");
         $membersStmt->execute([$teamId, $teamId, $teamId]);
         $members = $membersStmt->fetchAll();

@@ -416,6 +416,7 @@ export const AdminTeamsPage: React.FC = () => {
                         <tr style={{ backgroundColor: '#f8fafc', textAlign: 'left' }}>
                           <th style={{ padding: '8px' }}>ФИО</th>
                           <th style={{ padding: '8px' }}>Логин</th>
+                          <th style={{ padding: '8px' }}>Рейтинг</th>
                           <th style={{ padding: '8px' }}>Роль</th>
                           <th style={{ padding: '8px', width: '60px' }}>Действие</th>
                         </tr>
@@ -428,6 +429,7 @@ export const AdminTeamsPage: React.FC = () => {
                             <tr key={m.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                               <td style={{ padding: '8px', fontWeight: 600 }}>{m.last_name} {m.first_name || m.name}</td>
                               <td style={{ padding: '8px' }}>{m.login}</td>
+                              <td style={{ padding: '8px', fontWeight: 600, color: '#2563eb' }}>⭐ {m.rating ?? 0}</td>
                               <td style={{ padding: '8px' }}>
                                 {isCurator ? (
                                   <span style={{ fontSize: '11px', backgroundColor: '#2563eb', color: '#fff', padding: '2px 6px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>

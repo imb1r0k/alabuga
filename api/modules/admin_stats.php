@@ -66,6 +66,54 @@ if ($uri === 'admin/export/bookings') {
     jsonResponse($stmt->fetchAll());
 }
 
+// Экспорт списка пользователей для Excel
+if ($uri === 'admin/export/users') {
+    $user = requireStrictAdmin($pdo);
+
+    // Получаем всех пользователей с данными последнего подтверждённого бронирования
+    $stmt = $pdo->query("
+        SELECT u.id, u.last_name, u.first_name, u.patronymic, u.name, u.login, u.phone,
+               u.social_vk, u.social_telegram, u.social_instagram, u.social_max,
+               b_room.building_name, b_room.floor_number, b_room.room_number
+        FROM users u
+        LEFT JOIN (
+            SELECT b.user_id,
+                   bu.name as building_name,
+                   f.floor_number,
+                   r.room_number,
+                   ROW_NUMBER() OVER (PARTITION BY b.user_id ORDER BY b.updated_at DESC, b.id DESC) as rn
+            FROM bookings b
+            JOIN rooms r ON b.room_id = r.id
+            JOIN buildings bu ON r.building_id = bu.id
+            JOIN floors f ON r.floor_id = f.id
+            WHERE b.status IN ('approved', 'approved_bot')
+        ) b_room ON b_room.user_id = u.id AND b_room.rn = 1
+        WHERE u.role <> 'admin'
+        ORDER BY u.last_name ASC, u.first_name ASC
+    ");
+    $users = $stmt->fetchAll();
+
+    $publicProfileUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? '');
+    $result = [];
+    foreach ($users as $u) {
+        $result[] = [
+            'last_name' => $u['last_name'],
+            'first_name' => $u['first_name'],
+            'patronymic' => $u['patronymic'] ?? '',
+            'phone' => $u['phone'] ?? '',
+            'booking_building' => $u['building_name'] ?? '',
+            'booking_floor' => $u['floor_number'] ?? '',
+            'booking_room' => $u['room_number'] ?? '',
+            'social_vk' => $u['social_vk'] ?? '',
+            'social_telegram' => $u['social_telegram'] ?? '',
+            'social_instagram' => $u['social_instagram'] ?? '',
+            'social_max' => $u['social_max'] ?? '',
+            'public_profile_url' => ($publicProfileUrl ? $publicProfileUrl . '/public_profile/' . rawurlencode($u['login']) : '/public_profile/' . rawurlencode($u['login'])),
+        ];
+    }
+    jsonResponse($result);
+}
+
 if ($uri === 'admin/export/layouts') {
     $user = requireStrictAdmin($pdo);
     $buildings = $pdo->query("SELECT * FROM buildings ORDER BY id ASC")->fetchAll();

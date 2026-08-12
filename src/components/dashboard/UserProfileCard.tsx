@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Pencil, Save, X, User, Camera, Send, Globe, MessageCircle, ExternalLink } from 'lucide-react';
+import { Pencil, Save, X, User, Camera, Send, Globe, MessageCircle, ExternalLink, Star } from 'lucide-react';
 import { useToast } from '../Toast';
 import { updateMyProfile } from '../../services/api';
+import { useSettings } from '../../contexts/SettingsContext';
 import { Link } from 'react-router-dom';
 
 interface Props {
@@ -18,6 +19,7 @@ const socialFields = [
 
 export const UserProfileCard: React.FC<Props> = ({ user, onUpdate }) => {
   const { showToast } = useToast();
+  const { showRating } = useSettings();
   const [isEditing, setIsEditing] = useState(false);
   const [bio, setBio] = useState(user?.bio || '');
   const [socials, setSocials] = useState<Record<string, string>>({
@@ -63,6 +65,11 @@ export const UserProfileCard: React.FC<Props> = ({ user, onUpdate }) => {
         <div>
           <div style={{ marginBottom: '16px' }}>
             <strong>ФИО:</strong> {user?.last_name} {user?.first_name}
+            {showRating && (
+              <span style={{ marginLeft: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px', backgroundColor: '#dbeafe', color: '#1e40af', padding: '3px 10px', borderRadius: '16px', fontSize: '13px', fontWeight: 600 }}>
+                <Star size={14} /> {user?.rating ?? 0} баллов
+              </span>
+            )}
           </div>
           <div style={{ marginBottom: '16px' }}>
             <strong>Логин:</strong> {user?.login}

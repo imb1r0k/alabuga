@@ -167,6 +167,11 @@ export const getExportLayouts = async () => {
   return response.data;
 };
 
+export const getExportUsers = async () => {
+  const response = await api.get('/admin/export/users');
+  return response.data;
+};
+
 export const archiveAllBookings = async () => {
   const response = await api.post('/admin/archive-bookings');
   return response.data;

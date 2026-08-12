@@ -128,7 +128,7 @@ if ($uri === 'admin/teams/members') {
     }
 
     $stmt = $pdo->prepare("
-        SELECT u.id, u.first_name, u.last_name, u.name, u.login, u.role as user_role,
+        SELECT u.id, u.first_name, u.last_name, u.name, u.login, u.rating, u.role as user_role,
                COALESCE(tm.role, CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 'curator' ELSE 'member' END) as role
         FROM users u
         LEFT JOIN team_members tm ON tm.user_id = u.id AND tm.team_id = ?
@@ -137,7 +137,7 @@ if ($uri === 'admin/teams/members') {
                SELECT user_id FROM curator_teams WHERE team_id = ? OR team_id = 0
            )))
            AND u.status = 'active'
-        ORDER BY CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 0 ELSE 1 END, u.last_name ASC
+        ORDER BY CASE WHEN LOWER(TRIM(u.role)) IN ('curator', 'moderator') THEN 0 ELSE 1 END, u.rating DESC, u.last_name ASC
     ");
     $stmt->execute([$teamId, $teamId, $teamId]);
     jsonResponse($stmt->fetchAll());
@@ -231,27 +231,47 @@ if ($uri === 'admin/teams/calendar') {
     }
 
     if ($method === 'POST') {
-        $action = $data['action'] ?? 'create';
-        $teamId = (int)($data['team_id'] ?? 0);
-
-        if (!checkCuratorAccessToTeam($pdo, $user['id'], $teamId)) {
-            jsonError('У вас нет доступа к этой команде', 403);
+            $action = $data['action'] ?? 'create';
+            $teamId = (int)($data['team_id'] ?? 0);
+    
+            if (!checkCuratorAccessToTeam($pdo, $user['id'], $teamId)) {
+                jsonError('У вас нет доступа к этой команде', 403);
+            }
+    
+            if ($action === 'create') {
+                $title = trim($data['title'] ?? '');
+                $eventDate = trim($data['event_date'] ?? '');
+                $desc = trim($data['description'] ?? '');
+                if (!$title || !$eventDate) jsonError('Заполните название и дату');
+    
+                // Обработка загруженного изображения
+                $imageUrl = trim($data['image_url'] ?? '');
+                if (!empty($_FILES['image']) && $_FILES['image']['error'] === UPLOAD_ERR_OK) {
+                    $uploadDir = __DIR__ . '/../uploads/team_events/';
+                    if (!is_dir($uploadDir)) {
+                        mkdir($uploadDir, 0777, true);
+                    }
+                    $ext = strtolower(pathinfo($_FILES['image']['name'], PATHINFO_EXTENSION));
+                    $allowed = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+                    if (!in_array($ext, $allowed, true)) jsonError('Недопустимый формат изображения', 400);
+                    $fileName = 'event_' . time() . '_' . uniqid() . '.' . $ext;
+                    $filePath = $uploadDir . $fileName;
+                    if (move_uploaded_file($_FILES['image']['tmp_name'], $filePath)) {
+                        $imageUrl = '/uploads/team_events/' . $fileName;
+                    } else {
+                        jsonError('Не удалось сохранить изображение', 500);
+                    }
+                }
+    
+                $stmt = $pdo->prepare("INSERT INTO team_calendar_events (team_id, title, event_date, description, image_url, created_by) VALUES (?, ?, ?, ?, ?, ?)");
+                $stmt->execute([$teamId, $title, $eventDate, $desc, $imageUrl ?: null, $user['id']]);
+            } elseif ($action === 'delete') {
+                $id = (int)($data['id'] ?? 0);
+                $stmt = $pdo->prepare("DELETE FROM team_calendar_events WHERE id = ?");
+                $stmt->execute([$id]);
+            }
+            jsonResponse(['success' => true]);
         }
-
-        if ($action === 'create') {
-            $title = trim($data['title'] ?? '');
-            $eventDate = trim($data['event_date'] ?? '');
-            $desc = trim($data['description'] ?? '');
-            if (!$title || !$eventDate) jsonError('Заполните название и дату');
-            $stmt = $pdo->prepare("INSERT INTO team_calendar_events (team_id, title, event_date, description, created_by) VALUES (?, ?, ?, ?, ?)");
-            $stmt->execute([$teamId, $title, $eventDate, $desc, $user['id']]);
-        } elseif ($action === 'delete') {
-            $id = (int)($data['id'] ?? 0);
-            $stmt = $pdo->prepare("DELETE FROM team_calendar_events WHERE id = ?");
-            $stmt->execute([$id]);
-        }
-        jsonResponse(['success' => true]);
-    }
 
     jsonError('Метод не поддерживается', 405);
 }

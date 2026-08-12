@@ -12,6 +12,7 @@ interface HeroSettings {
 interface SettingsContextType {
   siteTitle: string;
   hero: HeroSettings;
+  showRating: boolean;
   loading: boolean;
   updateSiteTitle: (newTitle: string) => Promise<void>;
   updateAllSettings: (settings: Record<string, string>) => Promise<void>;
@@ -31,12 +32,14 @@ const SettingsContext = createContext<SettingsContextType | undefined>(undefined
 export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [siteTitle, setSiteTitle] = useState('Алабуга - форум 2025');
   const [hero, setHero] = useState<HeroSettings>(defaultHero);
+  const [showRating, setShowRating] = useState(true);
   const [loading, setLoading] = useState(true);
 
   const fetchSettings = async () => {
     try {
       const data = await getSettings();
       if (data?.site_title) setSiteTitle(data.site_title);
+      setShowRating(data?.show_rating === '1' || data?.show_rating === 'true');
       setHero({
         hero_badge: data?.hero_badge ?? defaultHero.hero_badge,
         hero_title: data?.hero_title ?? defaultHero.hero_title,
@@ -63,6 +66,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const handleUpdateAllSettings = async (settings: Record<string, string>) => {
     await updateSettings(settings);
     if (settings.site_title) setSiteTitle(settings.site_title);
+    if (settings.show_rating !== undefined) setShowRating(settings.show_rating === '1' || settings.show_rating === 'true');
     if (settings.hero_badge) setHero((prev) => ({ ...prev, hero_badge: settings.hero_badge }));
     if (settings.hero_title) setHero((prev) => ({ ...prev, hero_title: settings.hero_title }));
     if (settings.hero_description) setHero((prev) => ({ ...prev, hero_description: settings.hero_description }));
@@ -75,6 +79,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       value={{
         siteTitle,
         hero,
+        showRating,
         loading,
         updateSiteTitle: handleUpdateSiteTitle,
         updateAllSettings: handleUpdateAllSettings,

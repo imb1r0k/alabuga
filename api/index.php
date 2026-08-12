@@ -270,6 +270,11 @@ $method = $_SERVER['REQUEST_METHOD'];
 $rawInput = file_get_contents('php://input');
 $data = json_decode($rawInput, true) ?: [];
 
+// Для multipart-запросов (загрузка файлов) данные приходят в $_POST
+if ($method === 'POST' && empty($data) && !empty($_POST)) {
+    $data = $_POST;
+}
+
 // Перенаправление всех вызовов к боту ВК в отдельный модуль
 if (strpos($uri, 'admin/vk-bot') === 0 || strpos($uri, 'vk-bot') === 0) {
     require_once __DIR__ . '/vk_bot.php';

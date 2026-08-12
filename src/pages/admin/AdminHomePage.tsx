@@ -8,7 +8,7 @@ import { ChevronDown, ChevronUp, Settings2 } from 'lucide-react';
 import { getGlobalNotification, saveGlobalNotification } from '../../services/api';
 
 export const AdminHomePage: React.FC = () => {
-  const { siteTitle, hero, updateAllSettings } = useSettings();
+  const { siteTitle, hero, showRating, updateAllSettings } = useSettings();
   const { showToast } = useToast();
 
   // Состояния для всех полей
@@ -18,6 +18,7 @@ export const AdminHomePage: React.FC = () => {
   const [descInput, setDescInput] = useState(hero.hero_description);
   const [btnTextInput, setBtnTextInput] = useState(hero.hero_button_text);
   const [btnTextAuthInput, setBtnTextAuthInput] = useState(hero.hero_button_text_auth);
+  const [showRatingInput, setShowRatingInput] = useState(showRating);
 
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -64,6 +65,10 @@ export const AdminHomePage: React.FC = () => {
     setBtnTextAuthInput(hero.hero_button_text_auth);
   }, [siteTitle, hero]);
 
+  useEffect(() => {
+    setShowRatingInput(showRating);
+  }, [showRating]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -76,6 +81,7 @@ export const AdminHomePage: React.FC = () => {
         hero_description: descInput,
         hero_button_text: btnTextInput,
         hero_button_text_auth: btnTextAuthInput,
+        show_rating: showRatingInput ? '1' : '0',
       });
       setMsg('Все настройки успешно сохранены!');
       showToast('Все настройки успешно сохранены!', 'success');
@@ -261,20 +267,34 @@ export const AdminHomePage: React.FC = () => {
                   </div>
 
                   <div className="input-group">
-                    <label>Текст кнопки (для авторизованных)</label>
-                    <input
-                      type="text"
-                      value={btnTextAuthInput}
-                      onChange={(e) => setBtnTextAuthInput(e.target.value)}
-                      disabled={saving}
-                      placeholder="Например: Перейти в личный кабинет"
-                    />
-                  </div>
-                </div>
-
-                <button type="submit" className="btn btn-primary" disabled={saving}>
-                  {saving ? 'Сохранение...' : 'Сохранить все настройки'}
-                </button>
+                                      <label>Текст кнопки (для авторизованных)</label>
+                                      <input
+                                        type="text"
+                                        value={btnTextAuthInput}
+                                        onChange={(e) => setBtnTextAuthInput(e.target.value)}
+                                        disabled={saving}
+                                        placeholder="Например: Перейти в личный кабинет"
+                                      />
+                                    </div>
+                                  </div>
+                  
+                                  <div style={{ marginBottom: '24px' }}>
+                                    <h4 style={{ marginBottom: '12px', color: '#1e293b' }}>Рейтинг пользователей</h4>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '14px', color: '#334155' }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={showRatingInput}
+                                        onChange={(e) => setShowRatingInput(e.target.checked)}
+                                        disabled={saving}
+                                        style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                                      />
+                                      Показывать рейтинг пользователей (в личном кабинете, на публичных страницах и в командах)
+                                    </label>
+                                  </div>
+                  
+                                  <button type="submit" className="btn btn-primary" disabled={saving}>
+                                    {saving ? 'Сохранение...' : 'Сохранить все настройки'}
+                                  </button>
               </form>
 
               {/* Глобальное уведомление */}
