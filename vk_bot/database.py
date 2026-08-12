@@ -851,9 +851,11 @@ def check_user_agreement(user_id):
         with conn.cursor() as cursor:
             cursor.execute("SELECT agreement_accepted FROM users WHERE id = %s", (user_id,))
             result = cursor.fetchone()
-            return result and result.get('agreement_accepted') == 1
+            if result:
+                return result.get('agreement_accepted') == 1
+            return False
     except Exception as e:
-        logger.error(f"Ошибка проверки согласия пользователя: {e}")
+        logger.error(f"Ошибка проверки согласия пользователя {user_id}: {e}")
         return False
     finally:
         conn.close()
@@ -869,9 +871,15 @@ def set_user_agreement(user_id):
                 SET agreement_accepted = 1, agreement_accepted_at = NOW() 
                 WHERE id = %s
             """, (user_id,))
-        logger.info(f"Пользователь {user_id} подтвердил согласие с правилами")
+            # Проверяем, что обновление произошло
+            affected_rows = cursor.rowcount
+            if affected_rows > 0:
+                logger.info(f"Пользователь {user_id} подтвердил согласие с правилами. Обновлено {affected_rows} строк.")
+            else:
+                logger.warning(f"Пользователь {user_id} не найден при обновлении согласия.")
+            return affected_rows > 0
     except Exception as e:
-        logger.error(f"Ошибка установки согласия пользователя: {e}")
+        logger.error(f"Ошибка установки согласия для пользователя {user_id}: {e}")
         raise
     finally:
         conn.close()

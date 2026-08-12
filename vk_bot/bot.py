@@ -799,7 +799,11 @@ def main():
                         logger.error(f"Ошибка отправки файла с правилами: {e}")
                     
                     # Отмечаем согласие в БД
-                    set_user_agreement(db_user['id'])
+                    success = set_user_agreement(db_user['id'])
+                    if success:
+                        logger.info(f"Согласие пользователя {vk_id} успешно сохранено в БД")
+                    else:
+                        logger.error(f"Не удалось сохранить согласие пользователя {vk_id} в БД")
                     
                     # Отправляем подтверждение и показываем главное меню
                     vk.messages.send(
