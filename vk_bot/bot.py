@@ -411,15 +411,17 @@ def send_agreement_document(vk, user_id, document_path='Положение_о_п
             )
             return
         
-        # Загружаем файл на сервер VK
+        # Создаем экземпляр VkUpload
         upload = VkUpload(vk)
         
-        # Отправляем документ
-        doc = upload.document(
-            document=document_path,
-            title="Правила пребывания на Форуме",
-            tags="правила, форум"
-        )
+        # Открываем файл для загрузки
+        with open(document_path, 'rb') as file:
+            # Загружаем документ на сервер VK
+            doc = upload.document(
+                file=file,
+                title="Правила пребывания на Форуме",
+                tags="правила, форум"
+            )
         
         # Получаем attachment
         attachment = f"doc{doc['owner_id']}_{doc['id']}"
@@ -752,17 +754,21 @@ def main():
 
             # --- Обработка команды согласия с правилами ---
             if text == "✅ Подтверждаю":
+                logger.info(f"Пользователь {vk_id} нажал кнопку подтверждения")
                 if not check_user_agreement(db_user['id']):
+                    logger.info(f"Пользователь {vk_id} еще не соглашался с правилами")
+                    
                     # Сначала отправляем файл с правилами
                     try:
                         doc_path = 'Положение_о_проведении_форумной_линейки_Орбиты_будущего_2.docx'
                         if os.path.exists(doc_path):
                             upload = VkUpload(vk)
-                            doc = upload.document(
-                                document=doc_path,
-                                title="Правила пребывания на Форуме",
-                                tags="правила, форум"
-                            )
+                            with open(doc_path, 'rb') as file:
+                                doc = upload.document(
+                                    file=file,
+                                    title="Правила пребывания на Форуме",
+                                    tags="правила, форум"
+                                )
                             attachment = f"doc{doc['owner_id']}_{doc['id']}"
                             
                             # Отправляем файл с правилами
@@ -799,6 +805,7 @@ def main():
                         logger.error(f"Ошибка отправки файла с правилами: {e}")
                     
                     # Отмечаем согласие в БД
+                    logger.info(f"Попытка сохранить согласие для пользователя {vk_id}")
                     success = set_user_agreement(db_user['id'])
                     if success:
                         logger.info(f"Согласие пользователя {vk_id} успешно сохранено в БД")
@@ -812,7 +819,9 @@ def main():
                         random_id=0,
                         keyboard=create_main_keyboard(active_group, site_url)
                     )
+                    logger.info(f"Главное меню отправлено пользователю {vk_id}")
                 else:
+                    logger.info(f"Пользователь {vk_id} уже соглашался с правилами")
                     vk.messages.send(
                         user_id=vk_id,
                         message="Вы уже подтвердили согласие с правилами.",
