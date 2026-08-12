@@ -214,11 +214,36 @@ def get_user_task_report(user_id, task_id):
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT * FROM vk_bot_reports 
-                WHERE user_id = %s AND task_id = %s 
+                SELECT * FROM vk_bot_reports
+                WHERE user_id = %s AND task_id = %s
                 ORDER BY id DESC LIMIT 1
             """, (user_id, task_id))
             return cursor.fetchone()
+    finally:
+        conn.close()
+
+
+def get_user_task_status(user_id, task_id):
+    """Возвращает статус задания для пользователя.
+    Если есть хотя бы один одобренный отчёт — задание считается выполненным (approved),
+    иначе возвращается статус последнего отчёта (или None, если отчётов нет)."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT id FROM vk_bot_reports
+                WHERE user_id = %s AND task_id = %s AND status = 'approved'
+                LIMIT 1
+            """, (user_id, task_id))
+            if cursor.fetchone():
+                return 'approved'
+            cursor.execute("""
+                SELECT status FROM vk_bot_reports
+                WHERE user_id = %s AND task_id = %s
+                ORDER BY id DESC LIMIT 1
+            """, (user_id, task_id))
+            row = cursor.fetchone()
+            return row['status'] if row else None
     finally:
         conn.close()
 
@@ -820,12 +845,14 @@ def update_report_status(report_id, status, reject_reason=''):
                 if total_tasks > 0 and done_tasks >= total_tasks:
                     import hashlib
                     ticket_num = 'TKT-' + hashlib.md5(
-                        f"{user_id}{report['group_id']}{report_id}".encode()
+                        f"{['group_id']}{report_id}".encode()
                     ).hexdigest()[:6].upper()
                     cursor.execute("""
-                        INSERT IGNORE INTO vk_bot_tickets (user_id, group_id, ticket_number)
+                        INSERT IGNORE INTO vk_bot_tickets (_id, ticket_number)
                         VALUES (%s, %s, %s)
-                    """, (user_id, report['group_id'], ticket_num))
+                    """, (['group_id'], ticket_num))
+                    if cursor.rowcount > 0:
+                        message += f"\n\n🎉 Поздравляем! Вы выполнили все задания волны — вам выдан лотерейный билет!\n🎫 Номер билета: {ticket_num}"
 
                 message = f"✅ Ваше задание \"{report['title']}\" одобрено! Получено +{points} баллов."
 

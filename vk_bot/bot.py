@@ -13,6 +13,7 @@ from database import (
     get_active_task_group,
     get_tasks_for_group,
     get_user_task_report,
+    get_user_task_status,
     create_report,
     save_report_media,
     process_vk_attachments,
@@ -174,19 +175,19 @@ def build_tasks_keyboard(tasks, user_id):
     # Функция для добавления заданий с префиксом сложности
     def add_task_buttons(task_list, prefix, emoji):
         for t in task_list:
-            report = get_user_task_report(user_id, t['id'])
+            status = get_user_task_status(user_id, t['id'])
             # Формируем название с префиксом сложности
             label = f"{emoji} {prefix}: {t['title']}"
             color = VkKeyboardColor.PRIMARY
             
-            if report:
-                if report['status'] == 'approved':
+            if status:
+                if status == 'approved':
                     label = f"✅ {prefix}: {t['title']}"
                     color = VkKeyboardColor.POSITIVE
-                elif report['status'] == 'pending':
+                elif status == 'pending':
                     label = f"⏳ {prefix}: {t['title']}"
                     color = VkKeyboardColor.SECONDARY
-                elif report['status'] == 'rejected':
+                elif status == 'rejected':
                     label = f"❌ {prefix}: {t['title']}"
                     color = VkKeyboardColor.NEGATIVE
             
@@ -354,7 +355,7 @@ def format_request_message(request, messages):
     return msg
 
 
-def format_task_message(task, report=None):
+def format_task_message(task, report=None, task_status=None):
     """Форматирует сообщение с заданием для красивого отображения"""
     diff_emoji = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}
     diff_text = {'easy': 'Легкое', 'medium': 'Среднее', 'hard': 'Сложное'}
@@ -364,7 +365,9 @@ def format_task_message(task, report=None):
     msg += f"⭐ Сложность: {diff_emoji.get(task['difficulty'], '📌')} {diff_text.get(task['difficulty'], task['difficulty'])}\n"
     msg += f"🎯 Баллы: {task['points']}\n\n"
     
-    if report:
+    if task_status == 'approved':
+        msg += "✅ Статус: Выполнено! Баллы зачислены.\n"
+    elif report:
         if report['status'] == 'approved':
             msg += "✅ Статус: Выполнено! Баллы зачислены.\n"
         elif report['status'] == 'pending':
@@ -865,7 +868,8 @@ def main():
 
                     if matched_task:
                         report = get_user_task_report(db_user['id'], matched_task['id'])
-                        msg = format_task_message(matched_task, report)
+                        task_status = get_user_task_status(db_user['id'], matched_task['id'])
+                        msg = format_task_message(matched_task, report, task_status)
 
                         user_states[vk_id] = matched_task
 

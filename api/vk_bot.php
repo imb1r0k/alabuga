@@ -293,7 +293,7 @@ if ($uri === 'admin/vk-bot/reports') {
                 if ($totalTasks > 0 && $doneTasks >= $totalTasks) {
                     // Проверяем, не выдан ли уже билет
                     $checkTicket = $pdo->prepare("
-                        SELECT id FROM vk_bot_tickets 
+                        SELECT id FROM vk_bot_tickets
                         WHERE user_id = ? AND group_id = ?
                     ");
                     $checkTicket->execute([$report['user_id'], $report['group_id']]);
@@ -305,6 +305,7 @@ if ($uri === 'admin/vk-bot/reports') {
                             VALUES (?, ?, ?)
                         ");
                         $insTicket->execute([$report['user_id'], $report['group_id'], $ticketNum]);
+                        $message .= "\n\n🎉 Поздравляем! Вы выполнили все задания волны — вам выдан лотерейный билет!\n🎫 Номер билета: {$ticketNum}";
                     }
                 }
 
