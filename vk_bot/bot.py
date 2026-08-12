@@ -434,69 +434,68 @@ def main():
                     keyboard=create_main_keyboard(active_group, site_url)
                 )
 
-            # ─── Заявки ──────────────────────────────────────────
-                        elif text == "📋 Заявка":
-                            vk.messages.send(
-                                user_id=vk_id,
-                                message="📋 Выберите действие:",
-                                random_id=0,
-                                keyboard=create_request_keyboard()
-                            )
-            
-                        elif text == "➕ Создать заявку":
-                            user_states[vk_id] = {'action': 'create_request', 'step': 'category'}
-                            vk.messages.send(
-                                user_id=vk_id,
-                                message="📋 Выберите категорию проблемы:",
-                                random_id=0,
-                                keyboard=create_category_keyboard()
-                            )
-            
-                        elif text == "📋 Мои заявки":
-                            requests = get_user_requests(db_user['id'])
-                            if not requests:
-                                msg_text = "📋 У вас пока нет заявок."
-                            else:
-                                msg_text = "📋 Ваши заявки:\n\n"
-                                for i, r in enumerate(requests[:10], 1):
-                                    status_icon = {'open': '🟡', 'in_progress': '🔵', 'resolved': '✅', 'rejected': '❌'}
-                                    icon = status_icon.get(r['status'], '🟡')
-                                    cat_labels = {'site': 'Сайт', 'bot': 'Бот ВК', 'housing': 'Жильё'}
-                                    cat = cat_labels.get(r['category'], r['category'])
-                                    msg_text += f"{i}. #{r['id']} {icon} [{cat}] {r['subject'][:60]}\n"
-                                msg_text += f"\nВсего: {len(requests)} заявок"
-                            vk.messages.send(
-                                user_id=vk_id,
-                                message=msg_text,
-                                random_id=0,
-                                keyboard=create_request_keyboard()
-                            )
-            
-                        elif text in ["🌐 Сайт", "🤖 Бот ВК", "🏠 Жильё"]:
-                            if vk_id in user_states and isinstance(user_states[vk_id], dict) and user_states[vk_id].get('action') == 'create_request':
-                                category_map = {"🌐 Сайт": "site", "🤖 Бот ВК": "bot", "🏠 Жильё": "housing"}
-                                user_states[vk_id]['category'] = category_map[text]
-                                user_states[vk_id]['step'] = 'subject'
-                                vk.messages.send(
-                                    user_id=vk_id,
-                                    message="📝 Опишите суть проблемы кратко (одной строкой):",
-                                    random_id=0
-                                )
-                            else:
-                                vk.messages.send(
-                                    user_id=vk_id,
-                                    message="🤖 Воспользуйтесь кнопками меню:",
-                                    random_id=0,
-                                    keyboard=create_main_keyboard(active_group, site_url)
-                                )
-            
-                        elif text == "🌐 Личный кабинет" and site_url:
-                            vk.messages.send(
-                                user_id=vk_id,
-                                message=f"🌐 Перейдите в личный кабинет по ссылке:\n{site_url}",
-                                random_id=0,
-                                keyboard=create_main_keyboard(active_group, site_url)
-                            )
+            elif text == "📋 Заявка":
+                vk.messages.send(
+                    user_id=vk_id,
+                    message="📋 Выберите действие:",
+                    random_id=0,
+                    keyboard=create_request_keyboard()
+                )
+
+            elif text == "➕ Создать заявку":
+                user_states[vk_id] = {'action': 'create_request', 'step': 'category'}
+                vk.messages.send(
+                    user_id=vk_id,
+                    message="📋 Выберите категорию проблемы:",
+                    random_id=0,
+                    keyboard=create_category_keyboard()
+                )
+
+            elif text == "📋 Мои заявки":
+                requests = get_user_requests(db_user['id'])
+                if not requests:
+                    msg_text = "📋 У вас пока нет заявок."
+                else:
+                    msg_text = "📋 Ваши заявки:\n\n"
+                    for i, r in enumerate(requests[:10], 1):
+                        status_icon = {'open': '🟡', 'in_progress': '🔵', 'resolved': '✅', 'rejected': '❌'}
+                        icon = status_icon.get(r['status'], '🟡')
+                        cat_labels = {'site': 'Сайт', 'bot': 'Бот ВК', 'housing': 'Жильё'}
+                        cat = cat_labels.get(r['category'], r['category'])
+                        msg_text += f"{i}. #{r['id']} {icon} [{cat}] {r['subject'][:60]}\n"
+                    msg_text += f"\nВсего: {len(requests)} заявок"
+                vk.messages.send(
+                    user_id=vk_id,
+                    message=msg_text,
+                    random_id=0,
+                    keyboard=create_request_keyboard()
+                )
+
+            elif text in ["🌐 Сайт", "🤖 Бот ВК", "🏠 Жильё"]:
+                if vk_id in user_states and isinstance(user_states[vk_id], dict) and user_states[vk_id].get('action') == 'create_request':
+                    category_map = {"🌐 Сайт": "site", "🤖 Бот ВК": "bot", "🏠 Жильё": "housing"}
+                    user_states[vk_id]['category'] = category_map[text]
+                    user_states[vk_id]['step'] = 'subject'
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="📝 Опишите суть проблемы кратко (одной строкой):",
+                        random_id=0
+                    )
+                else:
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="🤖 Воспользуйтесь кнопками меню:",
+                        random_id=0,
+                        keyboard=create_main_keyboard(active_group, site_url)
+                    )
+
+            elif text == "🌐 Личный кабинет" and site_url:
+                vk.messages.send(
+                    user_id=vk_id,
+                    message=f"🌐 Перейдите в личный кабинет по ссылке:\n{site_url}",
+                    random_id=0,
+                    keyboard=create_main_keyboard(active_group, site_url)
+                )
 
             elif text == "⬅ Назад":
                 vk.messages.send(
