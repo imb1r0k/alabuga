@@ -114,24 +114,14 @@ try {
     $approvedCount = 0;
     $updateStmt = $pdo->prepare("UPDATE bookings SET status = 'approved_bot', comment = 'Одобрено автоматически ботом' WHERE id = ?");
 
-    // Вспомогательная функция: поиск VK-дубликата (тот же человек через бота ВК)
-    function findVkDuplicate($pdo, $row) {
-        if (empty($row['last_name']) || empty($row['first_name'])) return null;
-        $dupStmt = $pdo->prepare("
-            SELECT b.room_id
-            FROM bookings b
-            JOIN users u ON b.user_id = u.id
-            WHERE u.last_name = ? AND u.first_name = ?
-              AND u.vk_url IS NOT NULL AND u.vk_url != ''
-              AND u.bot_registered = 1
-              AND u.id != ?
-              AND b.status IN ('approved','approved_bot','pending')
-            ORDER BY b.id DESC
-            LIMIT 1
-        ");
-        $dupStmt->execute([$row['last_name'], $row['first_name'], $row['user_id']]);
-        return $dupStmt->fetch();
-    }
+    // Проверка: существует ли уже активная/ожидающая заявка у пользователя с таким же ФИО
+    $dupStmt = $pdo->prepare("
+        SELECT COUNT(*) FROM bookings db
+        JOIN users du ON db.user_id = du.id
+        WHERE du.last_name = ? AND du.first_name = ?
+          AND db.status IN ('pending', 'approved', 'approved_bot')
+          AND du.id != ?
+    ");
 
     foreach ($pendingList as $row) {
         $roomEff = $row['room_gender'] !== 'DEFAULT'
@@ -142,20 +132,31 @@ try {
         
         $userGender = detectGenderByLastName($row['last_name'] ?: $row['name']);
 
-        if ($roomEff === 'MIXED' || $roomEff === 'DEFAULT' || $userGender === null || $roomEff === $userGender) {
-            // В режиме "по полу + VK-дубликаты": если у человека уже есть одобренный
-            // дубликат в ДРУГОЙ комнате — пропускаем, чтобы поселить их вместе
-            if ($checkVkDuplicate) {
-                $dup = findVkDuplicate($pdo, $row);
-                if ($dup && (int)$dup['room_id'] !== (int)$row['room_id']) {
-                    logMessage("Пропущено бронирование ID: {$row['id']} (человек уже заселён через VK-аккаунт в комнате {$dup['room_id']})");
-                    continue;
-                }
-            }
-            $updateStmt->execute([$row['id']]);
-            $approvedCount++;
-            logMessage("Одобрено бронирование ID: {$row['id']} (пользователь: {$row['first_name']} {$row['last_name']})");
+        // Дубликат заявки с теми же ФИО уже существует — пропускаем (не одобряем дубль)
+        $dupStmt->execute([$row['last_name'], $row['first_name'], $row['user_id']]);
+        if ((int)$dupStmt->fetchColumn() > 0) {
+            logMessage("Пропущено бронирование ID: {$row['id']} (дубликат заявки по ФИО для {$row['first_name']} {$row['last_name']})");
+            continue;
         }
+
+        // Проверка пола (общая для обоих режимов)
+        if (!($roomEff === 'MIXED' || $roomEff === 'DEFAULT' || $userGender === null || $roomEff === $userGender)) {
+            continue;
+        }
+
+        // Режим "по полу + VK": автозаселение только для пользователей,
+        // зарегистрированных через бота ВК (vk_url заполнен и bot_registered = 1)
+        if ($checkVkDuplicate) {
+            $isVkUser = !empty($row['vk_url']) && (int)$row['bot_registered'] === 1;
+            if (!$isVkUser) {
+                logMessage("Пропущено бронирование ID: {$row['id']} ({$row['first_name']} {$row['last_name']} — не аккаунт из ВК, требуется ручное одобрение)");
+                continue;
+            }
+        }
+
+        $updateStmt->execute([$row['id']]);
+        $approvedCount++;
+        logMessage("Одобрено бронирование ID: {$row['id']} (пользователь: {$row['first_name']} {$row['last_name']})");
     }
     
     logMessage("Одобрено бронирований: $approvedCount");

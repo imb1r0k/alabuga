@@ -86,15 +86,22 @@ if ($uri === 'auto-book') {
         jsonError("У вас уже есть активная заявка на заселение.", 400);
     }
 
-    // Определяем режим автозаселения из настроек
-    $autoBookMode = 'gender';
-    $stmt = $pdo->prepare("SELECT `value` FROM settings WHERE `key` = 'auto-book-mode'");
-    $stmt->execute();
-    $modeVal = $stmt->fetchColumn();
-    if ($modeVal === 'gender_and_vk_duplicate') $autoBookMode = 'gender_and_vk_duplicate';
+    // Проверка на дубликат заявки с теми же ФИО (нельзя создавать повторные заявки)
+    $dupStmt = $pdo->prepare("
+        SELECT b.id FROM bookings b
+        JOIN users bu ON b.user_id = bu.id
+        WHERE bu.last_name = ? AND bu.first_name = ?
+          AND b.status IN ('pending', 'approved', 'approved_bot')
+          AND bu.id != ?
+        LIMIT 1
+    ");
+    $dupStmt->execute([$user['last_name'], $user['first_name'], $user['id']]);
+    if ($dupStmt->fetch()) {
+        jsonError("Уже существует заявка на заселение с такими же именем и фамилией.", 400);
+    }
 
     // Поиск свободной комнаты
-    $available = autoBookFindAvailableRoom($pdo, $gender, $autoBookMode, $user['id']);
+    $available = autoBookFindAvailableRoom($pdo, $gender);
     if (!$available) {
         jsonError('К сожалению, свободных комнат для этого пола сейчас нет. Попробуйте позже или выберите комнату вручную.', 404);
     }
@@ -141,39 +148,9 @@ if ($uri === 'auto-book') {
 
 // ─── Вспомогательная функция поиска свободной комнаты ─────────────────────
 
-function autoBookFindAvailableRoom($pdo, $gender, $mode = 'gender', $userId = null) {
-    // Если режим gender_and_vk_duplicate — ищем дубликат по фамилии+имени среди
-    // аккаунтов, созданных ботом ВК (vk_url не пуст, bot_registered = 1)
-    $duplicateUser = null;
-    $duplicateGender = null;
-    if ($mode === 'gender_and_vk_duplicate' && $userId) {
-        $stmt = $pdo->prepare("SELECT last_name, first_name FROM users WHERE id = ?");
-        $stmt->execute([$userId]);
-        $cur = $stmt->fetch();
-        if ($cur && !empty($cur['last_name']) && !empty($cur['first_name'])) {
-            $dupStmt = $pdo->prepare("
-                SELECT id, last_name, first_name
-                FROM users
-                WHERE last_name = ? AND first_name = ?
-                  AND vk_url IS NOT NULL AND vk_url != ''
-                  AND bot_registered = 1
-                  AND id != ?
-                LIMIT 1
-            ");
-            $dupStmt->execute([$cur['last_name'], $cur['first_name'], $userId]);
-            $duplicateUser = $dupStmt->fetch();
-        }
-        if ($duplicateUser) {
-            $detected = detectGenderByLastName($duplicateUser['last_name'] ?? '');
-            $duplicateGender = $detected ?: 'M';
-        }
-    }
-
-    // Пол для поиска: если нашли дубль — используем его пол, иначе исходный
-    $searchGender = $duplicateGender ?: $gender;
-
+function autoBookFindAvailableRoom($pdo, $gender) {
     $buildings = $pdo->prepare("SELECT * FROM buildings WHERE gender = 'MIXED' OR gender = ? ORDER BY id ASC");
-    $buildings->execute([$searchGender]);
+    $buildings->execute([$gender]);
     foreach ($buildings as $building) {
         $floors = $pdo->prepare("SELECT * FROM floors WHERE building_id = ? ORDER BY floor_number ASC");
         $floors->execute([$building['id']]);
@@ -183,29 +160,11 @@ function autoBookFindAvailableRoom($pdo, $gender, $mode = 'gender', $userId = nu
             $rooms->execute([$floor['id']]);
             foreach ($rooms as $room) {
                 $roomEffGender = $room['gender'] != 'DEFAULT' ? $room['gender'] : $floorEffGender;
-                if ($roomEffGender !== 'MIXED' && $roomEffGender != $searchGender) continue;
-
-                // Если есть дубль — сначала проверяем, не живёт ли он в этой комнате
-                if ($duplicateUser) {
-                    $dupBookingStmt = $pdo->prepare("
-                        SELECT COUNT(*) FROM bookings
-                        WHERE room_id = ? AND user_id = ? AND status IN ('approved','approved_bot','pending')
-                    ");
-                    $dupBookingStmt->execute([$room['id'], $duplicateUser['id']]);
-                    if ((int)$dupBookingStmt->fetchColumn() > 0) {
-                        // Дубль здесь — проверяем свободное место
-                        $cntStmt = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE room_id = ? AND status IN ('approved','approved_bot','pending')");
-                        $cntStmt->execute([$room['id']]);
-                        if ((int)$cntStmt->fetchColumn() < (int)$room['capacity']) {
-                            return ['room' => $room, 'building' => $building, 'floor' => $floor];
-                        }
-                    }
-                }
-
-                // Стандартная проверка: свободна ли комната
-                $cntStmt = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE room_id = ? AND status IN ('approved','approved_bot','pending')");
-                $cntStmt->execute([$room['id']]);
-                if ((int)$cntStmt->fetchColumn() < (int)$room['capacity']) {
+                if ($roomEffGender !== 'MIXED' && $roomEffGender != $gender) continue;
+                $stmt = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE room_id = ? AND status IN ('approved','approved_bot','pending')");
+                $stmt->execute([$room['id']]);
+                $cnt = (int)$stmt->fetchColumn();
+                if ($cnt < (int)$room['capacity']) {
                     return ['room' => $room, 'building' => $building, 'floor' => $floor];
                 }
             }

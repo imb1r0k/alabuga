@@ -207,6 +207,20 @@ if ($uri === 'book') {
         jsonError("У вас уже есть активная заявка на заселение.", 400);
     }
 
+    // Проверка на дубликат заявки с теми же ФИО (нельзя создавать повторные заявки)
+    $dupStmt = $pdo->prepare("
+        SELECT b.id FROM bookings b
+        JOIN users bu ON b.user_id = bu.id
+        WHERE bu.last_name = ? AND bu.first_name = ?
+          AND b.status IN ('pending', 'approved', 'approved_bot')
+          AND bu.id != ?
+        LIMIT 1
+    ");
+    $dupStmt->execute([$user['last_name'], $user['first_name'], $user['id']]);
+    if ($dupStmt->fetch()) {
+        jsonError("Уже существует заявка на заселение с такими же именем и фамилией.", 400);
+    }
+
     $stmt = $pdo->prepare("INSERT INTO bookings (user_id, room_id, status) VALUES (?, ?, 'pending')");
     $stmt->execute([$user['id'], $roomId]);
     $bookingId = (int)$pdo->lastInsertId();
