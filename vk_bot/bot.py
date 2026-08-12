@@ -447,6 +447,11 @@ def main():
 
     logger.info("✅ Бот успешно подключен к ВКонтакте и ожидает сообщений!")
 
+    # Базовая инициализация переменных (обновляются внутри цикла ниже)
+    settings = {}
+    site_url = ''
+    active_group = None
+
     for event in longpoll.listen():
         if event.type == VkEventType.MESSAGE_NEW and event.to_me:
             vk_id = event.user_id
