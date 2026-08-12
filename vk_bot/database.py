@@ -3,7 +3,7 @@ from pymysql.cursors import DictCursor
 import config
 import logging
 import re
-import hashlib
+import bcrypt
 import random
 import string
 import os
@@ -58,8 +58,8 @@ def get_bot_settings():
 
 
 def hash_password(password):
-    """Хеширование пароля для совместимости с PHP password_hash"""
-    return hashlib.sha256(password.encode()).hexdigest()
+    """Хеширование пароля совместимое с PHP password_hash (bcrypt)"""
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 
 def generate_password(length=10):
@@ -126,19 +126,19 @@ def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
                     return user
 
             # 4. Создаем нового пользователя
-            login = generate_login(first_name, last_name)
-            password = generate_password()
-            hashed_password = hash_password(password)
-            full_name = f"{last_name} {first_name}".strip()
-
-            cursor.execute("""
-                INSERT INTO users 
-                (vk_id, vk_url, first_name, last_name, name, login, phone, password, role, status, rating, completed_tasks)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                vk_id, vk_url, first_name, last_name, full_name,
-                login, '', hashed_password, 'user', 'active', 0, 0
-            ))
+                        login = generate_login(first_name, last_name)
+                        password = generate_password()
+                        hashed_password = hash_password(password)
+                        full_name = f"{last_name} {first_name}".strip()
+            
+                        cursor.execute("""
+                            INSERT INTO users
+                            (vk_id, vk_url, first_name, last_name, name, login, phone, password, role, status, rating, completed_tasks, social_vk)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            vk_id, vk_url, first_name, last_name, full_name,
+                            login, '', hashed_password, 'user', 'active', 0, 0, vk_url
+                        ))
 
             user_id = cursor.lastrowid
             cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
@@ -595,9 +595,52 @@ def add_notification(user_id, message, report_id=None):
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
-                INSERT INTO vk_bot_notifications (user_id, report_id, message) 
+                INSERT INTO vk_bot_notifications (user_id, report_id, message)
                 VALUES (%s, %s, %s)
             """, (user_id, report_id, message))
+    finally:
+        conn.close()
+
+
+def create_request(user_id, category, subject, description):
+    """Создаёт новую заявку от пользователя"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO vk_bot_requests (user_id, category, subject, description, status)
+                VALUES (%s, %s, %s, %s, 'open')
+            """, (user_id, category, subject, description))
+            return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def get_user_requests(user_id):
+    """Получает список заявок пользователя"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT * FROM vk_bot_requests
+                WHERE user_id = %s
+                ORDER BY created_at DESC
+            """, (user_id,))
+            return cursor.fetchall()
+    finally:
+        conn.close()
+
+
+def get_user_request_by_id(request_id, user_id):
+    """Получает одну заявку по ID"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT * FROM vk_bot_requests
+                WHERE id = %s AND user_id = %s
+            """, (request_id, user_id))
+            return cursor.fetchone()
     finally:
         conn.close()
 
@@ -686,5 +729,8 @@ def update_report_status(report_id, status, reject_reason=''):
 
 
 def verify_password(plain_password, hashed_password):
-    """Проверка пароля (совместимо с PHP password_hash)"""
-    return hash_password(plain_password) == hashed_password
+    """Проверка пароля (совместимо с PHP password_hash - bcrypt)"""
+    try:
+        return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+    except Exception:
+        return False

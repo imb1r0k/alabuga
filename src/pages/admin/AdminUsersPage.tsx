@@ -43,18 +43,19 @@ export const AdminUsersPage: React.FC = () => {
   const [teamFilter, setTeamFilter] = useState<string>('all');
 
   const [userFormData, setUserFormData] = useState<any>({
-    id: 0,
-    first_name: '',
-    last_name: '',
-    phone: '',
-    email: '',
-    role: 'user',
-    status: 'active',
-    team_name: '',
-    team_id: 0,
-    password: '',
-    curator_team_ids: [],
-  });
+      id: 0,
+      first_name: '',
+      last_name: '',
+      phone: '',
+      email: '',
+      role: 'user',
+      status: 'active',
+      team_name: '',
+      team_id: 0,
+      password: '',
+      rating: 0,
+      curator_team_ids: [],
+    });
   const [msg, setMsg] = useState('');
   const [saving, setSaving] = useState(false);
   const [selectedForQr, setSelectedForQr] = useState<any>(null);
@@ -147,18 +148,19 @@ export const AdminUsersPage: React.FC = () => {
     const normalizedRole = rawRole === 'moderator' ? 'curator' : rawRole;
 
     setUserFormData({
-      id: u.id,
-      first_name: u.first_name || '',
-      last_name: u.last_name || '',
-      phone: u.phone || '',
-      email: u.email || u.login || '',
-      role: normalizedRole,
-      status: u.status || 'active',
-      team_name: u.team_name || '',
-      team_id: u.team_id || 0,
-      password: '',
-      curator_team_ids: u.curator_team_ids || [],
-    });
+          id: u.id,
+          first_name: u.first_name || '',
+          last_name: u.last_name || '',
+          phone: u.phone || '',
+          email: u.email || u.login || '',
+          role: normalizedRole,
+          status: u.status || 'active',
+          team_name: u.team_name || '',
+          team_id: u.team_id || 0,
+          password: '',
+          rating: u.rating ?? 0,
+          curator_team_ids: u.curator_team_ids || [],
+        });
 
     try {
       const details = await getUserDetails(u.id);
@@ -374,15 +376,16 @@ export const AdminUsersPage: React.FC = () => {
                     <th style={{ padding: '10px' }}>Логин</th>
                     <th style={{ padding: '10px' }}>Телефон</th>
                     <th style={{ padding: '10px' }}>Роль</th>
-                    <th style={{ padding: '10px' }}>Статус</th>
-                    <th style={{ padding: '10px' }}>Команда</th>
+                                        <th style={{ padding: '10px' }}>Статус</th>
+                                        <th style={{ padding: '10px' }}>Рейтинг</th>
+                                        <th style={{ padding: '10px' }}>Команда</th>
                     <th style={{ padding: '10px' }}>Действия</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={8} style={{ padding: '24px', textAlign: 'center', color: '#94a3b8' }}>
+                      <td colSpan={9} style={{ padding: '24px', textAlign: 'center', color: '#94a3b8' }}>
                         Пользователи не найдены
                       </td>
                     </tr>
@@ -405,18 +408,21 @@ export const AdminUsersPage: React.FC = () => {
                           <td style={{ padding: '10px' }}>{u.email || u.login}</td>
                           <td style={{ padding: '10px' }}>{u.phone || '-'}</td>
                           <td style={{ padding: '10px' }}>{getRoleBadge(u.role)}</td>
-                          <td style={{ padding: '10px' }}>
-                            <span style={{
-                              padding: '2px 8px',
-                              borderRadius: '4px',
-                              fontSize: '12px',
-                              color: '#fff',
-                              backgroundColor: u.status === 'archived' ? '#6b7280' : '#16a34a'
-                            }}>
-                              {u.status === 'archived' ? 'В архиве' : 'Активен'}
-                            </span>
-                          </td>
-                          <td style={{ padding: '10px' }}>
+                                                    <td style={{ padding: '10px' }}>
+                                                      <span style={{
+                                                        padding: '2px 8px',
+                                                        borderRadius: '4px',
+                                                        fontSize: '12px',
+                                                        color: '#fff',
+                                                        backgroundColor: u.status === 'archived' ? '#6b7280' : '#16a34a'
+                                                      }}>
+                                                        {u.status === 'archived' ? 'В архиве' : 'Активен'}
+                                                      </span>
+                                                    </td>
+                                                    <td style={{ padding: '10px', fontWeight: 600, color: '#2563eb' }}>
+                                                      ⭐ {u.rating ?? 0}
+                                                    </td>
+                                                    <td style={{ padding: '10px' }}>
                             {isCuratorRole ? (
                               u.curator_team_ids?.includes(0) ? (
                                 <span style={{ fontWeight: 600, color: '#0284c7' }}>any</span>
@@ -536,19 +542,30 @@ export const AdminUsersPage: React.FC = () => {
                     </div>
 
                     <div className="input-group">
-                      <label>Статус</label>
-                      <select
-                        value={userFormData.status}
-                        onChange={(e) => setUserFormData({ ...userFormData, status: e.target.value })}
-                        style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
-                      >
-                        <option value="active">Активен</option>
-                        <option value="archived">В архиве</option>
-                      </select>
-                    </div>
-
-                    <div className="input-group">
-                      <label>Роль</label>
+                                          <label>Статус</label>
+                                          <select
+                                            value={userFormData.status}
+                                            onChange={(e) => setUserFormData({ ...userFormData, status: e.target.value })}
+                                            style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+                                          >
+                                            <option value="active">Активен</option>
+                                            <option value="archived">В архиве</option>
+                                          </select>
+                                        </div>
+                    
+                                        <div className="input-group">
+                                          <label>⭐ Рейтинг</label>
+                                          <input
+                                            type="number"
+                                            min={0}
+                                            value={userFormData.rating}
+                                            onChange={(e) => setUserFormData({ ...userFormData, rating: Number(e.target.value) })}
+                                            style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
+                                          />
+                                        </div>
+                    
+                                        <div className="input-group">
+                                          <label>Роль</label>
                       <select
                         value={userFormData.role}
                         onChange={(e) => setUserFormData({ ...userFormData, role: e.target.value })}

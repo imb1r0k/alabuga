@@ -14,6 +14,10 @@ import {
   updateVkBotReportStatus,
   getVkBotTickets,
   sendVkBotBroadcast,
+  getAdminRequests,
+  updateRequestStatus,
+  getRequestMessages,
+  sendRequestMessage,
 } from '../../services/api';
 import {
   Bot,
@@ -42,6 +46,7 @@ import {
   FileAudio,
   FileArchive,
   FileText,
+  HelpCircle,
 } from 'lucide-react';
 
 interface MediaFile {
@@ -55,7 +60,7 @@ interface MediaFile {
 
 export const AdminVkBotPage: React.FC = () => {
   const { showToast } = useToast();
-  const [activeTab, setActiveTab] = useState<'groups' | 'reports' | 'tickets' | 'settings' | 'broadcast'>('groups');
+  const [activeTab, setActiveTab] = useState<'groups' | 'reports' | 'tickets' | 'settings' | 'broadcast' | 'requests'>('groups');
   const [isEditMode, setIsEditMode] = useState(false);
 
   // Настройки
@@ -108,7 +113,16 @@ export const AdminVkBotPage: React.FC = () => {
   const [loadingMedia, setLoadingMedia] = useState<Record<number, boolean>>({});
   
   // Модалка просмотра фото
-  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+    const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  
+    // Заявки
+    const [requests, setRequests] = useState<any[]>([]);
+    const [requestFilter, setRequestFilter] = useState<string>('open');
+    const [selectedRequest, setSelectedRequest] = useState<any>(null);
+    const [requestMessages, setRequestMessages] = useState<any[]>([]);
+    const [newRequestMsg, setNewRequestMsg] = useState('');
+    const [resolutionText, setResolutionText] = useState('');
+    const [requestAction, setRequestAction] = useState<'resolve' | 'reject' | null>(null);
 
   useEffect(() => {
     loadAllData();
@@ -121,8 +135,18 @@ export const AdminVkBotPage: React.FC = () => {
   }, [selectedGroupId]);
 
   useEffect(() => {
-    loadReports(reportFilter);
-  }, [reportFilter]);
+      loadReports(reportFilter);
+    }, [reportFilter]);
+  
+    useEffect(() => {
+      loadRequests(requestFilter);
+    }, [requestFilter]);
+  
+    useEffect(() => {
+      if (activeTab === 'requests') {
+        loadRequests(requestFilter);
+      }
+    }, [activeTab]);
 
   const loadAllData = async () => {
     await Promise.all([
@@ -217,14 +241,65 @@ export const AdminVkBotPage: React.FC = () => {
   };
 
   const loadTickets = async (gId?: number) => {
-    try {
-      const data = await getVkBotTickets(gId);
-      setTickets(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error('Ошибка загрузки билетов:', err);
-      setTickets([]);
-    }
-  };
+      try {
+        const data = await getVkBotTickets(gId);
+        setTickets(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.error('Ошибка загрузки билетов:', err);
+        setTickets([]);
+      }
+    };
+  
+    // ─── Заявки ────────────────────────────────────────────────────────────────
+  
+    const loadRequests = async (status: string) => {
+      try {
+        const data = await getAdminRequests(status);
+        setRequests(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.error('Ошибка загрузки заявок:', err);
+        setRequests([]);
+      }
+    };
+  
+    const handleSelectRequest = async (req: any) => {
+      setSelectedRequest(req);
+      setResolutionText('');
+      setRequestAction(null);
+      try {
+        const data = await getRequestMessages(req.id);
+        setRequestMessages(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.error('Ошибка загрузки сообщений:', err);
+        setRequestMessages([]);
+      }
+    };
+  
+    const handleResolveReject = async (status: 'resolved' | 'rejected') => {
+      if (!selectedRequest) return;
+      try {
+        await updateRequestStatus(selectedRequest.id, status, resolutionText);
+        showToast(`Заявка #${selectedRequest.id} ${status === 'resolved' ? 'решена' : 'отклонена'}`, 'success');
+        setSelectedRequest(null);
+        setRequestAction(null);
+        loadRequests(requestFilter);
+      } catch (err: any) {
+        showToast('Ошибка: ' + (err.response?.data?.error || err.message), 'error');
+      }
+    };
+  
+    const handleSendMessage = async () => {
+      if (!selectedRequest || !newRequestMsg.trim()) return;
+      try {
+        await sendRequestMessage(selectedRequest.id, newRequestMsg.trim());
+        setNewRequestMsg('');
+        const data = await getRequestMessages(selectedRequest.id);
+        setRequestMessages(Array.isArray(data) ? data : []);
+        showToast('Сообщение отправлено', 'success');
+      } catch (err: any) {
+        showToast('Ошибка: ' + (err.response?.data?.error || err.message), 'error');
+      }
+    };
 
   // Сохранение настроек
   const handleSaveSettings = async (e: React.FormEvent) => {
@@ -482,16 +557,17 @@ export const AdminVkBotPage: React.FC = () => {
           padding: '4px 8px 0 8px'
         }}>
           {[
-            { id: 'groups', label: 'Задания', icon: Calendar },
-            { id: 'reports', label: 'Проверка отчетов', icon: CheckCircle2 },
-            { id: 'tickets', label: 'Билеты', icon: Ticket },
-            { id: 'broadcast', label: 'Рассылка', icon: Send },
-            { id: 'settings', label: 'Настройки', icon: Settings2 },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            const pendingCount = Array.isArray(reports) ? reports.filter(r => r.status === 'pending').length : 0;
-            return (
+                      { id: 'groups', label: 'Задания', icon: Calendar },
+                      { id: 'reports', label: 'Проверка отчетов', icon: CheckCircle2 },
+                      { id: 'requests', label: 'Заявки', icon: HelpCircle },
+                      { id: 'tickets', label: 'Билеты', icon: Ticket },
+                      { id: 'broadcast', label: 'Рассылка', icon: Send },
+                      { id: 'settings', label: 'Настройки', icon: Settings2 },
+                    ].map((tab) => {
+                      const Icon = tab.icon;
+                      const isActive = activeTab === tab.id;
+                      const pendingCount = Array.isArray(reports) ? reports.filter(r => r.status === 'pending').length : 0;
+                      return (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
@@ -1182,7 +1258,233 @@ export const AdminVkBotPage: React.FC = () => {
           </div>
         )}
 
-        {/* ВКЛАДКА 3: БИЛЕТЫ */}
+        {/* ВКЛАДКА: ЗАЯВКИ */}
+                {activeTab === 'requests' && (
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+                      <h3 style={{ margin: 0, fontSize: '18px', color: '#0f172a' }}>Заявки пользователей</h3>
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        {['open', 'in_progress', 'resolved', 'rejected', ''].map((st) => (
+                          <button
+                            key={st}
+                            className={`btn ${requestFilter === st ? 'btn-primary' : 'btn-secondary'}`}
+                            onClick={() => setRequestFilter(st)}
+                            style={{ fontSize: '13px', padding: '6px 14px' }}
+                          >
+                            {st === 'open' ? '🟡 Открытые' :
+                             st === 'in_progress' ? '🔵 В работе' :
+                             st === 'resolved' ? '✅ Решённые' :
+                             st === 'rejected' ? '❌ Отклонённые' : '📋 Все'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+        
+                    {!Array.isArray(requests) || requests.length === 0 ? (
+                      <div style={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', textAlign: 'center', padding: '48px', color: '#94a3b8' }}>
+                        <HelpCircle size={48} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
+                        <p>Заявок в этой категории нет</p>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {requests.map((r) => {
+                          const statusColors: Record<string, { label: string; color: string; bg: string }> = {
+                            open: { label: '🟡 Открыта', color: '#92400e', bg: '#fef3c7' },
+                            in_progress: { label: '🔵 В работе', color: '#1e40af', bg: '#dbeafe' },
+                            resolved: { label: '✅ Решена', color: '#166534', bg: '#dcfce7' },
+                            rejected: { label: '❌ Отклонена', color: '#991b1b', bg: '#fee2e2' },
+                          };
+                          const sc = statusColors[r.status] || statusColors.open;
+                          const categoryLabels: Record<string, string> = {
+                            site: '🌐 Сайт', bot: '🤖 Бот ВК', housing: '🏠 Жильё',
+                          };
+        
+                          return (
+                            <div
+                              key={r.id}
+                              onClick={() => handleSelectRequest(r)}
+                              style={{
+                                backgroundColor: '#fff',
+                                border: `1px solid ${selectedRequest?.id === r.id ? '#0284c7' : '#e2e8f0'}`,
+                                borderRadius: '10px',
+                                padding: '14px 18px',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s',
+                                boxShadow: selectedRequest?.id === r.id ? '0 4px 12px rgba(2,132,199,0.15)' : 'none',
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                                  <strong style={{ color: '#0f172a' }}>#{r.id}</strong>
+                                  <span style={{ fontSize: '13px', color: '#475569' }}>
+                                    {r.first_name} {r.last_name}
+                                  </span>
+                                  <span style={{ fontSize: '12px', padding: '2px 10px', borderRadius: '4px', backgroundColor: '#f1f5f9', color: '#64748b' }}>
+                                    {categoryLabels[r.category] || r.category}
+                                  </span>
+                                  <span style={{ fontSize: '12px', padding: '2px 10px', borderRadius: '4px', backgroundColor: sc.bg, color: sc.color, fontWeight: 600 }}>
+                                    {sc.label}
+                                  </span>
+                                </div>
+                                <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                                  {r.created_at ? new Date(r.created_at).toLocaleString('ru-RU') : ''}
+                                </span>
+                              </div>
+                              <div style={{ marginTop: '8px' }}>
+                                <strong style={{ fontSize: '14px', color: '#0f172a' }}>{r.subject}</strong>
+                                <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#64748b', maxHeight: '40px', overflow: 'hidden' }}>
+                                  {r.description}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+        
+                    {/* Модалка заявки */}
+                    {selectedRequest && (
+                      <div style={{
+                        position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px'
+                      }}>
+                        <div style={{
+                          backgroundColor: '#fff', borderRadius: '12px', maxWidth: '700px', width: '100%', maxHeight: '90vh', overflowY: 'auto',
+                          boxShadow: '0 10px 25px rgba(0,0,0,0.25)', position: 'relative', padding: '24px'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                            <h3 style={{ margin: 0, fontSize: '18px', color: '#0f172a' }}>
+                              Заявка #{selectedRequest.id}
+                            </h3>
+                            <button onClick={() => setSelectedRequest(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#64748b' }}>
+                              <X size={20} />
+                            </button>
+                          </div>
+        
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px', fontSize: '14px' }}>
+                            <div><strong>Пользователь:</strong> {selectedRequest.first_name} {selectedRequest.last_name}</div>
+                            <div><strong>Логин:</strong> {selectedRequest.login}</div>
+                            <div><strong>Категория:</strong> {selectedRequest.category === 'site' ? '🌐 Сайт' : selectedRequest.category === 'bot' ? '🤖 Бот ВК' : '🏠 Жильё'}</div>
+                            <div><strong>Статус:</strong> {selectedRequest.status === 'open' ? '🟡 Открыта' : selectedRequest.status === 'in_progress' ? '🔵 В работе' : selectedRequest.status === 'resolved' ? '✅ Решена' : '❌ Отклонена'}</div>
+                            {selectedRequest.resolver_first_name && (
+                              <div style={{ gridColumn: '1 / -1' }}><strong>Решил:</strong> {selectedRequest.resolver_first_name} {selectedRequest.resolver_last_name}</div>
+                            )}
+                          </div>
+        
+                          <div style={{ marginBottom: '16px' }}>
+                            <strong>Суть заявки:</strong>
+                            <p style={{ margin: '4px 0', fontSize: '14px', color: '#334155' }}>{selectedRequest.subject}</p>
+                          </div>
+        
+                          <div style={{ marginBottom: '16px' }}>
+                            <strong>Описание:</strong>
+                            <p style={{ margin: '4px 0', fontSize: '14px', color: '#334155', whiteSpace: 'pre-wrap' }}>{selectedRequest.description}</p>
+                          </div>
+        
+                          {selectedRequest.resolution_text && (
+                            <div style={{ marginBottom: '16px', padding: '10px 14px', backgroundColor: '#f0fdf4', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
+                              <strong>Решение:</strong>
+                              <p style={{ margin: '4px 0', fontSize: '14px', color: '#166534' }}>{selectedRequest.resolution_text}</p>
+                            </div>
+                          )}
+        
+                          {/* Сообщения */}
+                          <div style={{ marginBottom: '16px' }}>
+                            <h4 style={{ fontSize: '15px', margin: '0 0 10px', color: '#0f172a' }}>Переписка</h4>
+                            <div style={{ maxHeight: '250px', overflowY: 'auto', backgroundColor: '#f8fafc', borderRadius: '8px', padding: '12px' }}>
+                              {requestMessages.length === 0 ? (
+                                <p style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: '13px', textAlign: 'center' }}>Нет сообщений</p>
+                              ) : (
+                                requestMessages.map((m) => {
+                                  const isAdmin = m.role === 'admin' || m.role === 'curator';
+                                  return (
+                                    <div key={m.id} style={{
+                                      display: 'flex', flexDirection: 'column', alignItems: isAdmin ? 'flex-end' : 'flex-start',
+                                      marginBottom: '8px',
+                                    }}>
+                                      <div style={{
+                                        maxWidth: '80%', padding: '8px 12px', borderRadius: '8px',
+                                        backgroundColor: isAdmin ? '#dbeafe' : '#fff',
+                                        border: '1px solid #e2e8f0', fontSize: '13px',
+                                      }}>
+                                        <div style={{ fontWeight: 600, fontSize: '11px', color: isAdmin ? '#1e40af' : '#475569', marginBottom: '4px' }}>
+                                          {m.first_name} {m.last_name} {isAdmin ? '(админ)' : ''}
+                                        </div>
+                                        <div style={{ color: '#0f172a' }}>{m.message}</div>
+                                        <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '4px' }}>
+                                          {m.created_at ? new Date(m.created_at).toLocaleString('ru-RU') : ''}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+        
+                          {/* Отправка сообщения */}
+                          {(selectedRequest.status === 'open' || selectedRequest.status === 'in_progress') && (
+                            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                              <input
+                                type="text"
+                                value={newRequestMsg}
+                                onChange={(e) => setNewRequestMsg(e.target.value)}
+                                placeholder="Напишите сообщение пользователю..."
+                                style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                                onKeyDown={(e) => { if (e.key === 'Enter') handleSendMessage(); }}
+                              />
+                              <button className="btn btn-primary" onClick={handleSendMessage} style={{ padding: '8px 16px', fontSize: '13px' }}>
+                                <Send size={16} />
+                              </button>
+                            </div>
+                          )}
+        
+                          {/* Действия: решить / отклонить */}
+                          {(selectedRequest.status === 'open' || selectedRequest.status === 'in_progress') && (
+                            <div>
+                              {!requestAction ? (
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                  <button className="btn btn-primary" onClick={() => setRequestAction('resolve')} style={{ fontSize: '13px', backgroundColor: '#16a34a', borderColor: '#16a34a' }}>
+                                    ✅ Решить
+                                  </button>
+                                  <button className="btn btn-danger" onClick={() => setRequestAction('reject')} style={{ fontSize: '13px' }}>
+                                    ❌ Отклонить
+                                  </button>
+                                </div>
+                              ) : (
+                                <div>
+                                  <textarea
+                                    value={resolutionText}
+                                    onChange={(e) => setResolutionText(e.target.value)}
+                                    placeholder={requestAction === 'resolve' ? 'Текст решения...' : 'Причина отклонения...'}
+                                    rows={3}
+                                    style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', resize: 'vertical', marginBottom: '8px' }}
+                                  />
+                                  <div style={{ display: 'flex', gap: '8px' }}>
+                                    <button className="btn btn-primary" onClick={() => handleResolveReject(requestAction === 'resolve' ? 'resolved' : 'rejected')} style={{ fontSize: '13px' }}>
+                                      {requestAction === 'resolve' ? '✅ Подтвердить решение' : '❌ Подтвердить отклонение'}
+                                    </button>
+                                    <button className="btn btn-secondary" onClick={() => setRequestAction(null)} style={{ fontSize: '13px' }}>
+                                      Отмена
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+        
+                          {/* Информация о том, что заявка закрыта */}
+                          {(selectedRequest.status === 'resolved' || selectedRequest.status === 'rejected') && (
+                            <p style={{ fontSize: '13px', color: '#64748b', fontStyle: 'italic' }}>
+                              Заявка {selectedRequest.status === 'resolved' ? 'решена' : 'отклонена'}. Новые сообщения не принимаются.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+        
+                {/* ВКЛАДКА 3: БИЛЕТЫ */}
         {activeTab === 'tickets' && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>

@@ -30,15 +30,41 @@ try {
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
     // Автоматическое создание таблицы привязки кураторов к командам
-    $pdo->exec("CREATE TABLE IF NOT EXISTS curator_teams (
-        user_id INT NOT NULL,
-        team_id INT NOT NULL,
-        PRIMARY KEY (user_id, team_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-
-    try {
-        $pdo->exec("ALTER TABLE curator_teams DROP INDEX unique_curator_team");
-    } catch (PDOException $ex) {}
+        $pdo->exec("CREATE TABLE IF NOT EXISTS curator_teams (
+            user_id INT NOT NULL,
+            team_id INT NOT NULL,
+            PRIMARY KEY (user_id, team_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+    
+        try {
+            $pdo->exec("ALTER TABLE curator_teams DROP INDEX unique_curator_team");
+        } catch (PDOException $ex) {}
+    
+        // Таблица заявок от пользователей (через бота)
+        $pdo->exec("CREATE TABLE IF NOT EXISTS vk_bot_requests (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            category ENUM('site', 'bot', 'housing') NOT NULL DEFAULT 'site',
+            subject VARCHAR(255) NOT NULL,
+            description TEXT NOT NULL,
+            status ENUM('open', 'in_progress', 'resolved', 'rejected') NOT NULL DEFAULT 'open',
+            resolved_by INT NULL,
+            resolution_text TEXT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+    
+        // Таблица сообщений по заявкам
+        $pdo->exec("CREATE TABLE IF NOT EXISTS vk_bot_request_messages (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            request_id INT NOT NULL,
+            user_id INT NOT NULL,
+            message TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (request_id) REFERENCES vk_bot_requests(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
 } catch (PDOException $e) {
     http_response_code(500);
@@ -263,6 +289,7 @@ try {
     require_once __DIR__ . '/modules/admin_users_bookings.php'; // пользователи и бронирования
     require_once __DIR__ . '/modules/admin_buildings.php';     // здания, этажи, комнаты
     require_once __DIR__ . '/modules/admin_teams.php';         // команды (админ)
+        require_once __DIR__ . '/modules/admin_requests.php';     // заявки пользователей
 
     jsonError('Маршрут не найден: ' . $uri, 404);
 

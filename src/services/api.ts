@@ -422,3 +422,26 @@ export const exportVkBotData = async (type: 'reports' | 'tickets') => {
   const response = await api.get(`/admin/vk-bot/export?type=${type}`);
   return response.data;
 };
+
+// ─── Заявки пользователей (через бота) ─────────────────────────────────────
+
+export const getAdminRequests = async (status?: string) => {
+  const url = status ? `/admin/requests?status=${status}` : '/admin/requests';
+  const response = await api.get(url);
+  return response.data;
+};
+
+export const updateRequestStatus = async (id: number, status: string, resolutionText?: string) => {
+  const response = await api.post('/admin/requests', { id, status, resolution_text: resolutionText });
+  return response.data;
+};
+
+export const getRequestMessages = async (requestId: number) => {
+  const response = await api.get(`/admin/requests/messages?request_id=${requestId}`);
+  return response.data;
+};
+
+export const sendRequestMessage = async (requestId: number, message: string) => {
+  const response = await api.post('/admin/requests/messages', { request_id: requestId, message });
+  return response.data;
+};

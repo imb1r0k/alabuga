@@ -12,16 +12,16 @@ if ($uri === 'admin/users') {
     if ($method === 'GET') {
         $curatorTeams = getCuratorTeams($pdo, $curatorUser['id']);
         if ($curatorTeams === null) {
-            $stmt = $pdo->query("SELECT id, first_name, last_name, patronymic, name, login as email, phone, role, status, team_name, team_id, created_at FROM users ORDER BY id DESC");
-            $users = $stmt->fetchAll();
-        } else {
-            if (empty($curatorTeams)) {
-                $users = [];
-            } else {
-                $placeholders = implode(',', array_fill(0, count($curatorTeams), '?'));
-                $stmt = $pdo->prepare("SELECT id, first_name, last_name, patronymic, name, login as email, phone, role, status, team_name, team_id, created_at FROM users WHERE team_id IN ($placeholders) OR id = ? ORDER BY id DESC");
-                $params = array_merge($curatorTeams, [$curatorUser['id']]);
-                $stmt->execute($params);
+                    $stmt = $pdo->query("SELECT id, first_name, last_name, patronymic, name, login as email, phone, role, status, team_name, team_id, rating, created_at FROM users ORDER BY id DESC");
+                    $users = $stmt->fetchAll();
+                } else {
+                    if (empty($curatorTeams)) {
+                        $users = [];
+                    } else {
+                        $placeholders = implode(',', array_fill(0, count($curatorTeams), '?'));
+                        $stmt = $pdo->prepare("SELECT id, first_name, last_name, patronymic, name, login as email, phone, role, status, team_name, team_id, rating, created_at FROM users WHERE team_id IN ($placeholders) OR id = ? ORDER BY id DESC");
+                        $params = array_merge($curatorTeams, [$curatorUser['id']]);
+                        $stmt->execute($params);
                 $users = $stmt->fetchAll();
             }
         }
@@ -52,35 +52,36 @@ if ($uri === 'admin/users') {
         if ($role === 'moderator') $role = 'curator';
         $status = trim($data['status'] ?? 'active');
         $teamName = trim($data['team_name'] ?? '');
-        $teamId = (int)($data['team_id'] ?? 0);
-        $password = trim($data['password'] ?? '');
-
-        if ($id > 0) {
-            if ($curatorUser['role'] === 'curator' && !checkCuratorAccessToUser($pdo, $curatorUser['id'], $id) && $curatorUser['id'] != $id) {
-                jsonError('У вас нет доступа к редактированию этого пользователя', 403);
-            }
-
-            $fullName = $lastName . ' ' . $firstName . ($patronymic ? ' ' . $patronymic : '');
-            $teamNameResolved = $teamName;
-            if ($teamId > 0 && $role !== 'curator') {
-                $stmt = $pdo->prepare("SELECT name FROM teams WHERE id = ?");
-                $stmt->execute([$teamId]);
-                $teamNameResolved = $stmt->fetchColumn() ?: $teamName;
-            }
-
-            if ($role === 'curator') {
-                $teamId = null;
-                $teamNameResolved = null;
-            }
-
-            if ($password) {
-                $hash = password_hash($password, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, patronymic=?, name=?, phone=?, login=?, role=?, status=?, team_name=?, team_id=?, password=? WHERE id=?");
-                $stmt->execute([$firstName, $lastName, $patronymic, $fullName, $phone, $login, $role, $status, $teamNameResolved, $teamId, $hash, $id]);
-            } else {
-                $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, patronymic=?, name=?, phone=?, login=?, role=?, status=?, team_name=?, team_id=? WHERE id=?");
-                $stmt->execute([$firstName, $lastName, $patronymic, $fullName, $phone, $login, $role, $status, $teamNameResolved, $teamId, $id]);
-            }
+                $teamId = (int)($data['team_id'] ?? 0);
+                $password = trim($data['password'] ?? '');
+                $rating = (int)($data['rating'] ?? 0);
+        
+                if ($id > 0) {
+                    if ($curatorUser['role'] === 'curator' && !checkCuratorAccessToUser($pdo, $curatorUser['id'], $id) && $curatorUser['id'] != $id) {
+                        jsonError('У вас нет доступа к редактированию этого пользователя', 403);
+                    }
+        
+                    $fullName = $lastName . ' ' . $firstName . ($patronymic ? ' ' . $patronymic : '');
+                    $teamNameResolved = $teamName;
+                    if ($teamId > 0 && $role !== 'curator') {
+                        $stmt = $pdo->prepare("SELECT name FROM teams WHERE id = ?");
+                        $stmt->execute([$teamId]);
+                        $teamNameResolved = $stmt->fetchColumn() ?: $teamName;
+                    }
+        
+                    if ($role === 'curator') {
+                        $teamId = null;
+                        $teamNameResolved = null;
+                    }
+        
+                    if ($password) {
+                        $hash = password_hash($password, PASSWORD_DEFAULT);
+                        $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, patronymic=?, name=?, phone=?, login=?, role=?, status=?, team_name=?, team_id=?, password=?, rating=? WHERE id=?");
+                        $stmt->execute([$firstName, $lastName, $patronymic, $fullName, $phone, $login, $role, $status, $teamNameResolved, $teamId, $hash, $rating, $id]);
+                    } else {
+                        $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, patronymic=?, name=?, phone=?, login=?, role=?, status=?, team_name=?, team_id=?, rating=? WHERE id=?");
+                        $stmt->execute([$firstName, $lastName, $patronymic, $fullName, $phone, $login, $role, $status, $teamNameResolved, $teamId, $rating, $id]);
+                    }
 
             if ($role !== 'curator') {
                 if ($teamId > 0) {
