@@ -878,17 +878,16 @@ def set_user_agreement(user_id):
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
+            logger.info(f"set_user_agreement: Начинаем обновление для user_id={user_id}")
+            
             # Сначала проверяем, существует ли пользователь
             cursor.execute("SELECT id, agreement_accepted FROM users WHERE id = %s", (user_id,))
             user = cursor.fetchone()
             if not user:
-                logger.error(f"Пользователь {user_id} не найден")
+                logger.error(f"set_user_agreement: Пользователь {user_id} не найден")
                 return False
             
-            # Если уже согласился, возвращаем True
-            if user.get('agreement_accepted') == 1:
-                logger.info(f"Пользователь {user_id} уже согласился с правилами")
-                return True
+            logger.info(f"set_user_agreement: Текущее значение agreement_accepted = {user.get('agreement_accepted')}")
             
             # Обновляем согласие - ставим 1 и текущую дату
             cursor.execute("""
@@ -899,22 +898,26 @@ def set_user_agreement(user_id):
             
             # Проверяем, что обновление произошло
             affected_rows = cursor.rowcount
+            logger.info(f"set_user_agreement: affected_rows = {affected_rows}")
+            
             if affected_rows > 0:
-                logger.info(f"Пользователь {user_id} подтвердил согласие с правилами. Обновлено {affected_rows} строк.")
                 # Проверяем, что действительно обновилось
                 cursor.execute("SELECT agreement_accepted, agreement_accepted_at FROM users WHERE id = %s", (user_id,))
                 result = cursor.fetchone()
+                logger.info(f"set_user_agreement: После обновления - agreement_accepted = {result.get('agreement_accepted')}, agreement_accepted_at = {result.get('agreement_accepted_at')}")
+                
                 if result and result.get('agreement_accepted') == 1:
-                    logger.info(f"Подтверждено: agreement_accepted = 1, agreement_accepted_at = {result.get('agreement_accepted_at')} для пользователя {user_id}")
+                    logger.info(f"set_user_agreement: ✅ Успешно! Пользователь {user_id} подтвердил согласие")
                     return True
                 else:
-                    logger.error(f"Не удалось подтвердить обновление для пользователя {user_id}")
+                    logger.error(f"set_user_agreement: ❌ Не удалось подтвердить обновление для пользователя {user_id}")
                     return False
             else:
-                logger.warning(f"Не удалось обновить согласие для пользователя {user_id}")
+                logger.warning(f"set_user_agreement: ❌ Не удалось обновить согласие для пользователя {user_id}")
                 return False
+                
     except Exception as e:
-        logger.error(f"Ошибка установки согласия для пользователя {user_id}: {e}")
+        logger.error(f"set_user_agreement: Ошибка: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return False
