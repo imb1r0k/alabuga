@@ -57,37 +57,16 @@ def send_notification_worker(vk, settings):
                         time.sleep(0.5)
                     except vk_api.exceptions.ApiError as e:
                         logger.error(f"VK API ошибка при отправке уведомления: {e}")
-                        # Если ошибка связана с тем, что пользователь заблокировал бота, отмечаем как отправленное
                         if 'message' in str(e) and ('blocked' in str(e) or 'disabled' in str(e)):
                             logger.warning(f"Пользователь {notif['vk_id']} недоступен, отмечаем как отправленное")
                             mark_notification_sent(notif['id'])
                     except Exception as e:
                         logger.error(f"Ошибка отправки уведомления: {e}")
             else:
-                # Если нет уведомлений, спим дольше
                 time.sleep(5)
         except Exception as e:
             logger.error(f"Ошибка в потоке уведомлений: {e}")
             time.sleep(5)
-
-
-def send_notification_now(vk, user_id, message):
-    """Немедленная отправка уведомления пользователю"""
-    try:
-        if user_id:
-            vk.messages.send(
-                user_id=user_id,
-                message=message,
-                random_id=0
-            )
-            logger.info(f"Уведомление отправлено пользователю VK ID {user_id}")
-            return True
-    except vk_api.exceptions.ApiError as e:
-        logger.error(f"VK API ошибка при отправке уведомления: {e}")
-        return False
-    except Exception as e:
-        logger.error(f"Ошибка отправки уведомления: {e}")
-        return False
 
 
 def create_main_keyboard(active_group, site_url=''):
@@ -106,38 +85,61 @@ def create_main_keyboard(active_group, site_url=''):
 
 
 def build_tasks_keyboard(tasks, user_id):
-    """Создает клавиатуру с заданиями"""
+    """
+    Создает клавиатуру с заданиями, сгруппированными по сложности.
+    Легкие - первая строка, средние - вторая, сложные - третья.
+    """
     keyboard = VkKeyboard(one_time=False)
-
+    
+    # Группируем задания по сложности
+    easy_tasks = [t for t in tasks if t['difficulty'] == 'easy']
+    medium_tasks = [t for t in tasks if t['difficulty'] == 'medium']
+    hard_tasks = [t for t in tasks if t['difficulty'] == 'hard']
+    
     diff_labels = {'easy': '🔵 Простое', 'medium': '🟡 Среднее', 'hard': '🔴 Сложное'}
-    counts = {'easy': 1, 'medium': 1, 'hard': 1}
-
-    for idx, t in enumerate(tasks):
-        report = get_user_task_report(user_id, t['id'])
-        diff_str = diff_labels.get(t['difficulty'], 'Задание')
-        c_num = counts[t['difficulty']]
-        counts[t['difficulty']] += 1
-
-        label = f"{diff_str} {c_num}"
-        color = VkKeyboardColor.PRIMARY
-
-        if report:
-            if report['status'] == 'approved':
-                label += " ✅"
-                color = VkKeyboardColor.POSITIVE
-            elif report['status'] == 'pending':
-                label += " ⏳"
-                color = VkKeyboardColor.SECONDARY
-            elif report['status'] == 'rejected':
-                label += " ❌"
-                color = VkKeyboardColor.NEGATIVE
-
-        keyboard.add_button(label, color=color)
-        if idx % 2 == 1 and idx < len(tasks) - 1:
+    diff_colors = {
+        'easy': VkKeyboardColor.PRIMARY,
+        'medium': VkKeyboardColor.PRIMARY,
+        'hard': VkKeyboardColor.PRIMARY
+    }
+    
+    # Функция для добавления кнопок задания
+    def add_task_buttons(task_list, difficulty):
+        for idx, t in enumerate(task_list):
+            report = get_user_task_report(user_id, t['id'])
+            label = f"{diff_labels.get(difficulty, 'Задание')} {idx + 1}"
+            color = VkKeyboardColor.PRIMARY
+            
+            if report:
+                if report['status'] == 'approved':
+                    label += " ✅"
+                    color = VkKeyboardColor.POSITIVE
+                elif report['status'] == 'pending':
+                    label += " ⏳"
+                    color = VkKeyboardColor.SECONDARY
+                elif report['status'] == 'rejected':
+                    label += " ❌"
+                    color = VkKeyboardColor.NEGATIVE
+            
+            keyboard.add_button(label, color=color)
+            # Добавляем перенос строки после каждой кнопки
+            # чтобы каждая кнопка была на новой строке
             keyboard.add_line()
-
+    
+    # Добавляем задания по группам
+    if easy_tasks:
+        add_task_buttons(easy_tasks, 'easy')
+    
+    if medium_tasks:
+        add_task_buttons(medium_tasks, 'medium')
+    
+    if hard_tasks:
+        add_task_buttons(hard_tasks, 'hard')
+    
+    # Добавляем кнопку "Назад"
     keyboard.add_line()
     keyboard.add_button("⬅ Назад", color=VkKeyboardColor.SECONDARY)
+    
     return keyboard.get_keyboard()
 
 
@@ -168,16 +170,27 @@ def create_category_keyboard():
 def get_task_from_button(text, tasks):
     """Определяет задание по тексту кнопки"""
     diff_labels = {'easy': 'Простое', 'medium': 'Среднее', 'hard': 'Сложное'}
-    counts = {'easy': 1, 'medium': 1, 'hard': 1}
-
+    diff_emoji = {'easy': '🔵', 'medium': '🟡', 'hard': '🔴'}
+    
     clean_text = re.sub(r'[✅⏳❌🔵🟡🔴\s]', '', text).strip()
-
+    
     for t in tasks:
-        c_num = counts[t['difficulty']]
-        counts[t['difficulty']] += 1
-        label_base = f"{diff_labels.get(t['difficulty'], 'Задание')}{c_num}"
-        if label_base in clean_text:
+        # Проверяем по ID или по названию
+        if str(t['id']) == clean_text:
             return t
+        
+        # Проверяем по метке задания
+        diff = t['difficulty']
+        label = f"{diff_labels.get(diff, 'Задание')}"
+        # Находим номер задания в группе
+        tasks_by_diff = [x for x in tasks if x['difficulty'] == diff]
+        for idx, task in enumerate(tasks_by_diff, 1):
+            if task['id'] == t['id']:
+                full_label = f"{label} {idx}"
+                if full_label in clean_text or f"{diff_emoji.get(diff, '')} {full_label}" in clean_text:
+                    return t
+                break
+    
     return None
 
 
@@ -214,14 +227,12 @@ def main():
             vk_id = event.user_id
             text = event.text.strip()
 
-            # Проверяем наличие вложений
             attachments = []
             if event.attachments:
                 attachments = event.attachments
                 logger.info(f"=== ВЛОЖЕНИЯ ПОЛУЧЕНЫ ===")
                 logger.info(f"Тип attachments: {type(attachments)}")
                 
-                # Получаем полную информацию о сообщении для access_key
                 try:
                     message_data = vk.messages.getById(message_ids=event.message_id)
                     logger.info(f"Полная информация о сообщении: {message_data}")
@@ -291,7 +302,7 @@ def main():
             site_url = settings.get('site_url', '')
             active_group = get_active_task_group()
 
-            # --- Обработка ввода (отчет по заданию ИЛИ создание заявки) ---
+            # --- Обработка состояния пользователя ---
             if vk_id in user_states:
                 state = user_states[vk_id]
 
@@ -305,12 +316,11 @@ def main():
                     )
                     continue
 
-                # --- Создание заявки ---
+                # --- Создание заявки (state - словарь) ---
                 if isinstance(state, dict) and state.get('action') == 'create_request':
                     step = state.get('step')
 
                     if step == 'subject':
-                        # Получили суть заявки
                         state['subject'] = text
                         state['step'] = 'description'
                         vk.messages.send(
@@ -321,7 +331,6 @@ def main():
                         continue
 
                     elif step == 'description':
-                        # Получили описание — создаём заявку
                         category = state.get('category', 'other')
                         subject = state.get('subject', text[:50])
                         description = text
@@ -340,51 +349,53 @@ def main():
                         )
                         continue
 
-                # --- Отправка отчета по заданию (существующий функционал) ---
-                task = state  # существующий код ожидает dict задания
-                # Обрабатываем вложения - получаем ссылки на файлы
-                saved_files = []
-                attachment_text = ""
+                # --- Отправка отчета по заданию (state - объект задания) ---
+                elif isinstance(state, dict) and 'id' in state:
+                    task = state
+                    
+                    # Обрабатываем вложения
+                    saved_files = []
+                    attachment_text = ""
 
-                if attachments:
-                    try:
-                        saved_files, attachment_text = process_vk_attachments(attachments, vk_session)
-                        if attachment_text:
-                            text = f"{text}\n\n📎 Прикрепленные файлы:\n{attachment_text}" if text else f"📎 Прикрепленные файлы:\n{attachment_text}"
-                        if saved_files:
-                            logger.info(f"Сохранено файлов: {len(saved_files)}")
-                            for f in saved_files:
-                                logger.info(f"  Файл: {f['original_name']} -> {f['file_url']}")
-                    except Exception as e:
-                        logger.error(f"Ошибка обработки вложений: {e}")
+                    if attachments:
+                        try:
+                            saved_files, attachment_text = process_vk_attachments(attachments, vk_session)
+                            if attachment_text:
+                                text = f"{text}\n\n📎 Прикрепленные файлы:\n{attachment_text}" if text else f"📎 Прикрепленные файлы:\n{attachment_text}"
+                            if saved_files:
+                                logger.info(f"Сохранено файлов: {len(saved_files)}")
+                                for f in saved_files:
+                                    logger.info(f"  Файл: {f['original_name']} -> {f['file_url']}")
+                        except Exception as e:
+                            logger.error(f"Ошибка обработки вложений: {e}")
 
-                # Создаем отчет
-                has_attachments = len(saved_files) > 0
-                report_id = create_report(db_user['id'], task['id'], text, has_attachments)
+                    # Создаем отчет
+                    has_attachments = len(saved_files) > 0
+                    report_id = create_report(db_user['id'], task['id'], text, has_attachments)
 
-                # Сохраняем ссылки на файлы в базу
-                for file_info in saved_files:
-                    save_report_media(
-                        report_id,
-                        file_info['file_url'],
-                        file_info['file_type'],
-                        file_info['original_name'],
-                        file_info.get('file_size', 0)
+                    # Сохраняем ссылки на файлы
+                    for file_info in saved_files:
+                        save_report_media(
+                            report_id,
+                            file_info['file_url'],
+                            file_info['file_type'],
+                            file_info['original_name'],
+                            file_info.get('file_size', 0)
+                        )
+
+                    del user_states[vk_id]
+
+                    response_msg = "✅ Ваш отчет принят на рассмотрение администратором!\nСтатус задания изменится после проверки."
+                    if has_attachments:
+                        response_msg += f"\n📎 Прикреплено файлов: {len(saved_files)}"
+
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message=response_msg,
+                        random_id=0,
+                        keyboard=create_main_keyboard(active_group, site_url)
                     )
-
-                del user_states[vk_id]
-
-                response_msg = "✅ Ваш отчет принят на рассмотрение администратором!\nСтатус задания изменится после проверки."
-                if has_attachments:
-                    response_msg += f"\n📎 Прикреплено файлов: {len(saved_files)}"
-
-                vk.messages.send(
-                    user_id=vk_id,
-                    message=response_msg,
-                    random_id=0,
-                    keyboard=create_main_keyboard(active_group, site_url)
-                )
-                continue
+                    continue
 
             # --- Обработка команд ---
             if text in ["📋 Задания", "/start", "Начать", "Старт"]:
