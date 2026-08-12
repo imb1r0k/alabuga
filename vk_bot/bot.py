@@ -1,1049 +1,917 @@
-import vk_api
-from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
-from vk_api.utils import get_random_id
-import database as db
-import logging
-import json
 import time
-import sys
-import urllib.parse as urlparse
-import os
+import vk_api
+from vk_api.longpoll import VkLongPoll, VkEventType
+from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+import threading
+import logging
 import re
-import requests
+import os
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+from database import (
+    get_bot_settings,
+    find_or_create_user,
+    get_active_task_group,
+    get_tasks_for_group,
+    get_user_task_report,
+    get_user_task_status,
+    create_report,
+    save_report_media,
+    process_vk_attachments,
+    get_report_media,
+    get_user_tickets,
+    get_pending_notifications,
+    mark_notification_sent,
+    get_user_by_vk_id,
+    add_notification,
+    create_request,
+    get_user_requests,
+    get_user_request_by_id,
+    get_request_messages,
+    add_request_message,
+    get_all_requests_for_admin,
+    get_last_request_message,
+    get_request_by_id,
+    check_user_agreement,
+    set_user_agreement,
 )
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Максимум попыток отправки
-MAX_RETRIES = 3
+user_states = {}
+UPLOAD_DIR = 'uploads/vk_bot/'
+# Хранилище для уже отправленных уведомлений о сообщениях в заявках
+sent_notifications = {}
+# Множество для отслеживания пользователей, которым уже отправлены правила
+agreement_sent = set()
 
-def send_message(vk, peer_id, message, keyboard=None, attachment=None):
-    """Отправляет сообщение с retry"""
-    for attempt in range(MAX_RETRIES):
+
+def send_notification_worker(vk, settings):
+    """Фоновый поток для отправки уведомлений"""
+    while True:
         try:
-            params = {
-                'peer_id': peer_id,
-                'message': message,
-                'random_id': get_random_id()
-            }
-            if keyboard:
-                params['keyboard'] = json.dumps(keyboard, ensure_ascii=False)
-            if attachment:
-                params['attachment'] = attachment
-            vk.messages.send(**params)
-            return True
-        except vk_api.exceptions.ApiError as e:
-            logger.warning(f"Ошибка VK API (попытка {attempt+1}): {e}")
-            if attempt == MAX_RETRIES - 1:
-                logger.error(f"Не удалось отправить сообщение: {e}")
-                return False
-            time.sleep(1)
-        except Exception as e:
-            logger.error(f"Неизвестная ошибка отправки: {e}")
-            return False
-    return False
-
-
-def build_main_keyboard(settings):
-    """Формирует главную клавиатуру"""
-    buttons = [
-        [
-            {
-                "action": {
-                    "type": "text",
-                    "label": "📋 Задания",
-                    "payload": json.dumps({"cmd": "tasks"})
-                },
-                "color": "primary"
-            },
-            {
-                "action": {
-                    "type": "text",
-                    "label": "🎟 Мои билеты",
-                    "payload": json.dumps({"cmd": "tickets"})
-                },
-                "color": "secondary"
-            }
-        ],
-        [
-            {
-                "action": {
-                    "type": "text",
-                    "label": "⭐ Мой рейтинг",
-                    "payload": json.dumps({"cmd": "rating"})
-                },
-                "color": "secondary"
-            },
-            {
-                "action": {
-                    "type": "text",
-                    "label": "📩 Заявка",
-                    "payload": json.dumps({"cmd": "request"})
-                },
-                "color": "secondary"
-            }
-        ],
-        [
-            {
-                "action": {
-                    "type": "text",
-                    "label": "👤 Личный кабинет",
-                    "payload": json.dumps({"cmd": "profile"})
-                },
-                "color": "secondary"
-            },
-            {
-                "action": {
-                    "type": "text",
-                    "label": "🔄 Помощь",
-                    "payload": json.dumps({"cmd": "help"})
-                },
-                "color": "secondary"
-            }
-        ]
-    ]
-    return {
-        "inline": False,
-        "buttons": buttons
-    }
-
-
-def handle_agreement(vk, vk_id, settings):
-    """Обрабатывает согласие пользователя"""
-    user = db.get_user_by_vk_id(vk_id)
-    if not user:
-        send_message(vk, vk_id,
-            "❌ Вы не зарегистрированы. Напишите «Старт»", keyboard=build_main_keyboard(settings))
-        return True
-    
-    agreed = db.check_user_agreement(user['id'])
-    if agreed:
-        return False  # Пользователь уже согласился
-    
-    send_message(vk, vk_id,
-        "📋 *Правила участия в лотерее:*\n\n"
-        "1. Выполняйте задания из раздела «Задания».\n"
-        "2. Присылайте скриншоты/ссылки на подтверждение.\n"
-        "3. После прохождения всех заданий волны вы получаете лотерейный билет.\n"
-        "4. Розыгрыш ценных призов проводится ежедневно.\n"
-        "5. За нарушения правил бот может заблокировать доступ.\n\n"
-        "Напишите «Согласен» или нажмите кнопку ниже, чтобы принять правила.",
-        keyboard={
-            "inline": False,
-            "buttons": [[
-                {
-                    "action": {
-                        "type": "text",
-                        "label": "✅ Принимаю правила",
-                        "payload": json.dumps({"cmd": "agree"})
-                    },
-                    "color": "primary"
-                }
-            ]]
-        }
-    )
-    return True
-
-
-def handle_start(vk, vk_id, settings, first_name, last_name, vk_url):
-    """Обрабатывает команду старт"""
-    user = db.find_or_create_user(vk_id, first_name, last_name, vk_url)
-    
-    send_message(vk, vk_id,
-        f"👋 Привет, {first_name}!\n\n{settings.get('welcome_text', 'Добро пожаловать!')}\n\n"
-        f"🔑 Ваш логин: *{user['login']}*\n"
-        f"🔑 Пароль: *{user.get('generated_password', 'установлен')}*\n\n"
-        f"Эти данные нужны для входа на сайт: {settings.get('site_url', '')}",
-        keyboard=build_main_keyboard(settings)
-    )
-    
-    # Проверяем согласие
-    if user.get('agreement_accepted_at') is None:
-        try:
-            db.set_user_agreement(user['id'])
-        except Exception as e:
-            logger.error(f"Не удалось установить согласие: {e}")
-
-
-def handle_help(vk, vk_id, settings):
-    """Отправляет справочную информацию"""
-    send_message(vk, vk_id,
-        "🤖 *Команды бота:*\n\n"
-        "📋 *Задания* — посмотреть список доступных заданий\n"
-        "🎟 *Мои билеты* — просмотр ваших лотерейных билетов\n"
-        "⭐ *Мой рейтинг* — ваш текущий рейтинг и баллы\n"
-        "📩 *Заявка* — создать обращение в поддержку\n"
-        "👤 *Личный кабинет* — ссылка на сайт\n"
-        "🔄 *Помощь* — это сообщение\n\n"
-        "📌 *Как выполнять задания:*\n"
-        "1. Выберите «Задания»\n"
-        "2. Нажмите на номер задания\n"
-        "3. Выполните инструкцию\n"
-        "4. Пришлите подтверждение (ссылку или фото)\n\n"
-        f"🌐 *Сайт:* {settings.get('site_url', '')}",
-        keyboard=build_main_keyboard(settings)
-    )
-
-
-def handle_tasks(vk, vk_id, settings):
-    """Показывает список заданий"""
-    user = db.get_user_by_vk_id(vk_id)
-    if not user:
-        send_message(vk, vk_id, "❌ Вы не зарегистрированы. Напишите «Старт»")
-        return
-    
-    active_groups = db.get_active_task_groups()
-    
-    if not active_groups:
-        send_message(vk, vk_id,
-            "📭 Сейчас нет активных заданий.\n"
-            "Новые волны заданий появятся позже.\n"
-            "Следите за обновлениями!",
-            keyboard=build_main_keyboard(settings)
-        )
-        return
-    
-    # Показываем каждый активный пакет заданий
-    hide_keyboard = False
-    
-    for group in active_groups:
-        tasks = db.get_tasks_for_group(group['id'])
-        
-        if not tasks:
-            continue
-        
-        # Собираем статусы заданий
-        task_buttons = []
-        for task in tasks:
-            status = db.get_user_task_status(user['id'], task['id'])
-            
-            if status == 'approved':
-                prefix = '✅'
-            elif status == 'pending':
-                prefix = '⏳'
-            elif status == 'rejected':
-                prefix = '🔄'
-            else:
-                prefix = '⬜'
-            
-            diff_icon = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}.get(task['difficulty'], '⚪')
-            
-            task_buttons.append([
-                {
-                    "action": {
-                        "type": "text",
-                        "label": f"{prefix} {diff_icon} {task['title'][:35]}",
-                        "payload": json.dumps({"cmd": "task_detail", "uuid": task['uuid']})
-                    },
-                    "color": "primary" if status is None else "secondary"
-                }
-            ])
-        
-        # Считаем выполненные
-        done_count = sum(1 for t in tasks if db.get_user_task_status(user['id'], t['id']) == 'approved')
-        total_count = len(tasks)
-        
-        send_message(vk, vk_id,
-            f"📋 *Волна: {group['title']}*\n"
-            f"📅 {group['start_date']} — {group['end_date']}\n"
-            f"✅ Выполнено: {done_count} из {total_count}\n"
-            f"━━━━━━━━━━━━━━━━━",
-            keyboard={
-                "inline": False,
-                "buttons": task_buttons + [[
-                    {
-                        "action": {
-                            "type": "text",
-                            "label": "⬅️ Назад",
-                            "payload": json.dumps({"cmd": "menu"})
-                        },
-                        "color": "secondary"
-                    }
-                ]]
-            }
-        )
-
-
-def handle_task_detail(vk, vk_id, settings, uuid):
-    """Показывает детальное описание задания"""
-    user = db.get_user_by_vk_id(vk_id)
-    if not user:
-        send_message(vk, vk_id, "❌ Вы не зарегистрированы")
-        return
-    
-    task = db.get_task_by_uuid(uuid)
-    if not task:
-        send_message(vk, vk_id, "❌ Задание не найдено")
-        return
-    
-    diff_icon = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}.get(task['difficulty'], '⚪')
-    status = db.get_user_task_status(user['id'], task['id'])
-    
-    status_text = {
-        None: '❓ Не выполнено',
-        'pending': '⏳ На проверке',
-        'approved': '✅ Выполнено',
-        'rejected': '🔄 Отклонено'
-    }.get(status, '❓ Не выполнено')
-    
-    report = db.get_user_task_report(user['id'], task['id'])
-    reject_reason = ''
-    if report and report['status'] == 'rejected' and report.get('reject_reason'):
-        reject_reason = f"\n\n❌ *Причина отклонения:* {report['reject_reason']}\nОтправьте отчёт заново!"
-    
-    send_message(vk, vk_id,
-        f"📋 *{diff_icon} {task['title']}*\n"
-        f"━━━━━━━━━━━━━━━━━\n"
-        f"{task['description']}\n\n"
-        f"🎯 Сложность: {diff_icon} {task['difficulty']}\n"
-        f"⭐ Баллы: +{task['points']}\n"
-        f"📌 Статус: {status_text}{reject_reason}\n"
-        f"━━━━━━━━━━━━━━━━━\n"
-        f"📝 *Как отправить:*\n"
-        f"Просто пришлите ссылку на выполнение или фото в ответ на это сообщение.\n\n"
-        f"Или нажмите кнопку ниже для отправки отчёта.",
-        keyboard={
-            "inline": False,
-            "buttons": [[
-                {
-                    "action": {
-                        "type": "text",
-                        "label": "📤 Отправить отчёт",
-                        "payload": json.dumps({"cmd": "submit_report", "uuid": uuid})
-                    },
-                    "color": "primary"
-                }
-            ], [
-                {
-                    "action": {
-                        "type": "text",
-                        "label": "⬅️ Назад к заданиям",
-                        "payload": json.dumps({"cmd": "tasks"})
-                    },
-                    "color": "secondary"
-                }
-            ]]
-        }
-    )
-
-
-def handle_submit_report(vk, vk_id, settings, uuid):
-    """Запрашивает у пользователя отчёт по заданию"""
-    task = db.get_task_by_uuid(uuid)
-    if not task:
-        send_message(vk, vk_id, "❌ Задание не найдено")
-        return
-    
-    user = db.get_user_by_vk_id(vk_id)
-    if not user:
-        send_message(vk, vk_id, "❌ Вы не зарегистрированы")
-        return
-    
-    status = db.get_user_task_status(user['id'], task['id'])
-    if status == 'approved':
-        send_message(vk, vk_id, "✅ Вы уже выполнили это задание!")
-        return
-    if status == 'pending':
-        send_message(vk, vk_id, "⏳ Ваш предыдущий отчёт ещё на проверке. Ожидайте.")
-        return
-    
-    # Устанавливаем сессию ожидания отчёта
-    waiting_for_report[vk_id] = {
-        'uuid': uuid,
-        'task_id': task['id'],
-        'step': 'waiting_text'
-    }
-    
-    send_message(vk, vk_id,
-        f"📤 *Отправка отчёта для:* {task['title']}\n\n"
-        f"Пришлите:\n"
-        f"• Ссылку на выполненное действие\n"
-        f"• Или фото/скриншот (можно с текстом)\n"
-        f"• Или просто опишите, как выполнили задание\n\n"
-        f"*Важно:* прикрепите подтверждение напрямую к сообщению!",
-        keyboard={
-            "inline": False,
-            "buttons": [[
-                {
-                    "action": {
-                        "type": "text",
-                        "label": "⬅️ Отмена",
-                        "payload": json.dumps({"cmd": "cancel_report"})
-                    },
-                    "color": "secondary"
-                }
-            ]]
-        }
-    )
-
-
-def process_submission(vk, vk_id, settings, text, attachments):
-    """Обрабатывает отправленный отчёт"""
-    if vk_id not in waiting_for_report:
-        return False
-    
-    session = waiting_for_report[vk_id]
-    task_id = session.get('task_id')
-    uuid = session.get('uuid')
-    
-    if not task_id:
-        return False
-    
-    user = db.get_user_by_vk_id(vk_id)
-    if not user:
-        send_message(vk, vk_id, "❌ Пользователь не найден")
-        return False
-    
-    task = db.get_task_by_uuid(uuid)
-    if not task:
-        logger.error(f"Задание {uuid} не найдено")
-        del waiting_for_report[vk_id]
-        return False
-    
-    # Обрабатываем текст и вложения
-    submission_text = text.strip() if text else "Отчёт отправлен"
-    
-    has_attachments = False
-    
-    # Создаём отчёт в базе
-    report_id = db.create_report(
-        user_id=user['id'],
-        task_id=task_id,
-        submission_text=submission_text,
-        has_attachments=attachments is not None
-    )
-    
-    if not report_id:
-        send_message(vk, vk_id, "❌ Ошибка при создании отчёта. Попробуйте позже.")
-        del waiting_for_report[vk_id]
-        return True
-    
-    # Обрабатываем вложения, если есть
-    if attachments:
-        saved_files, attachments_text = db.process_vk_attachments(attachments, None)
-        
-        if saved_files:
-            db.update_report_has_attachments(report_id, len(saved_files))
-            
-            for file_info in saved_files:
-                try:
-                    db.save_report_media(
-                        report_id=report_id,
-                        file_url=file_info['file_url'],
-                        file_type=file_info['file_type'],
-                        original_name=file_info['original_name'],
-                        file_size=file_info.get('file_size', 0)
-                    )
-                except Exception as e:
-                    logger.error(f"Ошибка сохранения медиа: {e}")
-            
-            if attachments_text:
-                db.update_report_text(report_id, submission_text + "\n\n" + attachments_text)
-    
-    # Очищаем сессию
-    del waiting_for_report[vk_id]
-    
-    send_message(vk, vk_id,
-        f"✅ *Отчёт отправлен на проверку!*\n\n"
-        f"Задание: {task['title']}\n"
-        f"Статус: ⏳ Ожидает проверки\n\n"
-        f"Вы получите уведомление, когда администратор проверит отчёт.",
-        keyboard=build_main_keyboard(settings)
-    )
-    
-    return True
-
-
-def handle_rating(vk, vk_id, settings):
-    """Показывает рейтинг пользователя"""
-    user = db.get_user_by_vk_id(vk_id)
-    if not user:
-        send_message(vk, vk_id, "❌ Вы не зарегистрированы. Напишите «Старт»")
-        return
-    
-    send_message(vk, vk_id,
-        f"⭐ *Ваш рейтинг:*\n\n"
-        f"📊 *Баллы:* {user.get('rating', 0)}\n"
-        f"✅ *Выполнено заданий:* {user.get('completed_tasks', 0)}\n"
-        f"━━━━━━━━━━━━━━━━━\n\n"
-        f"Выполняйте задания и зарабатывайте баллы для получения лотерейных билетов! 🎟️",
-        keyboard=build_main_keyboard(settings)
-    )
-
-
-def handle_tickets(vk, vk_id, settings):
-    """Показывает лотерейные билеты пользователя"""
-    user = db.get_user_by_vk_id(vk_id)
-    if not user:
-        send_message(vk, vk_id, "❌ Вы не зарегистрированы")
-        return
-    
-    tickets = db.get_user_tickets(user['id'])
-    
-    if not tickets:
-        # Может быть задание выполнено, но билет ещё не выдан.
-        # Проверяем, может ли пользователь получить билет
-        active_groups = db.get_active_task_groups()
-        if active_groups:
-            for group in active_groups:
-                tasks = db.get_tasks_for_group(group['id'])
-                done_count = sum(1 for t in tasks if db.get_user_task_status(user['id'], t['id']) == 'approved')
-                if done_count == len(tasks) and done_count > 0:
-                    # Все задания выполнены, но билета нет - выдаём
-                    import hashlib
-                    ticket_num = 'TKT-' + hashlib.md5(f"{group['id']}{user['id']}".encode()).hexdigest()[:6].upper()
+            notifications = get_pending_notifications(limit=20)
+            if notifications:
+                logger.info(f"Получено {len(notifications)} уведомлений для отправки")
+                for notif in notifications:
                     try:
-                        conn = db.get_db_connection()
-                        with conn.cursor() as cursor:
-                            cursor.execute("""
-                                INSERT INTO vk_bot_tickets (user_id, group_id, ticket_number) 
-                                VALUES (%s, %s, %s)
-                            """, (user['id'], group['id'], ticket_num))
-                        conn.close()
-                        tickets = db.get_user_tickets(user['id'])
-                    except:
-                        pass
+                        if notif.get('vk_id'):
+                            logger.info(f"Отправка уведомления пользователю VK ID {notif['vk_id']}: {notif['message'][:50]}...")
+                            vk.messages.send(
+                                user_id=notif['vk_id'],
+                                message=notif['message'],
+                                random_id=0
+                            )
+                            mark_notification_sent(notif['id'])
+                            logger.info(f"Уведомление отправлено пользователю VK ID {notif['vk_id']}")
+                        else:
+                            logger.warning(f"Уведомление {notif['id']} без VK ID, пропускаем")
+                        time.sleep(0.5)
+                    except vk_api.exceptions.ApiError as e:
+                        logger.error(f"VK API ошибка при отправке уведомления: {e}")
+                        if 'message' in str(e) and ('blocked' in str(e) or 'disabled' in str(e)):
+                            logger.warning(f"Пользователь {notif['vk_id']} недоступен, отмечаем как отправленное")
+                            mark_notification_sent(notif['id'])
+                    except Exception as e:
+                        logger.error(f"Ошибка отправки уведомления: {e}")
+            else:
+                time.sleep(5)
+        except Exception as e:
+            logger.error(f"Ошибка в потоке уведомлений: {e}")
+            time.sleep(5)
+
+
+def check_request_messages_worker(vk, settings):
+    """Фоновый поток для проверки новых сообщений в заявках"""
+    global sent_notifications
+    
+    while True:
+        try:
+            # Получаем все открытые заявки
+            requests = get_all_requests_for_admin('open')
+            requests += get_all_requests_for_admin('in_progress')
+            
+            for req in requests:
+                request_id = req['id']
+                user_vk_id = req.get('vk_id')
+                
+                if not user_vk_id:
+                    continue
+                
+                # Получаем последнее сообщение
+                last_msg = get_last_request_message(request_id)
+                if not last_msg:
+                    continue
+                
+                # Проверяем, не отправил ли сообщение сам пользователь
+                if last_msg['user_id'] == req['user_id']:
+                    continue
+                
+                # Проверяем, не отправляли ли уже это сообщение
+                msg_key = f"{request_id}_{last_msg['id']}"
+                if sent_notifications.get(msg_key):
+                    continue
+                
+                # Отправляем уведомление пользователю
+                try:
+                    sender_name = last_msg.get('first_name', 'Администратор')
+                    msg_text = f"📋 Новое сообщение по заявке #{request_id}\n"
+                    msg_text += f"📝 {req['subject']}\n"
+                    msg_text += "━" * 30 + "\n\n"
+                    msg_text += f"💬 {sender_name}: {last_msg['message']}\n\n"
+                    msg_text += "🔗 Чтобы ответить, перейдите в раздел '📋 Заявки' в боте."
+                    
+                    vk.messages.send(
+                        user_id=user_vk_id,
+                        message=msg_text,
+                        random_id=0
+                    )
+                    sent_notifications[msg_key] = True
+                    logger.info(f"Уведомление о новом сообщении в заявке #{request_id} отправлено пользователю VK ID {user_vk_id}")
+                    
+                except Exception as e:
+                    logger.error(f"Ошибка отправки уведомления о сообщении в заявке #{request_id}: {e}")
+                
+                time.sleep(0.5)
+            
+            # Очищаем старые записи (старше 1 часа)
+            if len(sent_notifications) > 100:
+                # Оставляем только последние 50 записей
+                sent_notifications = dict(list(sent_notifications.items())[-50:])
+                
+        except Exception as e:
+            logger.error(f"Ошибка в потоке проверки заявок: {e}")
         
-        if not tickets:
-            send_message(vk, vk_id,
-                "🎟 *У вас пока нет лотерейных билетов.*\n\n"
-                "Выполните все задания из активной волны, чтобы получить билет!\n"
-                "→ В разделе «Задания»",
-                keyboard=build_main_keyboard(settings)
-            )
-            return
-    
-    msg_lines = ["🎟 *Ваши лотерейные билеты:*\n━━━━━━━━━━━━━━━━━"]
-    for ticket in tickets:
-        msg_lines.append(f"🎫 *{ticket['ticket_number']}*\n📅 {ticket['created_at']}\n📌 {ticket['group_title']}\n━━━━━━━━━━━━━━━━━")
-    
-    msg_lines.append(f"\n🎲 Розыгрыш призов проводится ежедневно в {settings.get('draw_time', '18:00')}!")
-    
-    send_message(vk, vk_id, "\n".join(msg_lines), keyboard=build_main_keyboard(settings))
+        time.sleep(10)
 
 
-def handle_request(vk, vk_id, settings, text='', step='init'):
-    """Обрабатывает создание заявки"""
-    user = db.get_user_by_vk_id(vk_id)
-    if not user:
-        send_message(vk, vk_id, "❌ Вы не зарегистрированы")
-        return
-    
-    if step == 'init':
-        send_message(vk, vk_id,
-            "📩 *Создание заявки*\n\n"
-            "Выберите категорию:",
-            keyboard={
-                "inline": False,
-                "buttons": [[
-                    {
-                        "action": {
-                            "type": "text",
-                            "label": "🌐 Сайт",
-                            "payload": json.dumps({"cmd": "request_cat", "cat": "site"})
-                        },
-                        "color": "primary"
-                    }
-                ], [
-                    {
-                        "action": {
-                            "type": "text",
-                            "label": "🤖 Бот",
-                            "payload": json.dumps({"cmd": "request_cat", "cat": "bot"})
-                        },
-                        "color": "primary"
-                    }
-                ], [
-                    {
-                        "action": {
-                            "type": "text",
-                            "label": "🏠 Жильё",
-                            "payload": json.dumps({"cmd": "request_cat", "cat": "housing"})
-                        },
-                        "color": "primary"
-                    }
-                ], [
-                    {
-                        "action": {
-                            "type": "text",
-                            "label": "⬅️ Назад",
-                            "payload": json.dumps({"cmd": "menu"})
-                        },
-                        "color": "secondary"
-                    }
-                ]]
-            }
-        )
-    
-    elif step == 'cat':
-        waiting_for_request[vk_id] = {'step': 'subject', 'category': text}
-        cat_names = {'site': '🌐 Сайт', 'bot': '🤖 Бот', 'housing': '🏠 Жильё'}
-        send_message(vk, vk_id,
-            f"📩 *Категория:* {cat_names.get(text, text)}\n\n"
-            f"Напишите кратко тему вашей заявки:",
-            keyboard={
-                "inline": False,
-                "buttons": [[
-                    {
-                        "action": {
-                            "type": "text",
-                            "label": "⬅️ Назад",
-                            "payload": json.dumps({"cmd": "cancel_request"})
-                        },
-                        "color": "secondary"
-                    }
-                ]]
-            }
-        )
-    
-    elif step == 'subject':
-        if vk_id in waiting_for_request:
-            waiting_for_request[vk_id]['subject'] = text
-            waiting_for_request[vk_id]['step'] = 'description'
-            send_message(vk, vk_id,
-                f"📩 *Тема:* {text}\n\n"
-                f"Теперь подробно опишите вашу проблему или вопрос:",
-                keyboard={
-                    "inline": False,
-                    "buttons": [[
-                        {
-                            "action": {
-                                "type": "text",
-                                "label": "⬅️ Назад",
-                                "payload": json.dumps({"cmd": "cancel_request"})
-                            },
-                            "color": "secondary"
-                        }
-                    ]]
-                }
-            )
-    
-    elif step == 'description':
-        if vk_id in waiting_for_request:
-            data = waiting_for_request[vk_id]
-            data['description'] = text
-            data['step'] = 'confirm'
-            
-            cat_names = {'site': '🌐 Сайт', 'bot': '🤖 Бот', 'housing': '🏠 Жильё'}
-            cat_name = cat_names.get(data.get('category', ''), data.get('category', ''))
-            
-            send_message(vk, vk_id,
-                f"📩 *Подтверждение заявки:*\n\n"
-                f"🔹 Категория: {cat_name}\n"
-                f"🔹 Тема: {data['subject']}\n"
-                f"🔹 Описание:\n{data['description']}\n\n"
-                f"Всё верно?",
-                keyboard={
-                    "inline": False,
-                    "buttons": [[
-                        {
-                            "action": {
-                                "type": "text",
-                                "label": "✅ Отправить",
-                                "payload": json.dumps({"cmd": "confirm_request"})
-                            },
-                            "color": "primary"
-                        }
-                    ], [
-                        {
-                            "action": {
-                                "type": "text",
-                                "label": "🔄 Заполнить заново",
-                                "payload": json.dumps({"cmd": "request"})
-                            },
-                            "color": "secondary"
-                        }
-                    ]]
-                }
-            )
+def create_main_keyboard(active_group, site_url=''):
+    """Создает главную клавиатуру"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("📋 Задания", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("👤 Мой профиль", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button("📋 Заявки", color=VkKeyboardColor.PRIMARY)
+
+    if site_url:
+        keyboard.add_line()
+        keyboard.add_button("🌐 Личный кабинет", color=VkKeyboardColor.POSITIVE)
+
+    return keyboard.get_keyboard()
 
 
-def handle_request_list(vk, vk_id, settings):
-    """Показывает список заявок пользователя"""
-    user = db.get_user_by_vk_id(vk_id)
-    if not user:
-        return
+def build_tasks_keyboard(tasks, user_id):
+    """
+    Создает клавиатуру с заданиями, сгруппированными по сложности.
+    Задания выводятся с указанием уровня сложности.
+    """
+    keyboard = VkKeyboard(one_time=False)
     
-    requests = db.get_user_requests(user['id'])
-    if requests:
-        lines = ["📩 *Ваши заявки:*\n"]
-        for req in requests:
-            status_icon = {
-                'open': '🟡',
-                'in_progress': '🔵',
-                'resolved': '✅',
-                'rejected': '❌'
-            }.get(req['status'], '⚪')
-            lines.append(f"{status_icon} #{req['id']}: {req['subject']} — *{req['status']}*")
-            lines.append(f"   📅 {req['created_at']}")
-        send_message(vk, vk_id, "\n".join(lines))
+    # Группируем задания по сложности
+    easy_tasks = [t for t in tasks if t['difficulty'] == 'easy']
+    medium_tasks = [t for t in tasks if t['difficulty'] == 'medium']
+    hard_tasks = [t for t in tasks if t['difficulty'] == 'hard']
+    
+    # Функция для добавления заданий с префиксом сложности
+    def add_task_buttons(task_list, prefix, emoji):
+        for t in task_list:
+            status = get_user_task_status(user_id, t['id'])
+    
+            # VK ограничение длины кнопки — 40 символов, обрезаем длинные заголовки
+            prefix_part = f" {prefix}: "
+            max_title_len = 40 - len(emoji) - len(prefix_part)
+            title_display = t['title']
+            if len(title_display) > max_title_len:
+                title_display = t['title'][:max_title_len].rstrip() + '…'
+    
+            label = f"{emoji}{prefix_part}{title_display}"
+            color = VkKeyboardColor.PRIMARY
+    
+            if status:
+                if status == 'approved':
+                    label = f"✅{prefix_part}{title_display}"
+                    color = VkKeyboardColor.POSITIVE
+                elif status == 'pending':
+                    label = f"⏳{prefix_part}{title_display}"
+                    color = VkKeyboardColor.SECONDARY
+                elif status == 'rejected':
+                    label = f"❌{prefix_part}{title_display}"
+                    color = VkKeyboardColor.NEGATIVE
+    
+            keyboard.add_button(label, color=color)
+            keyboard.add_line()
+    
+    # Добавляем задания с указанием сложности
+    if easy_tasks:
+        add_task_buttons(easy_tasks, "Легкое", "🟢")
+    
+    if medium_tasks:
+        add_task_buttons(medium_tasks, "Среднее", "🟡")
+    
+    if hard_tasks:
+        add_task_buttons(hard_tasks, "Сложное", "🔴")
+    
+    # Если заданий нет
+    if not tasks:
+        keyboard.add_button("📢 Нет заданий", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_line()
+    
+    keyboard.add_button("🔙 Назад в меню", color=VkKeyboardColor.SECONDARY)
+    
+    return keyboard.get_keyboard()
+
+
+def create_agreement_keyboard():
+    """Создает клавиатуру для согласия с правилами"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("✅ Подтверждаю", color=VkKeyboardColor.POSITIVE)
+    return keyboard.get_keyboard()
+
+
+def create_requests_keyboard(requests):
+    """Создает клавиатуру со списком заявок"""
+    keyboard = VkKeyboard(one_time=False)
+    
+    status_icons = {'open': '🟡', 'in_progress': '🔵', 'resolved': '✅', 'rejected': '❌'}
+    cat_labels = {'site': '🌐', 'bot': '🤖', 'housing': '🏠'}
+    
+    for r in requests[:10]:
+        icon = status_icons.get(r['status'], '🟡')
+        cat = cat_labels.get(r['category'], '📌')
+        label = f"{icon} Заявка #{r['id']}: {r['subject'][:25]}"
+        keyboard.add_button(label, color=VkKeyboardColor.PRIMARY)
+        keyboard.add_line()
+    
+    keyboard.add_button("➕ Создать заявку", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_line()
+    keyboard.add_button("🔙 Назад в меню", color=VkKeyboardColor.SECONDARY)
+    
+    return keyboard.get_keyboard()
+
+
+def create_request_chat_keyboard(request_id):
+    """Создает клавиатуру для чата заявки"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("✏️ Написать сообщение", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("🔄 Обновить", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("🔙 Назад к заявкам", color=VkKeyboardColor.SECONDARY)
+    return keyboard.get_keyboard()
+
+
+def create_category_keyboard():
+    """Клавиатура выбора категории заявки"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("🌐 Сайт", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("🤖 Бот ВК", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("🏠 Жильё", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("🔙 Назад", color=VkKeyboardColor.SECONDARY)
+    return keyboard.get_keyboard()
+
+
+def get_task_from_button(text, tasks):
+    """Определяет задание по тексту кнопки"""
+    # Убираем эмодзи статусов и сложности
+    status_emoji = ['✅', '⏳', '❌']
+    diff_emoji = ['🟢', '🟡', '🔴', '📌']
+    prefixes = ['Легкое:', 'Среднее:', 'Сложное:']
+    
+    clean_text = text
+    for emoji in status_emoji + diff_emoji:
+        clean_text = clean_text.replace(emoji, '')
+    
+    # Убираем префиксы
+    for prefix in prefixes:
+        clean_text = clean_text.replace(prefix, '')
+    
+    clean_text = clean_text.strip()
+    
+    # Ищем задание по названию
+    for t in tasks:
+        full_title = t['title'].strip()
+        if full_title == clean_text:
+            return t
+        # Частичное совпадение
+        if clean_text in full_title or full_title in clean_text:
+            return t
+        # Кнопка могла быть обрезана VK (лимит 40 символов) — сопоставляем по началу
+        clean_part = clean_text.rstrip('…').rstrip()
+        if clean_part and full_title.startswith(clean_part):
+            return t
+    
+    # Если не нашли по точному названию, пробуем найти по ID
+    match = re.search(r'#(\d+)', text)
+    if match:
+        task_id = int(match.group(1))
+        for t in tasks:
+            if t['id'] == task_id:
+                return t
+    
+    return None
+
+
+def get_status_label(status):
+    """Возвращает метку статуса с эмодзи"""
+    labels = {
+        'open': '🟡 Открыта',
+        'in_progress': '🔵 В работе',
+        'resolved': '✅ Решена',
+        'rejected': '❌ Отклонена'
+    }
+    return labels.get(status, status)
+
+
+def get_category_label(category):
+    """Возвращает метку категории с эмодзи"""
+    labels = {
+        'site': '🌐 Сайт',
+        'bot': '🤖 Бот ВК',
+        'housing': '🏠 Жильё'
+    }
+    return labels.get(category, category)
+
+
+def format_request_message(request, messages):
+    """Форматирует сообщение с заявкой для красивого отображения"""
+    status_emoji = {
+        'open': '🟡',
+        'in_progress': '🔵',
+        'resolved': '✅',
+        'rejected': '❌'
+    }
+    status_text = {
+        'open': 'Открыта',
+        'in_progress': 'В работе',
+        'resolved': 'Решена',
+        'rejected': 'Отклонена'
+    }
+    
+    msg = f"📋 Заявка #{request['id']}\n"
+    msg += f"📝 {request['subject']}\n"
+    msg += f"📊 Статус: {status_emoji.get(request['status'], '🟡')} {status_text.get(request['status'], request['status'])}\n"
+    msg += f"📅 Создана: {request['created_at'].strftime('%d.%m.%Y %H:%M') if request.get('created_at') else 'недавно'}\n\n"
+    
+    if messages:
+        msg += "💬 Сообщения:\n"
+        for msg_item in messages[-10:]:
+            sender = msg_item.get('first_name', 'Пользователь')
+            msg_text = msg_item['message']
+            msg += f"👤 {sender}: {msg_text}\n"
     else:
-        send_message(vk, vk_id, "📩 У вас пока нет заявок.")
+        msg += "💬 Сообщений пока нет\n"
+    
+    return msg
 
 
-def handle_profile(vk, vk_id, settings):
-    """Отправляет ссылку на личный кабинет"""
-    user = db.get_user_by_vk_id(vk_id)
-    if not user:
-        send_message(vk, vk_id, "❌ Вы не зарегистрированы")
-        return
+def format_task_message(task, report=None, task_status=None):
+    """Форматирует сообщение с заданием для красивого отображения"""
+    diff_emoji = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}
+    diff_text = {'easy': 'Легкое', 'medium': 'Среднее', 'hard': 'Сложное'}
     
-    site_url = settings.get('site_url', '')
-    profile_url = f"{site_url}/public_profile/{user['login']}"
+    msg = f"📌 {task['title']}\n\n"
+    msg += f"📝 {task['description']}\n\n"
+    msg += f"⭐ Сложность: {diff_emoji.get(task['difficulty'], '📌')} {diff_text.get(task['difficulty'], task['difficulty'])}\n"
+    msg += f"🎯 Баллы: {task['points']}\n\n"
     
-    send_message(vk, vk_id,
-        f"👤 *Личный кабинет*\n\n"
-        f"🔑 Логин: *{user['login']}*\n\n"
-        f"🌐 *Ссылка на ваш профиль:*\n{profile_url}\n\n"
-        f"💻 *Сайт:* {site_url}",
-        keyboard={
-            "inline": False,
-            "buttons": [[
-                {
-                    "action": {
-                        "type": "open_link",
-                        "link": site_url,
-                        "label": "🌐 Открыть сайт"
-                    }
-                }
-            ], [
-                {
-                    "action": {
-                        "type": "text",
-                        "label": "⬅️ Назад",
-                        "payload": json.dumps({"cmd": "menu"})
-                    },
-                    "color": "secondary"
-                }
-            ]]
-        }
+    if task_status == 'approved':
+        msg += "✅ Статус: Выполнено! Баллы зачислены.\n"
+    elif report:
+        if report['status'] == 'approved':
+            msg += "✅ Статус: Выполнено! Баллы зачислены.\n"
+        elif report['status'] == 'pending':
+            msg += "⏳ Статус: На рассмотрении администратора.\nПожалуйста, ожидайте проверки.\n"
+        elif report['status'] == 'rejected':
+            reason = report.get('reject_reason', 'Не выполнено')
+            msg += f"❌ Статус: Отклонено\nПричина: {reason}\n\n"
+            msg += "📝 Отправьте отчет повторно с исправлениями."
+    
+    msg += "\n📎 Для подтверждения выполнения прикрепите фото, видео или документы."
+    msg += "\n💬 Также можно просто написать текст с ссылкой."
+    
+    return msg
+
+
+def send_agreement_rules(vk, user_id):
+    """Отправляет правила и просит подтвердить согласие (только текст)"""
+    rules_text = (
+        "📋 ПРАВИЛА ПРЕБЫВАНИЯ НА ФОРУМЕ\n\n"
+        "1. Участник обязан соблюдать правила пребывания.\n"
+        "2. Постоянно носить именной бейдж.\n"
+        "3. Соблюдать требования санитарных норм.\n"
+        "4. Быть взаимно вежливым и дисциплинированным.\n"
+        "5. Присутствовать на всех мероприятиях согласно программе.\n"
+        "6. Выполнять указания Организатора.\n"
+        "7. Бережно относиться к имуществу.\n"
+        "8. Соблюдать комендантский час с 22:00 до 06:00.\n"
+        "9. Сообщать о недомоганиях.\n"
+        "10. Соблюдать правила личной гигиены.\n\n"
+        "⚠️ ЗА НАРУШЕНИЕ ПРАВИЛ ПРЕДУСМОТРЕНА ДИСКВАЛИФИКАЦИЯ!\n\n"
+        "✅ Для продолжения работы в боте нажмите кнопку 'Подтверждаю'."
     )
-
-
-def send_pending_notifications(vk):
-    """Отправляет ожидающие уведомления пользователям"""
-    try:
-        notifications = db.get_pending_notifications(limit=20)
-        for notif in notifications:
-            if not notif.get('vk_id'):
-                db.mark_notification_sent(notif['id'])
-                continue
-            
-            try:
-                send_message(vk, notif['vk_id'], notif['message'], keyboard=build_main_keyboard({}))
-                db.mark_notification_sent(notif['id'])
-                logger.info(f"Уведомление #{notif['id']} отправлено пользователю {notif['vk_id']}")
-            except Exception as e:
-                logger.error(f"Ошибка отправки уведомления #{notif['id']}: {e}")
-    except Exception as e:
-        logger.error(f"Ошибка отправки уведомлений: {e}")
-
-
-# Глобальные словари для хранения сессий
-waiting_for_report = {}
-waiting_for_request = {}
+    
+    vk.messages.send(
+        user_id=user_id,
+        message=rules_text,
+        random_id=0,
+        keyboard=create_agreement_keyboard()
+    )
+    logger.info(f"Правила отправлены пользователю {user_id}")
 
 
 def main():
-    """Основная функция запуска бота"""
-    logger.info("=== ЗАПУСК БОТА ВК ===")
+    global agreement_sent
     
-    # Получаем настройки
-    settings = db.get_bot_settings()
+    logger.info("🚀 Запуск бота ВКонтакте...")
+
+    settings = get_bot_settings()
     token = settings.get('vk_token', '')
-    group_id_str = settings.get('vk_group_id', '')
-    
+    site_url = settings.get('site_url', '')
+
     if not token:
-        logger.error("❌ Не указан VK Token в настройках")
-        print("Ошибка: VK Token не указан. Заполните настройки в админ-панели.")
-        sys.exit(1)
-    
-    if not group_id_str:
-        logger.error("❌ Не указан Group ID в настройках")
-        print("Ошибка: Group ID не указан. Заполните настройки в админ-панели.")
-        sys.exit(1)
-    
-    try:
-        group_id = int(group_id_str)
-    except ValueError:
-        logger.error(f"❌ Неверный формат Group ID: {group_id_str}")
-        print("Ошибка: Group ID должен быть числом.")
-        sys.exit(1)
-    
-    logger.info(f"✅ Настройки загружены. Group ID: {group_id}")
-    
-    try:
-        vk_session = vk_api.VkApi(token=token)
-        vk = vk_session.get_api()
-        longpoll = VkBotLongPoll(vk_session, group_id=group_id)
-        logger.info("✅ LongPoll подключён")
-    except Exception as e:
-        logger.error(f"❌ Ошибка подключения VK API: {e}")
-        print(f"Ошибка: Не удалось подключиться к VK API: {e}")
-        sys.exit(1)
-    
-    # Таймер для отправки уведомлений (каждые 10 секунд)
-    last_notification_time = time.time()
-    
-    logger.info("🤖 Бот запущен и готов к работе!")
-    print("✅ Бот ВК успешно запущен! Ожидаю сообщения...")
-    
-    try:
-        for event in longpoll.listen():
-            if event.type == VkBotEventType.MESSAGE_NEW and event.from_user:
-                vk_id = event.user_id
-                text = event.text.strip()
-                payload = None
-                attachments = None
+        logger.error("❌ ОШИБКА: Укажите VK Token в админ-панели!")
+        while not token:
+            time.sleep(10)
+            settings = get_bot_settings()
+            token = settings.get('vk_token', '')
+            site_url = settings.get('site_url', '')
+
+    vk_session = vk_api.VkApi(token=token)
+    vk = vk_session.get_api()
+    longpoll = VkLongPoll(vk_session)
+
+    # Запускаем поток для отправки уведомлений
+    notification_thread = threading.Thread(
+        target=send_notification_worker,
+        args=(vk, settings),
+        daemon=True
+    )
+    notification_thread.start()
+
+    # Запускаем поток для проверки новых сообщений в заявках
+    request_thread = threading.Thread(
+        target=check_request_messages_worker,
+        args=(vk, settings),
+        daemon=True
+    )
+    request_thread.start()
+    logger.info("✅ Поток проверки заявок запущен!")
+
+    logger.info("✅ Бот успешно подключен к ВКонтакте и ожидает сообщений!")
+
+    # Базовая инициализация переменных (обновляются внутри цикла ниже)
+    settings = {}
+    site_url = ''
+    active_group = None
+
+    for event in longpoll.listen():
+        if event.type == VkEventType.MESSAGE_NEW and event.to_me:
+            vk_id = event.user_id
+            text = event.text.strip()
+
+            attachments = []
+            if event.attachments:
+                attachments = event.attachments
+                logger.info(f"=== ВЛОЖЕНИЯ ПОЛУЧЕНЫ ===")
+                logger.info(f"Тип attachments: {type(attachments)}")
                 
-                # Парсим payload
                 try:
-                    payload_raw = event.raw.get('payload')
-                    if payload_raw and isinstance(payload_raw, str):
-                        payload = json.loads(payload_raw)
-                    elif payload_raw and isinstance(payload_raw, dict):
-                        payload = payload_raw
-                except:
-                    payload = None
-                
-                # Получаем вложения
-                attachments = event.raw.get('attachments')
-                
-                # Перезагружаем настройки каждые 100 сообщений
-                if hasattr(main, 'settings_counter'):
-                    main.settings_counter += 1
-                else:
-                    main.settings_counter = 0
-                if main.settings_counter % 100 == 0:
-                    settings = db.get_bot_settings()
-                
-                logger.info(f"💬 Сообщение от {vk_id}: {text[:50]}... payload={payload}")
-                
-                # Определяем пользователя
-                user_info = None
-                user = db.get_user_by_vk_id(vk_id)
-                is_start = text.lower() in ['старт', 'start', '/start', 'начать', 'начало']
-                
-                # Получаем расширенную информацию о пользователе VK
-                if user is None or is_start:
-                    try:
-                        vk_user_info = vk.users.get(
-                            user_ids=vk_id,
-                            fields='first_name,last_name,screen_name'
-                        )
-                        if vk_user_info:
-                            user_info = vk_user_info[0]
-                    except Exception as e:
-                        logger.error(f"Ошибка получения информации о пользователе: {e}")
-                
-                # Команда Старт
-                if is_start:
-                    if user_info:
-                        first_name = user_info.get('first_name', '')
-                        last_name = user_info.get('last_name', '')
-                        screen_name = user_info.get('screen_name', '')
-                        vk_url = f"https://vk.com/{screen_name}" if screen_name else f"https://vk.com/id{vk_id}"
-                        handle_start(vk, vk_id, settings, first_name, last_name, vk_url)
-                    else:
-                        send_message(vk, vk_id, "❌ Не удалось получить данные профиля. Попробуйте позже.")
-                    continue
-                
-                # Проверяем, есть ли пользователь в базе
-                if user is None:
-                    send_message(vk, vk_id,
-                        "❌ Вы не зарегистрированы.\n"
-                        "Напишите «Старт», чтобы начать работу с ботом.",
-                        keyboard={
-                            "inline": False,
-                            "buttons": [[
-                                {
-                                    "action": {
-                                        "type": "text",
-                                        "label": "🚀 Старт",
-                                        "payload": json.dumps({"cmd": "start"})
-                                    },
-                                    "color": "primary"
+                    message_data = vk.messages.getById(message_ids=event.message_id)
+                    logger.info(f"Полная информация о сообщении: {message_data}")
+                    if message_data and 'items' in message_data and len(message_data['items']) > 0:
+                        msg_attachments = message_data['items'][0].get('attachments', [])
+                        logger.info(f"Вложения из messages.getById: {msg_attachments}")
+                        
+                        if msg_attachments:
+                            new_attachments = {}
+                            for i, att in enumerate(msg_attachments):
+                                att_type = att.get('type')
+                                att_data = att.get(att_type, {})
+                                att_id = att_data.get('id')
+                                att_owner_id = att_data.get('owner_id')
+                                att_access_key = att_data.get('access_key', '')
+                                
+                                new_attachments[f'attach{i+1}'] = {
+                                    'type': att_type,
+                                    'id': att_id,
+                                    'owner_id': att_owner_id,
+                                    'access_key': att_access_key,
+                                    'data': att_data
                                 }
-                            ]]
-                        }
+                                new_attachments[f'attach{i+1}_type'] = att_type
+                            
+                            attachments = new_attachments
+                            logger.info(f"Преобразованные вложения: {list(attachments.keys())}")
+                except Exception as e:
+                    logger.error(f"Ошибка получения полной информации о сообщении: {e}")
+
+            try:
+                user_info = vk.users.get(user_ids=vk_id)[0]
+                first_name = user_info.get('first_name', '')
+                last_name = user_info.get('last_name', '')
+                vk_url = f"https://vk.com/id{vk_id}"
+
+                db_user = find_or_create_user(vk_id, first_name, last_name, vk_url)
+                logger.info(f"Пользователь найден/создан: ID={db_user['id']}, VK_ID={vk_id}")
+
+                # Проверяем, согласился ли пользователь с правилами (по наличию даты)
+                if not check_user_agreement(db_user['id']):
+                    logger.info(f"Пользователь {vk_id} еще не согласился с правилами")
+
+                    # Если пользователь нажал кнопку подтверждения — записываем согласие
+                    if text == "✅ Подтверждаю":
+                        logger.info(f"Пользователь {vk_id} нажал кнопку подтверждения")
+                        success = set_user_agreement(db_user['id'])
+                        logger.info(f"Сохранение согласия: {'успешно' if success else 'ОШИБКА'}")
+                        if vk_id in agreement_sent:
+                            agreement_sent.remove(vk_id)
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message="✅ Спасибо! Вы подтвердили согласие с правилами пребывания на Форуме.\n\nТеперь вам доступны все функции бота.",
+                            random_id=0,
+                            keyboard=create_main_keyboard(active_group, site_url)
+                        )
+                        logger.info(f"Главное меню отправлено пользователю {vk_id}")
+                        continue
+
+                    # Если пользователь только что создан, отправляем логин/пароль
+                    if db_user.get('generated_password'):
+                        login_msg = (
+                            f"👋 Привет, {first_name}!\n\n"
+                            f"Для тебя создан аккаунт на сайте:\n"
+                            f"🔑 Логин: {db_user['login']}\n"
+                            f"🔐 Пароль: {db_user['generated_password']}\n\n"
+                            f"🌐 Перейти на сайт: {site_url}\n\n"
+                            f"⚠️ Рекомендуем изменить пароль после первого входа!"
+                        )
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message=login_msg,
+                            random_id=0
+                        )
+                        logger.info(f"Создан новый пользователь: {first_name} {last_name}, логин: {db_user['login']}")
+                    
+                    # Отправляем правила только если не отправляли ранее
+                    if vk_id not in agreement_sent:
+                        logger.info(f"Отправка правил пользователю {vk_id}")
+                        send_agreement_rules(vk, vk_id)
+                        agreement_sent.add(vk_id)
+                    else:
+                        logger.info(f"Правила уже отправлены пользователю {vk_id}, ожидаем подтверждения")
+                    
+                    # Пропускаем дальнейшую обработку
+                    continue
+
+                # Если пользователь согласился, удаляем из множества отправленных
+                if vk_id in agreement_sent:
+                    agreement_sent.remove(vk_id)
+                    logger.info(f"Пользователь {vk_id} удален из множества ожидающих")
+
+                # Если пользователь согласился, но у него был generated_password - отправляем логин/пароль
+                if db_user.get('generated_password'):
+                    login_msg = (
+                        f"👋 Привет, {first_name}!\n\n"
+                        f"Для тебя создан аккаунт на сайте:\n"
+                        f"🔑 Логин: {db_user['login']}\n"
+                        f"🔐 Пароль: {db_user['generated_password']}\n\n"
+                        f"🌐 Перейти на сайт: {site_url}\n\n"
+                        f"⚠️ Рекомендуем изменить пароль после первого входа!"
+                    )
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message=login_msg,
+                        random_id=0
+                    )
+                    logger.info(f"Создан новый пользователь: {first_name} {last_name}, логин: {db_user['login']}")
+
+            except Exception as e:
+                logger.error(f"Ошибка получения пользователя: {e}")
+                db_user = get_user_by_vk_id(vk_id)
+                if not db_user:
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="❌ Произошла ошибка при регистрации. Попробуйте позже.",
+                        random_id=0
                     )
                     continue
-                
-                # Проверяем согласие с правилами
-                if not db.check_user_agreement(user['id']):
-                    agreed = db.handle_agreement(vk, vk_id, settings)
-                    if agreed:
+
+            settings = get_bot_settings()
+            site_url = settings.get('site_url', '')
+            active_group = get_active_task_group()
+
+            # --- Обработка состояния пользователя ---
+            if vk_id in user_states:
+                state = user_states[vk_id]
+
+                # Если пользователь нажал "Назад" в любом состоянии
+                if text in ["🔙 Назад в меню", "🔙 Назад", "🔙 Назад к заявкам"]:
+                    del user_states[vk_id]
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="🔙 Возврат в главное меню.",
+                        random_id=0,
+                        keyboard=create_main_keyboard(active_group, site_url)
+                    )
+                    continue
+
+                # --- Отправка сообщения в чат заявки ---
+                if isinstance(state, dict) and state.get('action') == 'request_chat':
+                    request_id = state.get('request_id')
+                    
+                    # Обработка команд в чате заявки
+                    if text == "✏️ Написать сообщение":
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message="✏️ Напишите ваше сообщение:",
+                            random_id=0
+                        )
                         continue
-                
-                # Обработка кнопок (payload)
-                if payload and isinstance(payload, dict):
-                    cmd = payload.get('cmd', '')
                     
-                    if cmd == 'tasks':
-                        handle_tasks(vk, vk_id, settings)
-                    elif cmd == 'task_detail':
-                        uuid = payload.get('uuid', '')
-                        handle_task_detail(vk, vk_id, settings, uuid)
-                    elif cmd == 'submit_report':
-                        uuid = payload.get('uuid', '')
-                        handle_submit_report(vk, vk_id, settings, uuid)
-                    elif cmd == 'cancel_report':
-                        if vk_id in waiting_for_report:
-                            del waiting_for_report[vk_id]
-                        send_message(vk, vk_id, "❌ Отправка отчёта отменена.",
-                            keyboard=build_main_keyboard(settings))
-                    elif cmd == 'rating':
-                        handle_rating(vk, vk_id, settings)
-                    elif cmd == 'tickets':
-                        handle_tickets(vk, vk_id, settings)
-                    elif cmd == 'request':
-                        handle_request(vk, vk_id, settings, step='init')
-                    elif cmd == 'request_cat':
-                        cat = payload.get('cat', 'site')
-                        handle_request(vk, vk_id, settings, text=cat, step='cat')
-                    elif cmd == 'confirm_request':
-                        if vk_id in waiting_for_request:
-                            data = waiting_for_request[vk_id]
-                            try:
-                                request_id = db.create_request(
-                                    user_id=user['id'],
-                                    category=data.get('category', 'site'),
-                                    subject=data.get('subject', 'Без темы'),
-                                    description=data.get('description', 'Без описания')
-                                )
-                                db.add_request_message(request_id, user['id'],
-                                    f"Заявка #{request_id} создана.\n"
-                                    f"Категория: {data.get('category', '')}\n"
-                                    f"Тема: {data.get('subject', '')}\n"
-                                    f"Описание: {data.get('description', '')}")
+                    elif text == "🔄 Обновить":
+                        if request_id:
+                            request = get_user_request_by_id(request_id, db_user['id'])
+                            if request:
+                                messages = get_request_messages(request_id)
+                                chat_text = format_request_message(request, messages)
                                 
-                                send_message(vk, vk_id,
-                                    f"✅ *Заявка #{request_id} успешно создана!*\n\n"
-                                    f"Скоро с вами свяжется администратор.\n"
-                                    f"Статус заявки можно отследить в личном кабинете на сайте.",
-                                    keyboard=build_main_keyboard(settings))
-                            except Exception as e:
-                                logger.error(f"Ошибка создания заявки: {e}")
-                                send_message(vk, vk_id, "❌ Ошибка создания заявки. Попробуйте позже.",
-                                    keyboard=build_main_keyboard(settings))
-                            finally:
-                                del waiting_for_request[vk_id]
-                        else:
-                            send_message(vk, vk_id, "❌ Сессия истекла. Начните заново.",
-                                keyboard=build_main_keyboard(settings))
-                    elif cmd == 'cancel_request':
-                        if vk_id in waiting_for_request:
-                            del waiting_for_request[vk_id]
-                        send_message(vk, vk_id, "❌ Создание заявки отменено.",
-                            keyboard=build_main_keyboard(settings))
-                    elif cmd == 'profile':
-                        handle_profile(vk, vk_id, settings)
-                    elif cmd == 'help':
-                        handle_help(vk, vk_id, settings)
-                    elif cmd == 'menu':
-                        send_message(vk, vk_id,
-                            "🏠 *Главное меню*\n"
-                            "Выберите раздел:",
-                            keyboard=build_main_keyboard(settings))
-                    elif cmd == 'start':
-                        try:
-                            vk_user_info = vk.users.get(user_ids=vk_id, fields='first_name,last_name,screen_name')
-                            if vk_user_info:
-                                ui = vk_user_info[0]
-                                first_name = ui.get('first_name', '')
-                                last_name = ui.get('last_name', '')
-                                screen_name = ui.get('screen_name', '')
-                                vk_url = f"https://vk.com/{screen_name}" if screen_name else f"https://vk.com/id{vk_id}"
-                                handle_start(vk, vk_id, settings, first_name, last_name, vk_url)
-                        except Exception as e:
-                            logger.error(f"Ошибка: {e}")
-                            send_message(vk, vk_id, "❌ Ошибка. Попробуйте позже.")
-                    elif cmd == 'agree':
-                        try:
-                            db.set_user_agreement(user['id'])
-                            send_message(vk, vk_id,
-                                "✅ *Правила приняты!*\n\n"
-                                "Теперь вы можете выполнять задания и участвовать в лотерее!",
-                                keyboard=build_main_keyboard(settings))
-                        except Exception as e:
-                            logger.error(f"Ошибка согласия: {e}")
-                            send_message(vk, vk_id, "❌ Ошибка. Попробуйте позже.")
-                    else:
-                        send_message(vk, vk_id, "❓ Неизвестная команда",
-                            keyboard=build_main_keyboard(settings))
-                
-                # Обработка обычного текста
-                elif text:
-                    # Проверяем, ожидаем ли мы отчёт
-                    if vk_id in waiting_for_report:
-                        processed = process_submission(vk, vk_id, settings, text, attachments)
-                        if processed:
-                            continue
+                                vk.messages.send(
+                                    user_id=vk_id,
+                                    message=chat_text,
+                                    random_id=0,
+                                    keyboard=create_request_chat_keyboard(request_id)
+                                )
+                                continue
                     
-                    # Проверяем, ожидаем ли мы заполнение заявки
-                    if vk_id in waiting_for_request:
-                        step = waiting_for_request[vk_id].get('step', '')
-                        if step == 'subject':
-                            handle_request(vk, vk_id, settings, text=text, step='subject')
+                    # Если это текст сообщения (не команда)
+                    elif request_id and text not in ["✏️ Написать сообщение", "🔄 Обновить", "🔙 Назад к заявкам"]:
+                        # Добавляем сообщение
+                        add_request_message(request_id, db_user['id'], text)
+                        
+                        # Показываем обновленный чат
+                        request = get_user_request_by_id(request_id, db_user['id'])
+                        if request:
+                            messages = get_request_messages(request_id)
+                            chat_text = format_request_message(request, messages)
+                            
+                            vk.messages.send(
+                                user_id=vk_id,
+                                message=chat_text,
+                                random_id=0,
+                                keyboard=create_request_chat_keyboard(request_id)
+                            )
                             continue
-                        elif step == 'description':
-                            handle_request(vk, vk_id, settings, text=text, step='description')
-                            continue
+
+                # --- Создание заявки ---
+                if isinstance(state, dict) and state.get('action') == 'create_request':
+                    step = state.get('step')
+
+                    if step == 'subject':
+                        state['subject'] = text
+                        state['step'] = 'description'
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message="📝 Теперь опишите проблему подробно:",
+                            random_id=0
+                        )
+                        continue
+
+                    elif step == 'description':
+                        category = state.get('category', 'other')
+                        subject = state.get('subject', text[:50])
+                        description = text
+
+                        request_id = create_request(db_user['id'], category, subject, description)
+                        del user_states[vk_id]
+
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message=f"✅ Ваша заявка #{request_id} успешно создана!\n"
+                                    f"📋 Категория: {get_category_label(category)}\n"
+                                    f"📝 Тема: {subject}\n\n"
+                                    f"Администратор рассмотрит её в ближайшее время.",
+                            random_id=0,
+                            keyboard=create_main_keyboard(active_group, site_url)
+                        )
+                        continue
+
+                # --- Отправка отчета по заданию ---
+                elif isinstance(state, dict) and 'id' in state:
+                    task = state
                     
-                    # Другие ключевые слова
-                    lower_text = text.lower()
-                    if 'задание' in lower_text or 'задачи' in lower_text:
-                        handle_tasks(vk, vk_id, settings)
-                    elif 'билет' in lower_text:
-                        handle_tickets(vk, vk_id, settings)
-                    elif 'рейтинг' in lower_text or 'балл' in lower_text:
-                        handle_rating(vk, vk_id, settings)
-                    elif 'заявк' in lower_text or 'поддержк' in lower_text or 'помощь' in lower_text:
-                        handle_request(vk, vk_id, settings, step='init')
-                    elif 'профиль' in lower_text or 'кабинет' in lower_text or 'сайт' in lower_text or 'личн' in lower_text:
-                        handle_profile(vk, vk_id, settings)
-                    elif 'помощ' in lower_text or 'команды' in lower_text or 'инструк' in lower_text or '/help' in lower_text:
-                        handle_help(vk, vk_id, settings)
+                    saved_files = []
+                    attachment_text = ""
+
+                    if attachments:
+                        try:
+                            saved_files, attachment_text = process_vk_attachments(attachments, vk_session)
+                            if attachment_text:
+                                text = f"{text}\n\n📎 Прикрепленные файлы:\n{attachment_text}" if text else f"📎 Прикрепленные файлы:\n{attachment_text}"
+                            if saved_files:
+                                logger.info(f"Сохранено файлов: {len(saved_files)}")
+                                for f in saved_files:
+                                    logger.info(f"  Файл: {f['original_name']} -> {f['file_url']}")
+                        except Exception as e:
+                            logger.error(f"Ошибка обработки вложений: {e}")
+
+                    has_attachments = len(saved_files) > 0
+                    report_id = create_report(db_user['id'], task['id'], text, has_attachments)
+
+                    for file_info in saved_files:
+                        save_report_media(
+                            report_id,
+                            file_info['file_url'],
+                            file_info['file_type'],
+                            file_info['original_name'],
+                            file_info.get('file_size', 0)
+                        )
+
+                    del user_states[vk_id]
+
+                    response_msg = "✅ Ваш отчет принят на рассмотрение!\n"
+                    response_msg += "Статус задания обновится после проверки администратором."
+                    if has_attachments:
+                        response_msg += f"\n📎 Прикреплено файлов: {len(saved_files)}"
+
+                    # Сразу показываем обновлённый список заданий, чтобы был виден новый статус «⏳ На рассмотрении»
+                    if active_group:
+                        tasks = get_tasks_for_group(active_group['id'])
+                        keyboard = build_tasks_keyboard(tasks, db_user['id'])
                     else:
-                        send_message(vk, vk_id,
-                            "❓ Я не совсем понял. Используйте кнопки меню или напишите «Помощь».",
-                            keyboard=build_main_keyboard(settings))
-                
-                # Вложения без текста
-                elif attachments:
-                    if vk_id in waiting_for_report:
-                        process_submission(vk, vk_id, settings, '', attachments)
-                    else:
-                        send_message(vk, vk_id,
-                            "📎 Я получил файл, но не знаю, к какому заданию его прикрепить.\n"
-                            "Сначала выберите задание в разделе «Задания».",
-                            keyboard=build_main_keyboard(settings))
-                
+                        keyboard = create_main_keyboard(active_group, site_url)
+
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message=response_msg,
+                        random_id=0,
+                        keyboard=keyboard
+                    )
+                    continue
+
+            # --- Обработка команд ---
+            if text in ["📋 Задания", "/start", "Начать", "Старт"]:
+                if not active_group:
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="📢 В данный момент нет активных заданий.\n\nСледите за обновлениями!",
+                        random_id=0,
+                        keyboard=create_main_keyboard(active_group, site_url)
+                    )
                 else:
-                    send_message(vk, vk_id, "❓ Используйте кнопки меню.",
-                        keyboard=build_main_keyboard(settings))
-                
-                # Отправка периодических уведомлений (раз в 10 сек)
-                current_time = time.time()
-                if current_time - last_notification_time > 10:
-                    send_pending_notifications(vk)
-                    last_notification_time = current_time
-            
-            elif event.type == VkBotEventType.MESSAGE_EVENT:
-                logger.info(f"Событие сообщения: {event.raw}")
-    
-    except KeyboardInterrupt:
-        logger.info("🚫 Бот остановлен пользователем")
-        print("\n❌ Бот остановлен.")
-    except Exception as e:
-        logger.error(f"❌ Критическая ошибка: {e}")
-        print(f"\n❌ Критическая ошибка: {e}")
-        import traceback
-        traceback.print_exc()
-        time.sleep(5)
+                    tasks = get_tasks_for_group(active_group['id'])
+                    welcome = settings.get('welcome_text', 'Привет! Выполняй задания и получай билеты! 🎫')
+                    welcome += f"\n\n⏰ Задания действуют до: {active_group['end_date']}"
+                    welcome += "\n📎 Для подтверждения прикрепляйте фото, файлы или ссылки!"
+
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message=welcome,
+                        random_id=0,
+                        keyboard=build_tasks_keyboard(tasks, db_user['id'])
+                    )
+
+            elif text == "👤 Мой профиль":
+                tickets = get_user_tickets(db_user['id'])
+                msg = f"👤 Ваш профиль\n\n"
+                msg += f"⭐ Рейтинг: {db_user['rating']} баллов\n"
+                msg += f"📊 Выполнено заданий: {db_user['completed_tasks']}\n"
+                msg += f"🎟 Получено билетов: {len(tickets)} шт.\n\n"
+
+                if tickets:
+                    msg += "🎫 Ваши лотерейные билеты:\n"
+                    for t in tickets:
+                        msg += f"• {t['ticket_number']} ({t['group_title']})\n"
+                    draw_time = settings.get('draw_time', '18:00')
+                    msg += f"\n⏰ Ожидайте розыгрыша в {draw_time}!"
+                else:
+                    msg += "🎯 Выполните все задания активной волны, чтобы получить лотерейный билет!"
+
+                if site_url:
+                    msg += f"\n\n🌐 {site_url}"
+
+                vk.messages.send(
+                    user_id=vk_id,
+                    message=msg,
+                    random_id=0,
+                    keyboard=create_main_keyboard(active_group, site_url)
+                )
+
+            elif text == "📋 Заявки":
+                requests = get_user_requests(db_user['id'])
+                if not requests:
+                    msg_text = "📋 У вас пока нет заявок.\n\n➕ Создайте новую заявку с помощью кнопки ниже."
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message=msg_text,
+                        random_id=0,
+                        keyboard=create_requests_keyboard([])
+                    )
+                else:
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="📋 Ваши заявки\n\nНажмите на заявку для просмотра и общения:",
+                        random_id=0,
+                        keyboard=create_requests_keyboard(requests)
+                    )
+
+            elif text == "➕ Создать заявку":
+                user_states[vk_id] = {'action': 'create_request', 'step': 'category'}
+                vk.messages.send(
+                    user_id=vk_id,
+                    message="📋 Выберите категорию проблемы:",
+                    random_id=0,
+                    keyboard=create_category_keyboard()
+                )
+
+            elif text in ["🌐 Сайт", "🤖 Бот ВК", "🏠 Жильё"]:
+                if vk_id in user_states and isinstance(user_states[vk_id], dict) and user_states[vk_id].get('action') == 'create_request':
+                    category_map = {"🌐 Сайт": "site", "🤖 Бот ВК": "bot", "🏠 Жильё": "housing"}
+                    user_states[vk_id]['category'] = category_map[text]
+                    user_states[vk_id]['step'] = 'subject'
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="📝 Опишите суть проблемы кратко (одной строкой):",
+                        random_id=0
+                    )
+                else:
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="🤖 Воспользуйтесь кнопками меню:",
+                        random_id=0,
+                        keyboard=create_main_keyboard(active_group, site_url)
+                    )
+
+            elif text == "🌐 Личный кабинет" and site_url:
+                vk.messages.send(
+                    user_id=vk_id,
+                    message=f"🌐 Перейдите в личный кабинет по ссылке:\n{site_url}",
+                    random_id=0,
+                    keyboard=create_main_keyboard(active_group, site_url)
+                )
+
+            elif text in ["🔙 Назад в меню", "🔙 Назад"]:
+                vk.messages.send(
+                    user_id=vk_id,
+                    message="🔙 Главное меню:",
+                    random_id=0,
+                    keyboard=create_main_keyboard(active_group, site_url)
+                )
+
+            else:
+                # --- Обработка нажатия на заявку ---
+                if 'Заявка #' in text or '#' in text:
+                    match = re.search(r'#(\d+)', text)
+                    if match:
+                        request_id = int(match.group(1))
+                        request = get_user_request_by_id(request_id, db_user['id'])
+                        if request:
+                            messages = get_request_messages(request_id)
+                            chat_text = format_request_message(request, messages)
+                            
+                            user_states[vk_id] = {'action': 'request_chat', 'request_id': request_id}
+                            
+                            vk.messages.send(
+                                user_id=vk_id,
+                                message=chat_text,
+                                random_id=0,
+                                keyboard=create_request_chat_keyboard(request_id)
+                            )
+                            continue
+
+                # --- Обработка нажатия на кнопку задания ---
+                if active_group:
+                    tasks = get_tasks_for_group(active_group['id'])
+                    matched_task = get_task_from_button(text, tasks)
+
+                    if matched_task:
+                        report = get_user_task_report(db_user['id'], matched_task['id'])
+                        task_status = get_user_task_status(db_user['id'], matched_task['id'])
+                        msg = format_task_message(matched_task, report, task_status)
+
+                        user_states[vk_id] = matched_task
+
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message=msg,
+                            random_id=0
+                        )
+                        continue
+                    else:
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message="🤖 Воспользуйтесь кнопками меню:",
+                            random_id=0,
+                            keyboard=create_main_keyboard(active_group, site_url)
+                        )
+                else:
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="📢 Сейчас нет активных заданий. Загляните позже!",
+                        random_id=0,
+                        keyboard=create_main_keyboard(active_group, site_url)
+                    )
 
 
 if __name__ == '__main__':

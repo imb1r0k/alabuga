@@ -16,7 +16,6 @@ try {
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS vk_bot_tasks (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        uuid VARCHAR(36) NOT NULL UNIQUE,
         group_id INT NOT NULL,
         title VARCHAR(255) NOT NULL,
         description TEXT NOT NULL,
@@ -73,27 +72,6 @@ try {
         FOREIGN KEY (report_id) REFERENCES vk_bot_reports(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
-    // Добавляем uuid в существующую таблицу, если его нет
-    try {
-        $pdo->exec("ALTER TABLE vk_bot_tasks ADD COLUMN uuid VARCHAR(36) NOT NULL DEFAULT '' AFTER id");
-    } catch (PDOException $ex) {
-        // колонка уже существует - игнорируем
-    }
-
-    // Обновляем задания, у которых uuid пустой
-    $stmt = $pdo->query("SELECT id FROM vk_bot_tasks WHERE uuid = ''");
-    $tasks = $stmt->fetchAll();
-    foreach ($tasks as $task) {
-        $uuid = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
-            mt_rand(0, 0xffff), mt_rand(0, 0xffff),
-            mt_rand(0, 0xffff),
-            mt_rand(0, 0x0fff) | 0x4000,
-            mt_rand(0, 0x3fff) | 0x8000,
-            mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
-        );
-        $upd = $pdo->prepare("UPDATE vk_bot_tasks SET uuid = ? WHERE id = ?");
-        $upd->execute([$uuid, $task['id']]);
-    }
 } catch (PDOException $e) {
     jsonError('Ошибка инициализации таблиц бота ВК: ' . $e->getMessage(), 500);
 }
@@ -224,29 +202,12 @@ if ($uri === 'admin/vk-bot/tasks') {
             if ($difficulty === 'medium') $points = 20;
             if ($difficulty === 'hard') $points = 30;
 
-            $uuid = '';
-            if ($id > 0) {
-                // при обновлении сохраняем существующий uuid
-                $stmt = $pdo->prepare("SELECT uuid FROM vk_bot_tasks WHERE id = ?");
-                $stmt->execute([$id]);
-                $uuid = $stmt->fetchColumn() ?: '';
-            }
-            if (!$uuid) {
-                $uuid = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
-                    mt_rand(0, 0xffff), mt_rand(0, 0xffff),
-                    mt_rand(0, 0xffff),
-                    mt_rand(0, 0x0fff) | 0x4000,
-                    mt_rand(0, 0x3fff) | 0x8000,
-                    mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
-                );
-            }
-
             if ($id > 0) {
                 $stmt = $pdo->prepare("UPDATE vk_bot_tasks SET group_id=?, title=?, description=?, difficulty=?, points=?, task_type=? WHERE id=?");
                 $stmt->execute([$groupId, $title, $description, $difficulty, $points, $taskType, $id]);
             } else {
-                $stmt = $pdo->prepare("INSERT INTO vk_bot_tasks (uuid, group_id, title, description, difficulty, points, task_type) VALUES (?, ?, ?, ?, ?, ?, ?)");
-                $stmt->execute([$uuid, $groupId, $title, $description, $difficulty, $points, $taskType]);
+                $stmt = $pdo->prepare("INSERT INTO vk_bot_tasks (group_id, title, description, difficulty, points, task_type) VALUES (?, ?, ?, ?, ?, ?)");
+                $stmt->execute([$groupId, $title, $description, $difficulty, $points, $taskType]);
             }
             jsonResponse(['success' => true]);
         }

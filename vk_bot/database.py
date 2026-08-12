@@ -179,30 +179,16 @@ def get_user_by_vk_id(vk_id):
 
 
 def get_active_task_group():
-    """Получает активную группу заданий (первую)"""
+    """Получает активную группу заданий"""
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT * FROM vk_bot_task_groups
+                SELECT * FROM vk_bot_task_groups 
                 WHERE start_date <= CURDATE() AND end_date >= CURDATE()
                 ORDER BY start_date ASC LIMIT 1
             """)
             return cursor.fetchone()
-    finally:
-        conn.close()
-
-def get_active_task_groups():
-    """Получает все активные группы заданий"""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT * FROM vk_bot_task_groups
-                WHERE start_date <= CURDATE() AND end_date >= CURDATE()
-                ORDER BY start_date ASC
-            """)
-            return cursor.fetchall()
     finally:
         conn.close()
 
@@ -213,26 +199,11 @@ def get_tasks_for_group(group_id):
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT * FROM vk_bot_tasks
-                WHERE group_id = %s
+                SELECT * FROM vk_bot_tasks 
+                WHERE group_id = %s 
                 ORDER BY FIELD(difficulty, 'easy', 'medium', 'hard'), id ASC
             """, (group_id,))
             return cursor.fetchall()
-    finally:
-        conn.close()
-
-
-def get_task_by_uuid(uuid):
-    """Получает задание по его UUID"""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT * FROM vk_bot_tasks
-                WHERE uuid = %s
-                LIMIT 1
-            """, (uuid,))
-            return cursor.fetchone()
     finally:
         conn.close()
 
@@ -816,34 +787,6 @@ def get_last_request_message(request_id):
                 LIMIT 1
             """, (request_id,))
             return cursor.fetchone()
-    finally:
-        conn.close()
-
-
-def update_report_has_attachments(report_id, count):
-    """Обновляет количество вложений в отчёте"""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                UPDATE vk_bot_reports
-                SET has_attachments = %s
-                WHERE id = %s
-            """, (count, report_id))
-    finally:
-        conn.close()
-
-
-def update_report_text(report_id, text):
-    """Обновляет текст отчёта"""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                UPDATE vk_bot_reports
-                SET submission_text = %s
-                WHERE id = %s
-            """, (text, report_id))
     finally:
         conn.close()
 
