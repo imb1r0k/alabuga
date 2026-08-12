@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Хост: localhost
--- Время создания: Авг 11 2026 г., 11:19
+-- Время создания: Авг 12 2026 г., 21:50
 -- Версия сервера: 5.7.27-30-log
 -- Версия PHP: 8.3.31
 
@@ -214,7 +214,9 @@ CREATE TABLE `users` (
   `social_max` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `rating` int(11) NOT NULL DEFAULT '0',
-  `completed_tasks` int(11) NOT NULL DEFAULT '0'
+  `completed_tasks` int(11) NOT NULL DEFAULT '0',
+  `agreement_accepted` tinyint(1) DEFAULT '0',
+  `agreement_accepted_at` timestamp NULL DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
@@ -270,6 +272,39 @@ CREATE TABLE `vk_bot_report_media` (
 -- --------------------------------------------------------
 
 --
+-- Структура таблицы `vk_bot_requests`
+--
+
+CREATE TABLE `vk_bot_requests` (
+  `id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `category` enum('site','bot','housing') NOT NULL DEFAULT 'site',
+  `subject` varchar(255) NOT NULL,
+  `description` text NOT NULL,
+  `status` enum('open','in_progress','resolved','rejected') NOT NULL DEFAULT 'open',
+  `resolved_by` int(11) DEFAULT NULL,
+  `resolution_text` text,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `vk_bot_request_messages`
+--
+
+CREATE TABLE `vk_bot_request_messages` (
+  `id` int(11) NOT NULL,
+  `request_id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `message` text NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+
+--
 -- Структура таблицы `vk_bot_settings`
 --
 
@@ -320,21 +355,6 @@ CREATE TABLE `vk_bot_tickets` (
   `user_id` int(11) NOT NULL,
   `group_id` int(11) NOT NULL,
   `ticket_number` varchar(64) NOT NULL,
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- --------------------------------------------------------
-
---
--- Структура таблицы `vk_bot_users`
---
-
-CREATE TABLE `vk_bot_users` (
-  `id` int(11) NOT NULL,
-  `vk_id` bigint(20) NOT NULL,
-  `first_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `last_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `points` int(11) DEFAULT '0',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -459,6 +479,21 @@ ALTER TABLE `vk_bot_report_media`
   ADD KEY `report_id` (`report_id`);
 
 --
+-- Индексы таблицы `vk_bot_requests`
+--
+ALTER TABLE `vk_bot_requests`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `user_id` (`user_id`);
+
+--
+-- Индексы таблицы `vk_bot_request_messages`
+--
+ALTER TABLE `vk_bot_request_messages`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `request_id` (`request_id`),
+  ADD KEY `user_id` (`user_id`);
+
+--
 -- Индексы таблицы `vk_bot_settings`
 --
 ALTER TABLE `vk_bot_settings`
@@ -485,13 +520,6 @@ ALTER TABLE `vk_bot_tickets`
   ADD UNIQUE KEY `ticket_number` (`ticket_number`),
   ADD KEY `fk_vk_tickets_user` (`user_id`),
   ADD KEY `fk_vk_tickets_group` (`group_id`);
-
---
--- Индексы таблицы `vk_bot_users`
---
-ALTER TABLE `vk_bot_users`
-  ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `vk_id` (`vk_id`);
 
 --
 -- AUTO_INCREMENT для сохранённых таблиц
@@ -582,6 +610,18 @@ ALTER TABLE `vk_bot_report_media`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
+-- AUTO_INCREMENT для таблицы `vk_bot_requests`
+--
+ALTER TABLE `vk_bot_requests`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT для таблицы `vk_bot_request_messages`
+--
+ALTER TABLE `vk_bot_request_messages`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
 -- AUTO_INCREMENT для таблицы `vk_bot_tasks`
 --
 ALTER TABLE `vk_bot_tasks`
@@ -597,12 +637,6 @@ ALTER TABLE `vk_bot_task_groups`
 -- AUTO_INCREMENT для таблицы `vk_bot_tickets`
 --
 ALTER TABLE `vk_bot_tickets`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
-
---
--- AUTO_INCREMENT для таблицы `vk_bot_users`
---
-ALTER TABLE `vk_bot_users`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
@@ -680,6 +714,19 @@ ALTER TABLE `vk_bot_reports`
 --
 ALTER TABLE `vk_bot_report_media`
   ADD CONSTRAINT `vk_bot_report_media_ibfk_1` FOREIGN KEY (`report_id`) REFERENCES `vk_bot_reports` (`id`) ON DELETE CASCADE;
+
+--
+-- Ограничения внешнего ключа таблицы `vk_bot_requests`
+--
+ALTER TABLE `vk_bot_requests`
+  ADD CONSTRAINT `vk_bot_requests_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+
+--
+-- Ограничения внешнего ключа таблицы `vk_bot_request_messages`
+--
+ALTER TABLE `vk_bot_request_messages`
+  ADD CONSTRAINT `vk_bot_request_messages_ibfk_1` FOREIGN KEY (`request_id`) REFERENCES `vk_bot_requests` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `vk_bot_request_messages_ibfk_2` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
 
 --
 -- Ограничения внешнего ключа таблицы `vk_bot_tasks`
