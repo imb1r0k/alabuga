@@ -127,9 +127,10 @@ def check_request_messages_worker(vk, settings):
                 
                 time.sleep(0.5)
             
-            # Очищаем старые записи (старше 1 часа)
-            if len(last_checked) > 1000:
-                last_checked.clear()
+            # Очищаем старые записи (старше 10 минут)
+            if len(last_checked) > 100:
+                # Оставляем только последние 50 записей
+                last_checked = dict(list(last_checked.items())[-50:])
                 
         except Exception as e:
             logger.error(f"Ошибка в потоке проверки заявок: {e}")
@@ -419,16 +420,49 @@ def main():
                     continue
 
                 # --- Отправка сообщения в чат заявки ---
-                if isinstance(state, dict) and state.get('action') == 'request_chat' and text != "✏️ Написать сообщение" and text != "🔄 Обновить":
+                if isinstance(state, dict) and state.get('action') == 'request_chat':
+                    # Если пользователь нажал кнопку, а не пишет сообщение
+                    if text in ["✏️ Написать сообщение", "🔄 Обновить"]:
+                        if text == "✏️ Написать сообщение":
+                            vk.messages.send(
+                                user_id=vk_id,
+                                message="✏️ Напишите ваше сообщение:",
+                                random_id=0
+                            )
+                            continue
+                        elif text == "🔄 Обновить":
+                            # Обновляем чат
+                            request_id = state.get('request_id')
+                            if request_id:
+                                request = get_user_request_by_id(request_id, db_user['id'])
+                                if request:
+                                    messages = get_request_messages(request_id)
+                                    chat_text = f"📋 Заявка #{request_id}\n"
+                                    chat_text += f"📝 {request['subject']}\n"
+                                    chat_text += f"📊 Статус: {get_status_label(request['status'])}\n"
+                                    chat_text += "━" * 30 + "\n\n"
+                                    
+                                    for msg in messages[-10:]:
+                                        sender = msg['first_name'] or 'Пользователь'
+                                        chat_text += f"{sender}: {msg['message']}\n"
+                                    
+                                    vk.messages.send(
+                                        user_id=vk_id,
+                                        message=chat_text,
+                                        random_id=0,
+                                        keyboard=create_request_chat_keyboard(request_id)
+                                    )
+                                    continue
+                    
+                    # Если это текст сообщения (не команда)
                     request_id = state.get('request_id')
-                    if request_id:
+                    if request_id and text not in ["✏️ Написать сообщение", "🔄 Обновить", "⬅ Назад к заявкам"]:
                         # Добавляем сообщение
                         add_request_message(request_id, db_user['id'], text)
                         
-                        # Обновляем заявку
+                        # Обновляем чат
                         request = get_user_request_by_id(request_id, db_user['id'])
                         if request:
-                            # Показываем обновленный чат
                             messages = get_request_messages(request_id)
                             chat_text = f"📋 Заявка #{request_id}\n"
                             chat_text += f"📝 {request['subject']}\n"
@@ -600,38 +634,6 @@ def main():
                     keyboard=create_category_keyboard()
                 )
 
-            elif text == "🔄 Обновить" and vk_id in user_states and isinstance(user_states[vk_id], dict) and user_states[vk_id].get('action') == 'request_chat':
-                # Обновление чата заявки
-                request_id = user_states[vk_id].get('request_id')
-                if request_id:
-                    request = get_user_request_by_id(request_id, db_user['id'])
-                    if request:
-                        messages = get_request_messages(request_id)
-                        chat_text = f"📋 Заявка #{request_id}\n"
-                        chat_text += f"📝 {request['subject']}\n"
-                        chat_text += f"📊 Статус: {get_status_label(request['status'])}\n"
-                        chat_text += "━" * 30 + "\n\n"
-                        
-                        for msg in messages[-10:]:
-                            sender = msg['first_name'] or 'Пользователь'
-                            chat_text += f"{sender}: {msg['message']}\n"
-                        
-                        vk.messages.send(
-                            user_id=vk_id,
-                            message=chat_text,
-                            random_id=0,
-                            keyboard=create_request_chat_keyboard(request_id)
-                        )
-                        continue
-
-            elif text == "✏️ Написать сообщение" and vk_id in user_states and isinstance(user_states[vk_id], dict) and user_states[vk_id].get('action') == 'request_chat':
-                vk.messages.send(
-                    user_id=vk_id,
-                    message="✏️ Напишите ваше сообщение:",
-                    random_id=0
-                )
-                continue
-
             elif text in ["🌐 Сайт", "🤖 Бот ВК", "🏠 Жильё"]:
                 if vk_id in user_states and isinstance(user_states[vk_id], dict) and user_states[vk_id].get('action') == 'create_request':
                     category_map = {"🌐 Сайт": "site", "🤖 Бот ВК": "bot", "🏠 Жильё": "housing"}
@@ -658,38 +660,6 @@ def main():
                     keyboard=create_main_keyboard(active_group, site_url)
                 )
 
-            elif text.startswith("#") and text.split()[0][1:].isdigit():
-                # Обработка нажатия на заявку по номеру
-                if "🔗" not in text and "⬅" not in text:
-                    request_id_match = re.search(r'#(\d+)', text)
-                    if request_id_match:
-                        request_id = int(request_id_match.group(1))
-                        request = get_user_request_by_id(request_id, db_user['id'])
-                        if request:
-                            messages = get_request_messages(request_id)
-                            chat_text = f"📋 Заявка #{request_id}\n"
-                            chat_text += f"📝 {request['subject']}\n"
-                            chat_text += f"📊 Статус: {get_status_label(request['status'])}\n"
-                            chat_text += "━" * 30 + "\n\n"
-                            
-                            if messages:
-                                for msg in messages[-10:]:
-                                    sender = msg['first_name'] or 'Пользователь'
-                                    chat_text += f"{sender}: {msg['message']}\n"
-                            else:
-                                chat_text += "💬 Сообщений пока нет\n"
-                            
-                            # Сохраняем состояние
-                            user_states[vk_id] = {'action': 'request_chat', 'request_id': request_id}
-                            
-                            vk.messages.send(
-                                user_id=vk_id,
-                                message=chat_text,
-                                random_id=0,
-                                keyboard=create_request_chat_keyboard(request_id)
-                            )
-                            continue
-
             elif text == "⬅ Назад":
                 vk.messages.send(
                     user_id=vk_id,
@@ -699,6 +669,45 @@ def main():
                 )
 
             else:
+                # --- Обработка нажатия на заявку ---
+                # Проверяем, не является ли текст кнопкой заявки (начинается с эмодзи статуса)
+                is_request_button = False
+                request_id = None
+                
+                # Проверяем разные форматы кнопок заявок
+                # Формат: "🟡 #1 🌐 Текст"
+                match = re.search(r'#(\d+)', text)
+                if match:
+                    request_id = int(match.group(1))
+                    is_request_button = True
+                
+                if is_request_button and request_id:
+                    request = get_user_request_by_id(request_id, db_user['id'])
+                    if request:
+                        messages = get_request_messages(request_id)
+                        chat_text = f"📋 Заявка #{request_id}\n"
+                        chat_text += f"📝 {request['subject']}\n"
+                        chat_text += f"📊 Статус: {get_status_label(request['status'])}\n"
+                        chat_text += "━" * 30 + "\n\n"
+                        
+                        if messages:
+                            for msg in messages[-10:]:
+                                sender = msg['first_name'] or 'Пользователь'
+                                chat_text += f"{sender}: {msg['message']}\n"
+                        else:
+                            chat_text += "💬 Сообщений пока нет\n"
+                        
+                        # Сохраняем состояние
+                        user_states[vk_id] = {'action': 'request_chat', 'request_id': request_id}
+                        
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message=chat_text,
+                            random_id=0,
+                            keyboard=create_request_chat_keyboard(request_id)
+                        )
+                        continue
+
                 # --- Обработка нажатия на кнопку задания ---
                 if active_group:
                     tasks = get_tasks_for_group(active_group['id'])
