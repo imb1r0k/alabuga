@@ -1,13 +1,13 @@
-# Инструкция по развертыванию
+Инструкция по развертыванию
 
-## 1. Требования
+1. Требования
 
-- **Сервер**: Linux (Ubuntu 20.04/22.04), Apache или Nginx, PHP 7.4+ (с расширениями `pdo_mysql`, `mbstring`, `json`), MySQL 5.7+.
-- **Frontend**: Node.js 18+ и npm.
-- **Python**: 3.8+ для бота.
-- **Домен** или IP-адрес.
+- Сервер: Linux (Ubuntu 20.04/22.04), Apache или Nginx, PHP 7.4+ (с расширениями `pdo_mysql`, `mbstring`, `json`), MySQL 5.7+.
+- Frontend: Node.js 18+ и npm.
+- Python: 3.8+ для бота.
+- Домен или IP-адрес.
 
-## 2. Развертывание Frontend
+2. Развертывание Frontend:
 
 1. Скопируйте файлы проекта на сервер (например, в `/var/www/forum`):
    ```bash
@@ -33,12 +33,12 @@
        location / { try_files $uri $uri/ /index.html; }
 
        location /api/ {
-           proxy_pass http://127.0.0.1:8080;  # если PHP работает через php-fpm
+           proxy_pass http://127.0.0.1:8080;   если PHP работает через php-fpm
            proxy_set_header Host $host;
            proxy_set_header X-Real-IP $remote_addr;
        }
 
-       # статические файлы загрузок
+        статические файлы загрузок
        location /uploads/ {
            proxy_pass http://127.0.0.1:8080;
        }
@@ -48,7 +48,7 @@
 
 5. Убедитесь, что API доступен по `/api` (прокси или rewrite).
 
-## 3. Развертывание Backend (PHP)
+3. Развертывание Backend (PHP)
 
 1. Убедитесь, что каталог `api/` доступен через веб-сервер (например, `/api/index.php`).
 2. Файл конфигурации БД находится в `api/index.php` (сейчас захардкожены параметры). Рекомендуется вынести их в переменные окружения (`getenv`).
@@ -62,9 +62,9 @@
    ```
 5. Проверьте работу API: откройте `https://example.com/api/settings`. Должен вернуться JSON с настройками.
 
-## 4. Развертывание бота ВКонтакте
+4. Развертывание бота ВКонтакте
 
-### 4.1. Установка Python и зависимостей
+4.1. Установка Python и зависимостей
 
 1. Перейдите в папку `vk_bot`:
    ```bash
@@ -76,26 +76,26 @@
    ```
    (или `pip install`)
 
-### 4.2. Настройка подключения к БД
+4.2. Настройка подключения к БД
 
 Отредактируйте `vk_bot/config.py`:
 
 ```python
-DB_HOST = 'localhost'         # обычно localhost
+DB_HOST = 'localhost'          обычно localhost
 DB_PORT = 3306
 DB_NAME = 'имя_бд'
 DB_USER = 'пользователь'
 DB_PASSWORD = 'пароль'
 ```
 
-### 4.3. Получение VK Token
+4.3. Получение VK Token
 
 1. Создайте сообщество ВК (или используйте существующее).
 2. В настройках сообщества включите Long Poll API.
 3. Создайте ключ доступа (Token) с правами: `messages`, `photos`, `docs`, `video` (и другие при необходимости).
 4. В админ-панели сайта в разделе «Бот ВК» → «Настройки» введите этот токен и ID сообщества.
 
-### 4.4. Запуск бота вручную (тест)
+4.4. Запуск бота вручную (тест)
 
 ```bash
 cd /var/www/forum/vk_bot
@@ -104,7 +104,7 @@ python3 bot.py
 
 Если всё настроено правильно, бот запустится и будет отвечать на сообщения.
 
-## 5. Автозапуск бота как службы (systemd)
+5. Автозапуск бота как службы (systemd)
 
 Создайте файл службы `/etc/systemd/system/vkbot.service`:
 
@@ -115,7 +115,7 @@ After=network.target mysql.service
 
 [Service]
 Type=simple
-User=www-data   # или ваш пользователь
+User=www-data    или ваш пользователь
 WorkingDirectory=/var/www/forum/vk_bot
 ExecStart=/usr/bin/python3 /var/www/forum/vk_bot/bot.py
 Restart=always
@@ -136,7 +136,7 @@ sudo systemctl start vkbot
 
 Проверка статуса: `sudo systemctl status vkbot`.
 
-## 6. Настройка cron для автозаселения
+6. Настройка cron для автозаселения
 
 Скрипт `api/cron_auto_approve.php` выполняет автоматическое одобрение заявок. Рекомендуется запускать его каждые 5–10 минут.
 
@@ -148,7 +148,7 @@ sudo systemctl start vkbot
 
 Убедитесь, что скрипт имеет права на запись в лог-файл.
 
-## 7. Настройка Nginx для PHP-FPM (пример)
+7. Настройка Nginx для PHP-FPM (пример)
 
 Установите PHP и FPM:
 ```bash
@@ -161,12 +161,12 @@ sudo apt install php-fpm php-mysql
 server {
     listen 80;
     server_name example.com;
-    root /var/www/forum;   # здесь у нас backend и frontend в одной папке?
-    # если frontend собран в dist, лучше разделить
+    root /var/www/forum;    здесь у нас backend и frontend в одной папке?
+     если frontend собран в dist, лучше разделить
     index index.php index.html;
 
     location / {
-        try_files $uri $uri/ /index.html;   # для SPA
+        try_files $uri $uri/ /index.html;    для SPA
     }
 
     location ~ \.php$ {
@@ -179,7 +179,7 @@ server {
     }
 
     location /uploads/ {
-        # отдавать статические файлы из /api/uploads
+         отдавать статические файлы из /api/uploads
         alias /var/www/forum/api/uploads/;
     }
 }
@@ -189,4 +189,4 @@ server {
 
 ---
 
-**Примечание.** Если вы используете Apache, аналогичные правила задаются через `.htaccess` в каталоге `api/` (файл уже есть) и в корне для SPA.
+Примечание. Если вы используете Apache, аналогичные правила задаются через `.htaccess` в каталоге `api/` (файл уже есть) и в корне для SPA.
