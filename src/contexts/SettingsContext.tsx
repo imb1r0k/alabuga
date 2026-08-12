@@ -13,6 +13,7 @@ interface SettingsContextType {
   siteTitle: string;
   hero: HeroSettings;
   showRating: boolean;
+  autoBookMode: string;
   loading: boolean;
   updateSiteTitle: (newTitle: string) => Promise<void>;
   updateAllSettings: (settings: Record<string, string>) => Promise<void>;
@@ -33,6 +34,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [siteTitle, setSiteTitle] = useState('Алабуга - форум 2025');
   const [hero, setHero] = useState<HeroSettings>(defaultHero);
   const [showRating, setShowRating] = useState(true);
+  const [autoBookMode, setAutoBookMode] = useState('gender');
   const [loading, setLoading] = useState(true);
 
   const fetchSettings = async () => {
@@ -40,6 +42,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const data = await getSettings();
       if (data?.site_title) setSiteTitle(data.site_title);
       setShowRating(data?.show_rating === '1' || data?.show_rating === 'true');
+      setAutoBookMode(data?.['auto-book-mode'] || 'gender');
       setHero({
         hero_badge: data?.hero_badge ?? defaultHero.hero_badge,
         hero_title: data?.hero_title ?? defaultHero.hero_title,
@@ -67,6 +70,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     await updateSettings(settings);
     if (settings.site_title) setSiteTitle(settings.site_title);
     if (settings.show_rating !== undefined) setShowRating(settings.show_rating === '1' || settings.show_rating === 'true');
+    if (settings['auto-book-mode']) setAutoBookMode(settings['auto-book-mode']);
     if (settings.hero_badge) setHero((prev) => ({ ...prev, hero_badge: settings.hero_badge }));
     if (settings.hero_title) setHero((prev) => ({ ...prev, hero_title: settings.hero_title }));
     if (settings.hero_description) setHero((prev) => ({ ...prev, hero_description: settings.hero_description }));
@@ -80,6 +84,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         siteTitle,
         hero,
         showRating,
+        autoBookMode,
         loading,
         updateSiteTitle: handleUpdateSiteTitle,
         updateAllSettings: handleUpdateAllSettings,

@@ -22,7 +22,7 @@ if ($uri === 'settings') {
         $user = requireStrictAdmin($pdo);
 
         foreach ($data as $key => $value) {
-            $allowed = ['site_title', 'hero_badge', 'hero_title', 'hero_description', 'hero_button_text', 'hero_button_text_auth', 'auto-accept-bookings', 'show_rating'];
+            $allowed = ['site_title', 'hero_badge', 'hero_title', 'hero_description', 'hero_button_text', 'hero_button_text_auth', 'auto-accept-bookings', 'show_rating', 'auto-book-mode'];
             if (!in_array($key, $allowed)) continue;
             $val = trim((string)$value);
             $stmt = $pdo->prepare("INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = ?");

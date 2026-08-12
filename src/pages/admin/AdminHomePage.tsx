@@ -8,7 +8,7 @@ import { ChevronDown, ChevronUp, Settings2 } from 'lucide-react';
 import { getGlobalNotification, saveGlobalNotification } from '../../services/api';
 
 export const AdminHomePage: React.FC = () => {
-  const { siteTitle, hero, showRating, updateAllSettings } = useSettings();
+  const { siteTitle, hero, showRating, autoBookMode, updateAllSettings } = useSettings();
   const { showToast } = useToast();
 
   // Состояния для всех полей
@@ -19,6 +19,7 @@ export const AdminHomePage: React.FC = () => {
   const [btnTextInput, setBtnTextInput] = useState(hero.hero_button_text);
   const [btnTextAuthInput, setBtnTextAuthInput] = useState(hero.hero_button_text_auth);
   const [showRatingInput, setShowRatingInput] = useState(showRating);
+  const [autoBookModeInput, setAutoBookModeInput] = useState(autoBookMode);
 
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -69,6 +70,10 @@ export const AdminHomePage: React.FC = () => {
     setShowRatingInput(showRating);
   }, [showRating]);
 
+  useEffect(() => {
+    setAutoBookModeInput(autoBookMode);
+  }, [autoBookMode]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -82,6 +87,7 @@ export const AdminHomePage: React.FC = () => {
         hero_button_text: btnTextInput,
         hero_button_text_auth: btnTextAuthInput,
         show_rating: showRatingInput ? '1' : '0',
+        'auto-book-mode': autoBookModeInput,
       });
       setMsg('Все настройки успешно сохранены!');
       showToast('Все настройки успешно сохранены!', 'success');
@@ -292,6 +298,25 @@ export const AdminHomePage: React.FC = () => {
                                     </label>
                                   </div>
                   
+                                  <div style={{ marginBottom: '24px' }}>
+                                    <h4 style={{ marginBottom: '12px', color: '#1e293b' }}>Автозаселение</h4>
+                                    <div className="input-group">
+                                      <label>Режим автозаселения</label>
+                                      <select
+                                        value={autoBookModeInput}
+                                        onChange={(e) => setAutoBookModeInput(e.target.value)}
+                                        disabled={saving}
+                                        style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', width: '100%' }}
+                                      >
+                                        <option value="gender">По полу</option>
+                                        <option value="gender_and_vk_duplicate">По полу и по совпадению Фамилии и Имени среди аккаунтов с VK-ссылкой</option>
+                                      </select>
+                                    <small style={{ color: '#64748b', fontSize: '12px', display: 'block', marginTop: '6px' }}>
+                                      «По полу и по совпадению Фамилии и Имени» — система учитывает аккаунты, созданные ботом ВК (vk_url заполнено и bot_registered = true): если у человека уже есть дубликат через ВК, он будет заселён в ту же комнату.
+                                    </small>
+                                    </div>
+                                  </div>
+
                                   <button type="submit" className="btn btn-primary" disabled={saving}>
                                     {saving ? 'Сохранение...' : 'Сохранить все настройки'}
                                   </button>
