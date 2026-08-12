@@ -163,56 +163,51 @@ def create_main_keyboard(active_group, site_url=''):
 def build_tasks_keyboard(tasks, user_id):
     """
     Создает клавиатуру с заданиями, сгруппированными по сложности.
-    Каждая кнопка на отдельной строке.
+    Задания выводятся с указанием уровня сложности.
     """
     keyboard = VkKeyboard(one_time=False)
     
+    # Группируем задания по сложности
     easy_tasks = [t for t in tasks if t['difficulty'] == 'easy']
     medium_tasks = [t for t in tasks if t['difficulty'] == 'medium']
     hard_tasks = [t for t in tasks if t['difficulty'] == 'hard']
     
-    def add_task_buttons(task_list, difficulty):
-        emoji_map = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}
+    # Функция для добавления заданий с префиксом сложности
+    def add_task_buttons(task_list, prefix, emoji):
         for t in task_list:
             report = get_user_task_report(user_id, t['id'])
-            # Используем название задания в тексте кнопки
-            label = f"{t['title']}"
+            # Формируем название с префиксом сложности
+            label = f"{emoji} {prefix}: {t['title']}"
             color = VkKeyboardColor.PRIMARY
             
             if report:
                 if report['status'] == 'approved':
-                    label = f"✅ {label}"
+                    label = f"✅ {prefix}: {t['title']}"
                     color = VkKeyboardColor.POSITIVE
                 elif report['status'] == 'pending':
-                    label = f"⏳ {label}"
+                    label = f"⏳ {prefix}: {t['title']}"
                     color = VkKeyboardColor.SECONDARY
                 elif report['status'] == 'rejected':
-                    label = f"❌ {label}"
+                    label = f"❌ {prefix}: {t['title']}"
                     color = VkKeyboardColor.NEGATIVE
-            else:
-                label = f"{emoji_map.get(difficulty, '📌')} {label}"
             
             keyboard.add_button(label, color=color)
             keyboard.add_line()
     
-    # Добавляем задания с группировкой по сложности
+    # Добавляем задания с указанием сложности
     if easy_tasks:
-        if len(easy_tasks) > 0:
-            keyboard.add_button("🟢 Простые", color=VkKeyboardColor.SECONDARY)
-            keyboard.add_line()
-            add_task_buttons(easy_tasks, 'easy')
+        add_task_buttons(easy_tasks, "Легкое", "🟢")
     
     if medium_tasks:
-        if len(medium_tasks) > 0:
-            keyboard.add_button("🟡 Средние", color=VkKeyboardColor.SECONDARY)
-            keyboard.add_line()
-            add_task_buttons(medium_tasks, 'medium')
+        add_task_buttons(medium_tasks, "Среднее", "🟡")
     
     if hard_tasks:
-        if len(hard_tasks) > 0:
-            keyboard.add_button("🔴 Сложные", color=VkKeyboardColor.SECONDARY)
-            keyboard.add_line()
-            add_task_buttons(hard_tasks, 'hard')
+        add_task_buttons(hard_tasks, "Сложное", "🔴")
+    
+    # Если заданий нет
+    if not tasks:
+        keyboard.add_button("📢 Нет заданий", color=VkKeyboardColor.SECONDARY)
+        keyboard.add_line()
     
     keyboard.add_button("🔙 Назад в меню", color=VkKeyboardColor.SECONDARY)
     
@@ -276,10 +271,16 @@ def get_task_from_button(text, tasks):
     # Убираем эмодзи статусов и сложности
     status_emoji = ['✅', '⏳', '❌']
     diff_emoji = ['🟢', '🟡', '🔴', '📌']
+    prefixes = ['Легкое:', 'Среднее:', 'Сложное:']
     
     clean_text = text
     for emoji in status_emoji + diff_emoji:
         clean_text = clean_text.replace(emoji, '')
+    
+    # Убираем префиксы
+    for prefix in prefixes:
+        clean_text = clean_text.replace(prefix, '')
+    
     clean_text = clean_text.strip()
     
     # Ищем задание по названию
@@ -357,7 +358,7 @@ def format_request_message(request, messages):
 def format_task_message(task, report=None):
     """Форматирует сообщение с заданием для красивого отображения"""
     diff_emoji = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}
-    diff_text = {'easy': 'Простое', 'medium': 'Среднее', 'hard': 'Сложное'}
+    diff_text = {'easy': 'Легкое', 'medium': 'Среднее', 'hard': 'Сложное'}
     
     msg = f"📌 {task['title']}\n\n"
     msg += f"📝 {task['description']}\n\n"
@@ -878,7 +879,6 @@ def main():
 
             else:
                 # --- Обработка нажатия на заявку ---
-                # Проверяем, не является ли текст кнопкой заявки
                 if 'Заявка #' in text or '#' in text:
                     match = re.search(r'#(\d+)', text)
                     if match:
@@ -888,7 +888,6 @@ def main():
                             messages = get_request_messages(request_id)
                             chat_text = format_request_message(request, messages)
                             
-                            # Сохраняем состояние
                             user_states[vk_id] = {'action': 'request_chat', 'request_id': request_id}
                             
                             vk.messages.send(
