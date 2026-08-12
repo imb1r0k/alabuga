@@ -755,7 +755,12 @@ def main():
             # --- Обработка команды согласия с правилами ---
             if text == "✅ Подтверждаю":
                 logger.info(f"Пользователь {vk_id} нажал кнопку подтверждения")
-                if not check_user_agreement(db_user['id']):
+                
+                # Проверяем текущий статус
+                current_status = check_user_agreement(db_user['id'])
+                logger.info(f"Текущий статус согласия для пользователя {vk_id} (ID в БД: {db_user['id']}): {current_status}")
+                
+                if not current_status:
                     logger.info(f"Пользователь {vk_id} еще не соглашался с правилами")
                     
                     # Сначала отправляем файл с правилами
@@ -804,13 +809,17 @@ def main():
                     except Exception as e:
                         logger.error(f"Ошибка отправки файла с правилами: {e}")
                     
-                    # Отмечаем согласие в БД
-                    logger.info(f"Попытка сохранить согласие для пользователя {vk_id}")
+                    # Отмечаем согласие в БД - ставим 1 и дату
+                    logger.info(f"Попытка сохранить согласие для пользователя {vk_id} (ID в БД: {db_user['id']})")
                     success = set_user_agreement(db_user['id'])
+                    
                     if success:
-                        logger.info(f"Согласие пользователя {vk_id} успешно сохранено в БД")
+                        logger.info(f"✅ Согласие пользователя {vk_id} успешно сохранено в БД")
+                        # Дополнительная проверка
+                        verify = check_user_agreement(db_user['id'])
+                        logger.info(f"Проверка после сохранения: {verify}")
                     else:
-                        logger.error(f"Не удалось сохранить согласие пользователя {vk_id} в БД")
+                        logger.error(f"❌ Не удалось сохранить согласие пользователя {vk_id} в БД")
                     
                     # Отправляем подтверждение и показываем главное меню
                     vk.messages.send(
