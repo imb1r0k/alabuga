@@ -126,19 +126,19 @@ def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
                     return user
 
             # 4. Создаем нового пользователя
-                        login = generate_login(first_name, last_name)
-                        password = generate_password()
-                        hashed_password = hash_password(password)
-                        full_name = f"{last_name} {first_name}".strip()
-            
-                        cursor.execute("""
-                            INSERT INTO users
-                            (vk_id, vk_url, first_name, last_name, name, login, phone, password, role, status, rating, completed_tasks, social_vk)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """, (
-                            vk_id, vk_url, first_name, last_name, full_name,
-                            login, '', hashed_password, 'user', 'active', 0, 0, vk_url
-                        ))
+            login = generate_login(first_name, last_name)
+            password = generate_password()
+            hashed_password = hash_password(password)
+            full_name = f"{last_name} {first_name}".strip()
+
+            cursor.execute("""
+                INSERT INTO users
+                (vk_id, vk_url, first_name, last_name, name, login, phone, password, role, status, rating, completed_tasks, social_vk)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                vk_id, vk_url, first_name, last_name, full_name,
+                login, '', hashed_password, 'user', 'active', 0, 0, vk_url
+            ))
 
             user_id = cursor.lastrowid
             cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
