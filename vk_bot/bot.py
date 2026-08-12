@@ -37,6 +37,8 @@ logger = logging.getLogger(__name__)
 
 user_states = {}
 UPLOAD_DIR = 'uploads/vk_bot/'
+# Хранилище для уже отправленных уведомлений о сообщениях в заявках
+sent_notifications = {}
 
 
 def send_notification_worker(vk, settings):
@@ -76,7 +78,7 @@ def send_notification_worker(vk, settings):
 
 def check_request_messages_worker(vk, settings):
     """Фоновый поток для проверки новых сообщений в заявках"""
-    last_checked = {}
+    global sent_notifications
     
     while True:
         try:
@@ -102,7 +104,7 @@ def check_request_messages_worker(vk, settings):
                 
                 # Проверяем, не отправляли ли уже это сообщение
                 msg_key = f"{request_id}_{last_msg['id']}"
-                if last_checked.get(msg_key):
+                if sent_notifications.get(msg_key):
                     continue
                 
                 # Отправляем уведомление пользователю
@@ -119,7 +121,7 @@ def check_request_messages_worker(vk, settings):
                         message=msg_text,
                         random_id=0
                     )
-                    last_checked[msg_key] = True
+                    sent_notifications[msg_key] = True
                     logger.info(f"Уведомление о новом сообщении в заявке #{request_id} отправлено пользователю VK ID {user_vk_id}")
                     
                 except Exception as e:
@@ -127,10 +129,10 @@ def check_request_messages_worker(vk, settings):
                 
                 time.sleep(0.5)
             
-            # Очищаем старые записи (старше 10 минут)
-            if len(last_checked) > 100:
+            # Очищаем старые записи (старше 1 часа)
+            if len(sent_notifications) > 100:
                 # Оставляем только последние 50 записей
-                last_checked = dict(list(last_checked.items())[-50:])
+                sent_notifications = dict(list(sent_notifications.items())[-50:])
                 
         except Exception as e:
             logger.error(f"Ошибка в потоке проверки заявок: {e}")
@@ -246,20 +248,25 @@ def create_category_keyboard():
 def get_task_from_button(text, tasks):
     """Определяет задание по тексту кнопки"""
     diff_labels = {'easy': 'Простое', 'medium': 'Среднее', 'hard': 'Сложное'}
+    diff_emoji = {'easy': '🔵', 'medium': '🟡', 'hard': '🔴'}
     
+    # Убираем эмодзи и статусы
     clean_text = re.sub(r'[✅⏳❌🔵🟡🔴\s]', '', text).strip()
     
     for t in tasks:
+        # Проверяем по ID
         if str(t['id']) == clean_text:
             return t
         
+        # Проверяем по названию с номером
         diff = t['difficulty']
         label = f"{diff_labels.get(diff, 'Задание')}"
         tasks_by_diff = [x for x in tasks if x['difficulty'] == diff]
         for idx, task in enumerate(tasks_by_diff, 1):
             if task['id'] == t['id']:
                 full_label = f"{label} {idx}"
-                if full_label in clean_text:
+                # Проверяем с эмодзи и без
+                if full_label in clean_text or f"{diff_emoji.get(diff, '')}{full_label}" in clean_text:
                     return t
                 break
     
@@ -409,6 +416,7 @@ def main():
             if vk_id in user_states:
                 state = user_states[vk_id]
 
+                # Если пользователь нажал "Назад" в любом состоянии
                 if text == "⬅ Назад" or text == "⬅ Назад к заявкам":
                     del user_states[vk_id]
                     vk.messages.send(
@@ -421,46 +429,48 @@ def main():
 
                 # --- Отправка сообщения в чат заявки ---
                 if isinstance(state, dict) and state.get('action') == 'request_chat':
-                    # Если пользователь нажал кнопку, а не пишет сообщение
-                    if text in ["✏️ Написать сообщение", "🔄 Обновить"]:
-                        if text == "✏️ Написать сообщение":
-                            vk.messages.send(
-                                user_id=vk_id,
-                                message="✏️ Напишите ваше сообщение:",
-                                random_id=0
-                            )
-                            continue
-                        elif text == "🔄 Обновить":
-                            # Обновляем чат
-                            request_id = state.get('request_id')
-                            if request_id:
-                                request = get_user_request_by_id(request_id, db_user['id'])
-                                if request:
-                                    messages = get_request_messages(request_id)
-                                    chat_text = f"📋 Заявка #{request_id}\n"
-                                    chat_text += f"📝 {request['subject']}\n"
-                                    chat_text += f"📊 Статус: {get_status_label(request['status'])}\n"
-                                    chat_text += "━" * 30 + "\n\n"
-                                    
+                    request_id = state.get('request_id')
+                    
+                    # Обработка команд в чате заявки
+                    if text == "✏️ Написать сообщение":
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message="✏️ Напишите ваше сообщение:",
+                            random_id=0
+                        )
+                        continue
+                    
+                    elif text == "🔄 Обновить":
+                        if request_id:
+                            request = get_user_request_by_id(request_id, db_user['id'])
+                            if request:
+                                messages = get_request_messages(request_id)
+                                chat_text = f"📋 Заявка #{request_id}\n"
+                                chat_text += f"📝 {request['subject']}\n"
+                                chat_text += f"📊 Статус: {get_status_label(request['status'])}\n"
+                                chat_text += "━" * 30 + "\n\n"
+                                
+                                if messages:
                                     for msg in messages[-10:]:
                                         sender = msg['first_name'] or 'Пользователь'
                                         chat_text += f"{sender}: {msg['message']}\n"
-                                    
-                                    vk.messages.send(
-                                        user_id=vk_id,
-                                        message=chat_text,
-                                        random_id=0,
-                                        keyboard=create_request_chat_keyboard(request_id)
-                                    )
-                                    continue
+                                else:
+                                    chat_text += "💬 Сообщений пока нет\n"
+                                
+                                vk.messages.send(
+                                    user_id=vk_id,
+                                    message=chat_text,
+                                    random_id=0,
+                                    keyboard=create_request_chat_keyboard(request_id)
+                                )
+                                continue
                     
                     # Если это текст сообщения (не команда)
-                    request_id = state.get('request_id')
-                    if request_id and text not in ["✏️ Написать сообщение", "🔄 Обновить", "⬅ Назад к заявкам"]:
+                    elif request_id and text not in ["✏️ Написать сообщение", "🔄 Обновить", "⬅ Назад к заявкам"]:
                         # Добавляем сообщение
                         add_request_message(request_id, db_user['id'], text)
                         
-                        # Обновляем чат
+                        # Показываем обновленный чат
                         request = get_user_request_by_id(request_id, db_user['id'])
                         if request:
                             messages = get_request_messages(request_id)
@@ -469,9 +479,12 @@ def main():
                             chat_text += f"📊 Статус: {get_status_label(request['status'])}\n"
                             chat_text += "━" * 30 + "\n\n"
                             
-                            for msg in messages[-10:]:
-                                sender = msg['first_name'] or 'Пользователь'
-                                chat_text += f"{sender}: {msg['message']}\n"
+                            if messages:
+                                for msg in messages[-10:]:
+                                    sender = msg['first_name'] or 'Пользователь'
+                                    chat_text += f"{sender}: {msg['message']}\n"
+                            else:
+                                chat_text += "💬 Сообщений пока нет\n"
                             
                             vk.messages.send(
                                 user_id=vk_id,
@@ -670,18 +683,13 @@ def main():
 
             else:
                 # --- Обработка нажатия на заявку ---
-                # Проверяем, не является ли текст кнопкой заявки (начинается с эмодзи статуса)
-                is_request_button = False
+                # Проверяем, не является ли текст кнопкой заявки
                 request_id = None
-                
-                # Проверяем разные форматы кнопок заявок
-                # Формат: "🟡 #1 🌐 Текст"
                 match = re.search(r'#(\d+)', text)
                 if match:
                     request_id = int(match.group(1))
-                    is_request_button = True
                 
-                if is_request_button and request_id:
+                if request_id:
                     request = get_user_request_by_id(request_id, db_user['id'])
                     if request:
                         messages = get_request_messages(request_id)
