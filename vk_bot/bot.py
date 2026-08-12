@@ -171,7 +171,8 @@ def build_tasks_keyboard(tasks, user_id):
     def add_task_buttons(task_list, difficulty):
         for idx, t in enumerate(task_list):
             report = get_user_task_report(user_id, t['id'])
-            label = f"{diff_labels.get(difficulty, 'Задание')} {idx + 1}"
+            # Используем ID задания в тексте кнопки для точного определения
+            label = f"{diff_labels.get(difficulty, 'Задание')} #{t['id']}"
             color = VkKeyboardColor.PRIMARY
             
             if report:
@@ -247,28 +248,36 @@ def create_category_keyboard():
 
 def get_task_from_button(text, tasks):
     """Определяет задание по тексту кнопки"""
+    # Ищем ID задания в формате #123
+    match = re.search(r'#(\d+)', text)
+    if match:
+        task_id = int(match.group(1))
+        for t in tasks:
+            if t['id'] == task_id:
+                return t
+    
+    # Если не нашли по ID, пробуем другие способы...
     diff_labels = {'easy': 'Простое', 'medium': 'Среднее', 'hard': 'Сложное'}
-    diff_emoji = {'easy': '🔵', 'medium': '🟡', 'hard': '🔴'}
+    status_emoji = ['✅', '⏳', '❌']
     
-    # Убираем эмодзи и статусы
-    clean_text = re.sub(r'[✅⏳❌🔵🟡🔴\s]', '', text).strip()
+    # Убираем эмодзи статусов
+    clean_text = text
+    for emoji in status_emoji:
+        clean_text = clean_text.replace(emoji, '')
+    clean_text = clean_text.strip()
     
-    for t in tasks:
-        # Проверяем по ID
-        if str(t['id']) == clean_text:
-            return t
+    # Убираем маркер # и пробуем найти по ID
+    clean_text = re.sub(r'#\d+\s*', '', clean_text)
+    
+    # Проверяем по названию с номером
+    for diff in ['easy', 'medium', 'hard']:
+        diff_label = diff_labels.get(diff, 'Задание')
+        tasks_by_diff = [t for t in tasks if t['difficulty'] == diff]
         
-        # Проверяем по названию с номером
-        diff = t['difficulty']
-        label = f"{diff_labels.get(diff, 'Задание')}"
-        tasks_by_diff = [x for x in tasks if x['difficulty'] == diff]
         for idx, task in enumerate(tasks_by_diff, 1):
-            if task['id'] == t['id']:
-                full_label = f"{label} {idx}"
-                # Проверяем с эмодзи и без
-                if full_label in clean_text or f"{diff_emoji.get(diff, '')}{full_label}" in clean_text:
-                    return t
-                break
+            full_label = f"{diff_label} {idx}"
+            if clean_text == full_label or clean_text.startswith(full_label):
+                return task
     
     return None
 
@@ -683,38 +692,36 @@ def main():
 
             else:
                 # --- Обработка нажатия на заявку ---
-                # Проверяем, не является ли текст кнопкой заявки
-                request_id = None
-                match = re.search(r'#(\d+)', text)
-                if match:
-                    request_id = int(match.group(1))
-                
-                if request_id:
-                    request = get_user_request_by_id(request_id, db_user['id'])
-                    if request:
-                        messages = get_request_messages(request_id)
-                        chat_text = f"📋 Заявка #{request_id}\n"
-                        chat_text += f"📝 {request['subject']}\n"
-                        chat_text += f"📊 Статус: {get_status_label(request['status'])}\n"
-                        chat_text += "━" * 30 + "\n\n"
-                        
-                        if messages:
-                            for msg in messages[-10:]:
-                                sender = msg['first_name'] or 'Пользователь'
-                                chat_text += f"{sender}: {msg['message']}\n"
-                        else:
-                            chat_text += "💬 Сообщений пока нет\n"
-                        
-                        # Сохраняем состояние
-                        user_states[vk_id] = {'action': 'request_chat', 'request_id': request_id}
-                        
-                        vk.messages.send(
-                            user_id=vk_id,
-                            message=chat_text,
-                            random_id=0,
-                            keyboard=create_request_chat_keyboard(request_id)
-                        )
-                        continue
+                # Проверяем, не является ли текст кнопкой заявки (ищем # в тексте)
+                if '#' in text:
+                    match = re.search(r'#(\d+)', text)
+                    if match:
+                        request_id = int(match.group(1))
+                        request = get_user_request_by_id(request_id, db_user['id'])
+                        if request:
+                            messages = get_request_messages(request_id)
+                            chat_text = f"📋 Заявка #{request_id}\n"
+                            chat_text += f"📝 {request['subject']}\n"
+                            chat_text += f"📊 Статус: {get_status_label(request['status'])}\n"
+                            chat_text += "━" * 30 + "\n\n"
+                            
+                            if messages:
+                                for msg in messages[-10:]:
+                                    sender = msg['first_name'] or 'Пользователь'
+                                    chat_text += f"{sender}: {msg['message']}\n"
+                            else:
+                                chat_text += "💬 Сообщений пока нет\n"
+                            
+                            # Сохраняем состояние
+                            user_states[vk_id] = {'action': 'request_chat', 'request_id': request_id}
+                            
+                            vk.messages.send(
+                                user_id=vk_id,
+                                message=chat_text,
+                                random_id=0,
+                                keyboard=create_request_chat_keyboard(request_id)
+                            )
+                            continue
 
                 # --- Обработка нажатия на кнопку задания ---
                 if active_group:
@@ -747,6 +754,7 @@ def main():
                             message=msg,
                             random_id=0
                         )
+                        continue
                     else:
                         vk.messages.send(
                             user_id=vk_id,
