@@ -645,6 +645,79 @@ def get_user_request_by_id(request_id, user_id):
         conn.close()
 
 
+def get_request_messages(request_id):
+    """Получает все сообщения по заявке"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT m.*, u.first_name, u.last_name, u.vk_id
+                FROM vk_bot_request_messages m
+                JOIN users u ON m.user_id = u.id
+                WHERE m.request_id = %s
+                ORDER BY m.created_at ASC
+            """, (request_id,))
+            return cursor.fetchall()
+    finally:
+        conn.close()
+
+
+def add_request_message(request_id, user_id, message):
+    """Добавляет сообщение в заявку"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO vk_bot_request_messages (request_id, user_id, message)
+                VALUES (%s, %s, %s)
+            """, (request_id, user_id, message))
+            return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def update_request_status(request_id, status, resolved_by=None, resolution_text=None):
+    """Обновляет статус заявки"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            if resolved_by and resolution_text:
+                cursor.execute("""
+                    UPDATE vk_bot_requests 
+                    SET status = %s, resolved_by = %s, resolution_text = %s 
+                    WHERE id = %s
+                """, (status, resolved_by, resolution_text, request_id))
+            else:
+                cursor.execute("""
+                    UPDATE vk_bot_requests 
+                    SET status = %s 
+                    WHERE id = %s
+                """, (status, request_id))
+    finally:
+        conn.close()
+
+
+def get_all_requests_for_admin(status=None):
+    """Получает все заявки для админа (с фильтром по статусу)"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            sql = """
+                SELECT r.*, u.first_name, u.last_name, u.vk_id,
+                       (SELECT COUNT(*) FROM vk_bot_request_messages WHERE request_id = r.id) as messages_count
+                FROM vk_bot_requests r
+                JOIN users u ON r.user_id = u.id
+            """
+            if status and status != 'all':
+                sql += " WHERE r.status = %s"
+                cursor.execute(sql, (status,))
+            else:
+                cursor.execute(sql)
+            return cursor.fetchall()
+    finally:
+        conn.close()
+
+
 def update_report_status(report_id, status, reject_reason=''):
     """Обновляет статус отчета, начисляет баллы, выдает билеты"""
     conn = get_db_connection()

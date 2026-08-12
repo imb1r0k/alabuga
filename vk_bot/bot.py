@@ -25,6 +25,8 @@ from database import (
     create_request,
     get_user_requests,
     get_user_request_by_id,
+    get_request_messages,
+    add_request_message,
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -75,7 +77,7 @@ def create_main_keyboard(active_group, site_url=''):
     keyboard.add_button("📋 Задания", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
     keyboard.add_button("👤 Мой профиль", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_button("📋 Заявка", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("📋 Заявки", color=VkKeyboardColor.PRIMARY)
 
     if site_url:
         keyboard.add_line()
@@ -85,25 +87,15 @@ def create_main_keyboard(active_group, site_url=''):
 
 
 def build_tasks_keyboard(tasks, user_id):
-    """
-    Создает клавиатуру с заданиями, сгруппированными по сложности.
-    Легкие - первая строка, средние - вторая, сложные - третья.
-    """
+    """Создает клавиатуру с заданиями, сгруппированными по сложности"""
     keyboard = VkKeyboard(one_time=False)
     
-    # Группируем задания по сложности
     easy_tasks = [t for t in tasks if t['difficulty'] == 'easy']
     medium_tasks = [t for t in tasks if t['difficulty'] == 'medium']
     hard_tasks = [t for t in tasks if t['difficulty'] == 'hard']
     
     diff_labels = {'easy': '🔵 Простое', 'medium': '🟡 Среднее', 'hard': '🔴 Сложное'}
-    diff_colors = {
-        'easy': VkKeyboardColor.PRIMARY,
-        'medium': VkKeyboardColor.PRIMARY,
-        'hard': VkKeyboardColor.PRIMARY
-    }
     
-    # Функция для добавления кнопок задания
     def add_task_buttons(task_list, difficulty):
         for idx, t in enumerate(task_list):
             report = get_user_task_report(user_id, t['id'])
@@ -122,35 +114,51 @@ def build_tasks_keyboard(tasks, user_id):
                     color = VkKeyboardColor.NEGATIVE
             
             keyboard.add_button(label, color=color)
-            # Добавляем перенос строки после каждой кнопки
-            # чтобы каждая кнопка была на новой строке
             keyboard.add_line()
     
-    # Добавляем задания по группам
     if easy_tasks:
         add_task_buttons(easy_tasks, 'easy')
-    
     if medium_tasks:
         add_task_buttons(medium_tasks, 'medium')
-    
     if hard_tasks:
         add_task_buttons(hard_tasks, 'hard')
     
-    # Добавляем кнопку "Назад"
     keyboard.add_line()
     keyboard.add_button("⬅ Назад", color=VkKeyboardColor.SECONDARY)
     
     return keyboard.get_keyboard()
 
 
-def create_request_keyboard():
-    """Клавиатура для заявок: создать / мои заявки"""
+def create_requests_keyboard(requests):
+    """Создает клавиатуру со списком заявок"""
     keyboard = VkKeyboard(one_time=False)
+    
+    status_icons = {'open': '🟡', 'in_progress': '🔵', 'resolved': '✅', 'rejected': '❌'}
+    cat_labels = {'site': '🌐', 'bot': '🤖', 'housing': '🏠'}
+    
+    for r in requests[:10]:
+        icon = status_icons.get(r['status'], '🟡')
+        cat = cat_labels.get(r['category'], '📌')
+        label = f"{icon} #{r['id']} {cat} {r['subject'][:30]}"
+        keyboard.add_button(label, color=VkKeyboardColor.PRIMARY)
+        keyboard.add_line()
+    
+    keyboard.add_line()
     keyboard.add_button("➕ Создать заявку", color=VkKeyboardColor.POSITIVE)
     keyboard.add_line()
-    keyboard.add_button("📋 Мои заявки", color=VkKeyboardColor.SECONDARY)
-    keyboard.add_line()
     keyboard.add_button("⬅ Назад", color=VkKeyboardColor.SECONDARY)
+    
+    return keyboard.get_keyboard()
+
+
+def create_request_chat_keyboard(request_id):
+    """Создает клавиатуру для чата заявки"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("✏️ Написать сообщение", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button("🔄 Обновить", color=VkKeyboardColor.SECONDARY)
+    keyboard.add_line()
+    keyboard.add_button("⬅ Назад к заявкам", color=VkKeyboardColor.SECONDARY)
     return keyboard.get_keyboard()
 
 
@@ -170,24 +178,20 @@ def create_category_keyboard():
 def get_task_from_button(text, tasks):
     """Определяет задание по тексту кнопки"""
     diff_labels = {'easy': 'Простое', 'medium': 'Среднее', 'hard': 'Сложное'}
-    diff_emoji = {'easy': '🔵', 'medium': '🟡', 'hard': '🔴'}
     
     clean_text = re.sub(r'[✅⏳❌🔵🟡🔴\s]', '', text).strip()
     
     for t in tasks:
-        # Проверяем по ID или по названию
         if str(t['id']) == clean_text:
             return t
         
-        # Проверяем по метке задания
         diff = t['difficulty']
         label = f"{diff_labels.get(diff, 'Задание')}"
-        # Находим номер задания в группе
         tasks_by_diff = [x for x in tasks if x['difficulty'] == diff]
         for idx, task in enumerate(tasks_by_diff, 1):
             if task['id'] == t['id']:
                 full_label = f"{label} {idx}"
-                if full_label in clean_text or f"{diff_emoji.get(diff, '')} {full_label}" in clean_text:
+                if full_label in clean_text:
                     return t
                 break
     
@@ -306,17 +310,46 @@ def main():
             if vk_id in user_states:
                 state = user_states[vk_id]
 
-                if text == "⬅ Назад":
+                if text == "⬅ Назад" or text == "⬅ Назад к заявкам":
                     del user_states[vk_id]
                     vk.messages.send(
                         user_id=vk_id,
-                        message="🔙 Действие отменено.",
+                        message="🔙 Возврат в главное меню.",
                         random_id=0,
                         keyboard=create_main_keyboard(active_group, site_url)
                     )
                     continue
 
-                # --- Создание заявки (state - словарь) ---
+                # --- Отправка сообщения в чат заявки ---
+                if isinstance(state, dict) and state.get('action') == 'request_chat' and text != "✏️ Написать сообщение" and text != "🔄 Обновить":
+                    request_id = state.get('request_id')
+                    if request_id:
+                        # Добавляем сообщение
+                        add_request_message(request_id, db_user['id'], text)
+                        
+                        # Обновляем заявку
+                        request = get_user_request_by_id(request_id, db_user['id'])
+                        if request:
+                            # Показываем обновленный чат
+                            messages = get_request_messages(request_id)
+                            chat_text = f"📋 Заявка #{request_id}\n"
+                            chat_text += f"📝 {request['subject']}\n"
+                            chat_text += f"📊 Статус: {get_status_label(request['status'])}\n"
+                            chat_text += "━" * 30 + "\n\n"
+                            
+                            for msg in messages[-10:]:
+                                sender = msg['first_name'] or 'Пользователь'
+                                chat_text += f"{sender}: {msg['message']}\n"
+                            
+                            vk.messages.send(
+                                user_id=vk_id,
+                                message=chat_text,
+                                random_id=0,
+                                keyboard=create_request_chat_keyboard(request_id)
+                            )
+                            continue
+
+                # --- Создание заявки ---
                 if isinstance(state, dict) and state.get('action') == 'create_request':
                     step = state.get('step')
 
@@ -341,7 +374,7 @@ def main():
                         vk.messages.send(
                             user_id=vk_id,
                             message=f"✅ Ваша заявка #{request_id} создана!\n"
-                                    f"📋 Категория: {category}\n"
+                                    f"📋 Категория: {get_category_label(category)}\n"
                                     f"📝 Суть: {subject}\n\n"
                                     f"Администратор рассмотрит её в ближайшее время.",
                             random_id=0,
@@ -349,11 +382,10 @@ def main():
                         )
                         continue
 
-                # --- Отправка отчета по заданию (state - объект задания) ---
+                # --- Отправка отчета по заданию ---
                 elif isinstance(state, dict) and 'id' in state:
                     task = state
                     
-                    # Обрабатываем вложения
                     saved_files = []
                     attachment_text = ""
 
@@ -369,11 +401,9 @@ def main():
                         except Exception as e:
                             logger.error(f"Ошибка обработки вложений: {e}")
 
-                    # Создаем отчет
                     has_attachments = len(saved_files) > 0
                     report_id = create_report(db_user['id'], task['id'], text, has_attachments)
 
-                    # Сохраняем ссылки на файлы
                     for file_info in saved_files:
                         save_report_media(
                             report_id,
@@ -445,13 +475,23 @@ def main():
                     keyboard=create_main_keyboard(active_group, site_url)
                 )
 
-            elif text == "📋 Заявка":
-                vk.messages.send(
-                    user_id=vk_id,
-                    message="📋 Выберите действие:",
-                    random_id=0,
-                    keyboard=create_request_keyboard()
-                )
+            elif text == "📋 Заявки":
+                requests = get_user_requests(db_user['id'])
+                if not requests:
+                    msg_text = "📋 У вас пока нет заявок.\n\n➕ Создайте новую заявку с помощью кнопки ниже."
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message=msg_text,
+                        random_id=0,
+                        keyboard=create_requests_keyboard([])
+                    )
+                else:
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="📋 Ваши заявки (нажмите на заявку для просмотра):",
+                        random_id=0,
+                        keyboard=create_requests_keyboard(requests)
+                    )
 
             elif text == "➕ Создать заявку":
                 user_states[vk_id] = {'action': 'create_request', 'step': 'category'}
@@ -462,25 +502,37 @@ def main():
                     keyboard=create_category_keyboard()
                 )
 
-            elif text == "📋 Мои заявки":
-                requests = get_user_requests(db_user['id'])
-                if not requests:
-                    msg_text = "📋 У вас пока нет заявок."
-                else:
-                    msg_text = "📋 Ваши заявки:\n\n"
-                    for i, r in enumerate(requests[:10], 1):
-                        status_icon = {'open': '🟡', 'in_progress': '🔵', 'resolved': '✅', 'rejected': '❌'}
-                        icon = status_icon.get(r['status'], '🟡')
-                        cat_labels = {'site': 'Сайт', 'bot': 'Бот ВК', 'housing': 'Жильё'}
-                        cat = cat_labels.get(r['category'], r['category'])
-                        msg_text += f"{i}. #{r['id']} {icon} [{cat}] {r['subject'][:60]}\n"
-                    msg_text += f"\nВсего: {len(requests)} заявок"
+            elif text == "🔄 Обновить" and vk_id in user_states and isinstance(user_states[vk_id], dict) and user_states[vk_id].get('action') == 'request_chat':
+                # Обновление чата заявки
+                request_id = user_states[vk_id].get('request_id')
+                if request_id:
+                    request = get_user_request_by_id(request_id, db_user['id'])
+                    if request:
+                        messages = get_request_messages(request_id)
+                        chat_text = f"📋 Заявка #{request_id}\n"
+                        chat_text += f"📝 {request['subject']}\n"
+                        chat_text += f"📊 Статус: {get_status_label(request['status'])}\n"
+                        chat_text += "━" * 30 + "\n\n"
+                        
+                        for msg in messages[-10:]:
+                            sender = msg['first_name'] or 'Пользователь'
+                            chat_text += f"{sender}: {msg['message']}\n"
+                        
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message=chat_text,
+                            random_id=0,
+                            keyboard=create_request_chat_keyboard(request_id)
+                        )
+                        continue
+
+            elif text == "✏️ Написать сообщение" and vk_id in user_states and isinstance(user_states[vk_id], dict) and user_states[vk_id].get('action') == 'request_chat':
                 vk.messages.send(
                     user_id=vk_id,
-                    message=msg_text,
-                    random_id=0,
-                    keyboard=create_request_keyboard()
+                    message="✏️ Напишите ваше сообщение:",
+                    random_id=0
                 )
+                continue
 
             elif text in ["🌐 Сайт", "🤖 Бот ВК", "🏠 Жильё"]:
                 if vk_id in user_states and isinstance(user_states[vk_id], dict) and user_states[vk_id].get('action') == 'create_request':
@@ -507,6 +559,38 @@ def main():
                     random_id=0,
                     keyboard=create_main_keyboard(active_group, site_url)
                 )
+
+            elif text.startswith("#") and text.split()[0][1:].isdigit():
+                # Обработка нажатия на заявку по номеру
+                if "🔗" not in text and "⬅" not in text:
+                    request_id_match = re.search(r'#(\d+)', text)
+                    if request_id_match:
+                        request_id = int(request_id_match.group(1))
+                        request = get_user_request_by_id(request_id, db_user['id'])
+                        if request:
+                            messages = get_request_messages(request_id)
+                            chat_text = f"📋 Заявка #{request_id}\n"
+                            chat_text += f"📝 {request['subject']}\n"
+                            chat_text += f"📊 Статус: {get_status_label(request['status'])}\n"
+                            chat_text += "━" * 30 + "\n\n"
+                            
+                            if messages:
+                                for msg in messages[-10:]:
+                                    sender = msg['first_name'] or 'Пользователь'
+                                    chat_text += f"{sender}: {msg['message']}\n"
+                            else:
+                                chat_text += "💬 Сообщений пока нет\n"
+                            
+                            # Сохраняем состояние
+                            user_states[vk_id] = {'action': 'request_chat', 'request_id': request_id}
+                            
+                            vk.messages.send(
+                                user_id=vk_id,
+                                message=chat_text,
+                                random_id=0,
+                                keyboard=create_request_chat_keyboard(request_id)
+                            )
+                            continue
 
             elif text == "⬅ Назад":
                 vk.messages.send(
@@ -562,6 +646,27 @@ def main():
                         random_id=0,
                         keyboard=create_main_keyboard(active_group, site_url)
                     )
+
+
+def get_status_label(status):
+    """Возвращает метку статуса с эмодзи"""
+    labels = {
+        'open': '🟡 Открыта',
+        'in_progress': '🔵 В работе',
+        'resolved': '✅ Решена',
+        'rejected': '❌ Отклонена'
+    }
+    return labels.get(status, status)
+
+
+def get_category_label(category):
+    """Возвращает метку категории с эмодзи"""
+    labels = {
+        'site': '🌐 Сайт',
+        'bot': '🤖 Бот ВК',
+        'housing': '🏠 Жильё'
+    }
+    return labels.get(category, category)
 
 
 if __name__ == '__main__':
