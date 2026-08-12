@@ -379,6 +379,22 @@ def format_request_message(request, messages):
     return msg
 
 
+def get_active_tasks_for_user(user_id):
+    """Возвращает список ВСЕХ заданий из ВСЕХ активных волн"""
+    groups = get_active_task_groups()
+    if not groups:
+        return []
+    return get_all_tasks_for_groups(groups)
+
+
+def get_task_by_id(task_id, tasks):
+    """Находит задание по ID (только если оно есть в переданном списке)"""
+    for t in tasks:
+        if t['id'] == task_id:
+            return t
+    return None
+
+
 def format_task_message(task, report=None, task_status=None):
     """Форматирует сообщение с заданием для красивого отображения"""
     diff_emoji = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}
@@ -748,9 +764,10 @@ def main():
                         response_msg += f"\n📎 Прикреплено файлов: {len(saved_files)}"
 
                     # Сразу показываем обновлённый список заданий, чтобы был виден новый статус «⏳ На рассмотрении»
-                    if active_groups:
-                        tasks = get_all_tasks_for_groups(active_groups)
-                        keyboard = build_tasks_keyboard(tasks, db_user['id'])
+                    # После отправки отчёта показываем клавиатуру с заданиями ТОЛЬКО активных волн
+                    active_tasks = get_active_tasks_for_user(db_user['id'])
+                    if active_tasks:
+                        keyboard = build_tasks_keyboard(active_tasks, db_user['id'])
                     else:
                         keyboard = create_main_keyboard(active_groups, site_url)
 
@@ -772,7 +789,8 @@ def main():
                         keyboard=create_main_keyboard(active_groups, site_url)
                     )
                 else:
-                    tasks = get_all_tasks_for_groups(active_groups)
+                    # Получаем задания ТОЛЬКО из активных волн
+                    active_tasks = get_all_tasks_for_groups(active_groups)
                     welcome = settings.get('welcome_text', 'Привет! Выполняй задания и получай билеты! 🎫')
                     # Перечисляем все активные волны
                     waves_info = ", ".join([g['title'] for g in active_groups])
@@ -785,7 +803,7 @@ def main():
                         user_id=vk_id,
                         message=welcome,
                         random_id=0,
-                        keyboard=build_tasks_keyboard(tasks, db_user['id'])
+                        keyboard=build_tasks_keyboard(active_tasks, db_user['id'])
                     )
 
             elif text == "👤 Мой профиль":
