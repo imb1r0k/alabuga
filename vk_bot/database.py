@@ -213,11 +213,26 @@ def get_tasks_for_group(group_id):
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT * FROM vk_bot_tasks 
-                WHERE group_id = %s 
+                SELECT * FROM vk_bot_tasks
+                WHERE group_id = %s
                 ORDER BY FIELD(difficulty, 'easy', 'medium', 'hard'), id ASC
             """, (group_id,))
             return cursor.fetchall()
+    finally:
+        conn.close()
+
+
+def get_task_by_uuid(uuid):
+    """Получает задание по его UUID"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT * FROM vk_bot_tasks
+                WHERE uuid = %s
+                LIMIT 1
+            """, (uuid,))
+            return cursor.fetchone()
     finally:
         conn.close()
 

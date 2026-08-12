@@ -161,10 +161,33 @@ def create_main_keyboard(active_groups, site_url=''):
     return keyboard.get_keyboard()
 
 
+def build_waves_keyboard(groups, user_id):
+    """Создает клавиатуру выбора волны с указанием прогресса"""
+    keyboard = VkKeyboard(one_time=False)
+    
+    for g in groups:
+        # Получаем задания этой волны
+        tasks = get_tasks_for_group(g['id'])
+        total = len(tasks)
+        done = 0
+        for t in tasks:
+            status = get_user_task_status(user_id, t['id'])
+            if status == 'approved':
+                done += 1
+        
+        label = f"🌊 {g['title']} ({done}/{total})"
+        # Добавляем payload с id волны
+        keyboard.add_button(label, color=VkKeyboardColor.PRIMARY, payload={"wave_id": g['id']})
+        keyboard.add_line()
+    
+    keyboard.add_button("🔙 Назад в меню", color=VkKeyboardColor.SECONDARY)
+    return keyboard.get_keyboard()
+
+
 def build_tasks_keyboard(tasks, user_id):
     """
     Создает клавиатуру с заданиями, сгруппированными по сложности.
-    Задания выводятся с указанием уровня сложности.
+    Использует UUID в payload для точной идентификации задания.
     """
     keyboard = VkKeyboard(one_time=False)
     
@@ -185,21 +208,22 @@ def build_tasks_keyboard(tasks, user_id):
             if len(title_display) > max_title_len:
                 title_display = t['title'][:max_title_len].rstrip() + '…'
     
-            label = f"{emoji}#{t['id']} {prefix_part}{title_display}"
+            label = f"{emoji} {prefix_part}{title_display}"
             color = VkKeyboardColor.PRIMARY
 
             if status:
                 if status == 'approved':
-                    label = f"✅#{t['id']} {prefix_part}{title_display}"
+                    label = f"✅ {prefix_part}{title_display}"
                     color = VkKeyboardColor.POSITIVE
                 elif status == 'pending':
-                    label = f"⏳#{t['id']} {prefix_part}{title_display}"
+                    label = f"⏳ {prefix_part}{title_display}"
                     color = VkKeyboardColor.SECONDARY
                 elif status == 'rejected':
-                    label = f"❌#{t['id']} {prefix_part}{title_display}"
+                    label = f"❌ {prefix_part}{title_display}"
                     color = VkKeyboardColor.NEGATIVE
     
-            keyboard.add_button(label, color=color)
+            # В payload передаём uuid задания
+            keyboard.add_button(label, color=color, payload={"task_uuid": t['uuid']})
             keyboard.add_line()
     
     # Добавляем задания с указанием сложности
@@ -499,6 +523,7 @@ def main():
         if event.type == VkEventType.MESSAGE_NEW and event.to_me:
             vk_id = event.user_id
             text = event.text.strip()
+            payload = event.payload
 
             attachments = []
             if event.attachments:
@@ -779,6 +804,28 @@ def main():
                     )
                     continue
 
+            # --- Обработка выбора волны ---
+            if payload and 'wave_id' in payload:
+                wave_id = int(payload['wave_id'])
+                wave = None
+                for g in active_groups:
+                    if g['id'] == wave_id:
+                        wave = g
+                        break
+                if wave:
+                    tasks = get_tasks_for_group(wave['id'])
+                    welcome = settings.get('welcome_text', 'Привет! Выполняй задания и получай билеты! 🎫')
+                    welcome += f"\n\n🌊 Волна: {wave['title']}"
+                    welcome += f"\n⏰ Действует до: {wave['end_date']}"
+                    welcome += "\n📎 Для подтверждения прикрепляйте фото, файлы или ссылки!"
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message=welcome,
+                        random_id=0,
+                        keyboard=build_tasks_keyboard(tasks, db_user['id'])
+                    )
+                continue
+
             # --- Обработка команд ---
             if text in ["📋 Задания", "/start", "Начать", "Старт"]:
                 if not active_groups:
@@ -789,22 +836,28 @@ def main():
                         keyboard=create_main_keyboard(active_groups, site_url)
                     )
                 else:
-                    # Получаем задания ТОЛЬКО из активных волн
-                    active_tasks = get_all_tasks_for_groups(active_groups)
-                    welcome = settings.get('welcome_text', 'Привет! Выполняй задания и получай билеты! 🎫')
-                    # Перечисляем все активные волны
-                    waves_info = ", ".join([g['title'] for g in active_groups])
-                    welcome += f"\n\n🌊 Активные волны: {waves_info}"
-                    for g in active_groups:
-                        welcome += f"\n⏰ «{g['title']}» действует до: {g['end_date']}"
-                    welcome += "\n📎 Для подтверждения прикрепляйте фото, файлы или ссылки!"
-
-                    vk.messages.send(
-                        user_id=vk_id,
-                        message=welcome,
-                        random_id=0,
-                        keyboard=build_tasks_keyboard(active_tasks, db_user['id'])
-                    )
+                    # Если активных волн несколько – показываем выбор волны
+                    if len(active_groups) > 1:
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message="🌊 Выберите волну заданий:",
+                            random_id=0,
+                            keyboard=build_waves_keyboard(active_groups, db_user['id'])
+                        )
+                    else:
+                        # Одна волна – сразу показываем её задания
+                        wave = active_groups[0]
+                        tasks = get_tasks_for_group(wave['id'])
+                        welcome = settings.get('welcome_text', 'Привет! Выполняй задания и получай билеты! 🎫')
+                        welcome += f"\n\n🌊 Волна: {wave['title']}"
+                        welcome += f"\n⏰ Действует до: {wave['end_date']}"
+                        welcome += "\n📎 Для подтверждения прикрепляйте фото, файлы или ссылки!"
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message=welcome,
+                            random_id=0,
+                            keyboard=build_tasks_keyboard(tasks, db_user['id'])
+                        )
 
             elif text == "👤 Мой профиль":
                 tickets = get_user_tickets(db_user['id'])
