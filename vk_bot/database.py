@@ -101,7 +101,7 @@ def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
                     if user.get('vk_id') != vk_id:
                         cursor.execute("""
                             UPDATE users 
-                            SET vk_id = %s, agreement_accepted = 0, agreement_accepted_at = NULL 
+                            SET vk_id = %s, agreement_accepted_at = NULL 
                             WHERE id = %s
                         """, (vk_id, user['id']))
                         logger.info(f"Обновлен vk_id для пользователя {user['id']}")
@@ -115,7 +115,7 @@ def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
                     if user.get('vk_url') != vk_url:
                         cursor.execute("""
                             UPDATE users 
-                            SET vk_url = %s, agreement_accepted = 0, agreement_accepted_at = NULL 
+                            SET vk_url = %s, agreement_accepted_at = NULL 
                             WHERE id = %s
                         """, (vk_url, user['id']))
                         logger.info(f"Обновлен vk_url для пользователя {user['id']}")
@@ -132,7 +132,7 @@ def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
                 if user:
                     cursor.execute("""
                         UPDATE users 
-                        SET vk_id = %s, vk_url = %s, agreement_accepted = 0, agreement_accepted_at = NULL 
+                        SET vk_id = %s, vk_url = %s, agreement_accepted_at = NULL 
                         WHERE id = %s
                     """, (vk_id, vk_url, user['id']))
                     logger.info(f"Связан пользователь {first_name} {last_name} с VK ID {vk_id}")
@@ -146,11 +146,11 @@ def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
 
             cursor.execute("""
                 INSERT INTO users
-                (vk_id, vk_url, first_name, last_name, name, login, phone, password, role, status, rating, completed_tasks, social_vk, agreement_accepted, bot_registered)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (vk_id, vk_url, first_name, last_name, name, login, phone, password, role, status, rating, completed_tasks, social_vk, bot_registered)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 vk_id, vk_url, first_name, last_name, full_name,
-                login, '', hashed_password, 'user', 'active', 0, 0, vk_url, 0, 1
+                login, '', hashed_password, 'user', 'active', 0, 0, vk_url, 1
             ))
 
             user_id = cursor.lastrowid
@@ -857,14 +857,14 @@ def verify_password(plain_password, hashed_password):
 
 
 def check_user_agreement(user_id):
-    """Проверяет, согласился ли пользователь с правилами"""
+    """Проверяет, согласился ли пользователь с правилами (по наличию даты)"""
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT agreement_accepted FROM users WHERE id = %s", (user_id,))
+            cursor.execute("SELECT agreement_accepted_at FROM users WHERE id = %s", (user_id,))
             result = cursor.fetchone()
             if result:
-                return result.get('agreement_accepted') == 1
+                return result.get('agreement_accepted_at') is not None
             return False
     except Exception as e:
         logger.error(f"Ошибка проверки согласия пользователя {user_id}: {e}")
@@ -874,25 +874,27 @@ def check_user_agreement(user_id):
 
 
 def set_user_agreement(user_id):
-    """Устанавливает отметку о согласии пользователя с правилами"""
+    """Устанавливает отметку о согласии пользователя с правилами (ставит текущую дату)"""
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
             logger.info(f"set_user_agreement: Начинаем обновление для user_id={user_id}")
             
             # Сначала проверяем, существует ли пользователь
-            cursor.execute("SELECT id, agreement_accepted FROM users WHERE id = %s", (user_id,))
+            cursor.execute("SELECT id, agreement_accepted_at FROM users WHERE id = %s", (user_id,))
             user = cursor.fetchone()
             if not user:
                 logger.error(f"set_user_agreement: Пользователь {user_id} не найден")
                 return False
             
-            logger.info(f"set_user_agreement: Текущее значение agreement_accepted = {user.get('agreement_accepted')}")
+            # Если уже есть дата, возвращаем True
+            if user.get('agreement_accepted_at') is not None:
+                logger.info(f"set_user_agreement: Пользователь {user_id} уже согласился с правилами {user.get('agreement_accepted_at')}")
+                return True
             
-            # Обновляем согласие - ставим 1 и текущую дату
-            cursor.execute("""
+            # Обновляем согласие - ставим текущую дату            cursor.execute("""
                 UPDATE users 
-                SET agreement_accepted = 1, agreement_accepted_at = NOW() 
+                SET agreement_accepted_at = NOW() 
                 WHERE id = %s
             """, (user_id,))
             
@@ -902,11 +904,11 @@ def set_user_agreement(user_id):
             
             if affected_rows > 0:
                 # Проверяем, что действительно обновилось
-                cursor.execute("SELECT agreement_accepted, agreement_accepted_at FROM users WHERE id = %s", (user_id,))
+                cursor.execute("SELECT agreement_accepted_at FROM users WHERE id = %s", (user_id,))
                 result = cursor.fetchone()
-                logger.info(f"set_user_agreement: После обновления - agreement_accepted = {result.get('agreement_accepted')}, agreement_accepted_at = {result.get('agreement_accepted_at')}")
+                logger.info(f"set_user_agreement: После обновления - agreement_accepted_at = {result.get('agreement_accepted_at') if result else None}")
                 
-                if result and result.get('agreement_accepted') == 1:
+                if result and result.get('agreement_accepted_at') is not None:
                     logger.info(f"set_user_agreement: ✅ Успешно! Пользователь {user_id} подтвердил согласие")
                     return True
                 else:
@@ -931,7 +933,7 @@ def get_user_agreement_status(user_id):
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT agreement_accepted, agreement_accepted_at 
+                SELECT agreement_accepted_at 
                 FROM users 
                 WHERE id = %s
             """, (user_id,))
