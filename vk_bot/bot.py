@@ -292,99 +292,99 @@ def main():
             active_group = get_active_task_group()
 
             # --- Обработка ввода (отчет по заданию ИЛИ создание заявки) ---
-                        if vk_id in user_states:
-                            state = user_states[vk_id]
-            
-                            if text == "⬅ Назад":
-                                del user_states[vk_id]
-                                vk.messages.send(
-                                    user_id=vk_id,
-                                    message="🔙 Действие отменено.",
-                                    random_id=0,
-                                    keyboard=create_main_keyboard(active_group, site_url)
-                                )
-                                continue
-            
-                            # --- Создание заявки ---
-                            if isinstance(state, dict) and state.get('action') == 'create_request':
-                                step = state.get('step')
-            
-                                if step == 'subject':
-                                    # Получили суть заявки
-                                    state['subject'] = text
-                                    state['step'] = 'description'
-                                    vk.messages.send(
-                                        user_id=vk_id,
-                                        message="📝 Теперь опишите проблему подробно:",
-                                        random_id=0
-                                    )
-                                    continue
-            
-                                elif step == 'description':
-                                    # Получили описание — создаём заявку
-                                    category = state.get('category', 'other')
-                                    subject = state.get('subject', text[:50])
-                                    description = text
-            
-                                    request_id = create_request(db_user['id'], category, subject, description)
-                                    del user_states[vk_id]
-            
-                                    vk.messages.send(
-                                        user_id=vk_id,
-                                        message=f"✅ Ваша заявка #{request_id} создана!\\n"
-                                                f"📋 Категория: {category}\\n"
-                                                f"📝 Суть: {subject}\\n\\n"
-                                                f"Администратор рассмотрит её в ближайшее время.",
-                                        random_id=0,
-                                        keyboard=create_main_keyboard(active_group, site_url)
-                                    )
-                                    continue
-            
-                            # --- Отправка отчета по заданию (существующий функционал) ---
-                            task = state  # существующий код ожидает dict задания
-                            # Обрабатываем вложения - получаем ссылки на файлы
-                            saved_files = []
-                            attachment_text = ""
-            
-                            if attachments:
-                                try:
-                                    saved_files, attachment_text = process_vk_attachments(attachments, vk_session)
-                                    if attachment_text:
-                                        text = f"{text}\n\n📎 Прикрепленные файлы:\n{attachment_text}" if text else f"📎 Прикрепленные файлы:\n{attachment_text}"
-                                    if saved_files:
-                                        logger.info(f"Сохранено файлов: {len(saved_files)}")
-                                        for f in saved_files:
-                                            logger.info(f"  Файл: {f['original_name']} -> {f['file_url']}")
-                                except Exception as e:
-                                    logger.error(f"Ошибка обработки вложений: {e}")
-            
-                            # Создаем отчет
-                            has_attachments = len(saved_files) > 0
-                            report_id = create_report(db_user['id'], task['id'], text, has_attachments)
-            
-                            # Сохраняем ссылки на файлы в базу
-                            for file_info in saved_files:
-                                save_report_media(
-                                    report_id,
-                                    file_info['file_url'],
-                                    file_info['file_type'],
-                                    file_info['original_name'],
-                                    file_info.get('file_size', 0)
-                                )
-            
-                            del user_states[vk_id]
-            
-                            response_msg = "✅ Ваш отчет принят на рассмотрение администратором!\nСтатус задания изменится после проверки."
-                            if has_attachments:
-                                response_msg += f"\n📎 Прикреплено файлов: {len(saved_files)}"
-            
-                            vk.messages.send(
-                                user_id=vk_id,
-                                message=response_msg,
-                                random_id=0,
-                                keyboard=create_main_keyboard(active_group, site_url)
-                            )
-                            continue
+            if vk_id in user_states:
+                state = user_states[vk_id]
+
+                if text == "⬅ Назад":
+                    del user_states[vk_id]
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="🔙 Действие отменено.",
+                        random_id=0,
+                        keyboard=create_main_keyboard(active_group, site_url)
+                    )
+                    continue
+
+                # --- Создание заявки ---
+                if isinstance(state, dict) and state.get('action') == 'create_request':
+                    step = state.get('step')
+
+                    if step == 'subject':
+                        # Получили суть заявки
+                        state['subject'] = text
+                        state['step'] = 'description'
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message="📝 Теперь опишите проблему подробно:",
+                            random_id=0
+                        )
+                        continue
+
+                    elif step == 'description':
+                        # Получили описание — создаём заявку
+                        category = state.get('category', 'other')
+                        subject = state.get('subject', text[:50])
+                        description = text
+
+                        request_id = create_request(db_user['id'], category, subject, description)
+                        del user_states[vk_id]
+
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message=f"✅ Ваша заявка #{request_id} создана!\n"
+                                    f"📋 Категория: {category}\n"
+                                    f"📝 Суть: {subject}\n\n"
+                                    f"Администратор рассмотрит её в ближайшее время.",
+                            random_id=0,
+                            keyboard=create_main_keyboard(active_group, site_url)
+                        )
+                        continue
+
+                # --- Отправка отчета по заданию (существующий функционал) ---
+                task = state  # существующий код ожидает dict задания
+                # Обрабатываем вложения - получаем ссылки на файлы
+                saved_files = []
+                attachment_text = ""
+
+                if attachments:
+                    try:
+                        saved_files, attachment_text = process_vk_attachments(attachments, vk_session)
+                        if attachment_text:
+                            text = f"{text}\n\n📎 Прикрепленные файлы:\n{attachment_text}" if text else f"📎 Прикрепленные файлы:\n{attachment_text}"
+                        if saved_files:
+                            logger.info(f"Сохранено файлов: {len(saved_files)}")
+                            for f in saved_files:
+                                logger.info(f"  Файл: {f['original_name']} -> {f['file_url']}")
+                    except Exception as e:
+                        logger.error(f"Ошибка обработки вложений: {e}")
+
+                # Создаем отчет
+                has_attachments = len(saved_files) > 0
+                report_id = create_report(db_user['id'], task['id'], text, has_attachments)
+
+                # Сохраняем ссылки на файлы в базу
+                for file_info in saved_files:
+                    save_report_media(
+                        report_id,
+                        file_info['file_url'],
+                        file_info['file_type'],
+                        file_info['original_name'],
+                        file_info.get('file_size', 0)
+                    )
+
+                del user_states[vk_id]
+
+                response_msg = "✅ Ваш отчет принят на рассмотрение администратором!\nСтатус задания изменится после проверки."
+                if has_attachments:
+                    response_msg += f"\n📎 Прикреплено файлов: {len(saved_files)}"
+
+                vk.messages.send(
+                    user_id=vk_id,
+                    message=response_msg,
+                    random_id=0,
+                    keyboard=create_main_keyboard(active_group, site_url)
+                )
+                continue
 
             # --- Обработка команд ---
             if text in ["📋 Задания", "/start", "Начать", "Старт"]:
