@@ -936,7 +936,7 @@ def get_user_agreement_status(user_id):
                 SELECT agreement_accepted_at 
                 FROM users 
                 WHERE id = %s
-            """, (user_id,))
+            """, (user_id))
             return cursor.fetchone()
     finally:
         conn.close()
