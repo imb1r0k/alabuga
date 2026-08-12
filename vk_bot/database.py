@@ -892,7 +892,8 @@ def set_user_agreement(user_id):
                 logger.info(f"set_user_agreement: Пользователь {user_id} уже согласился с правилами {user.get('agreement_accepted_at')}")
                 return True
             
-            # Обновляем согласие - ставим текущую дату            cursor.execute("""
+            # Обновляем согласие - ставим текущую дату
+            cursor.execute("""
                 UPDATE users 
                 SET agreement_accepted_at = NOW() 
                 WHERE id = %s
@@ -936,7 +937,7 @@ def get_user_agreement_status(user_id):
                 SELECT agreement_accepted_at 
                 FROM users 
                 WHERE id = %s
-            """, (user_id))
+            """, (user_id,))
             return cursor.fetchone()
     finally:
         conn.close()
