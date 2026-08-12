@@ -1,6 +1,6 @@
 import time
 import vk_api
-from vk_api.longpoll import VkLongPoll, VkEventType
+from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 import threading
 import logging
@@ -493,7 +493,7 @@ def main():
 
     vk_session = vk_api.VkApi(token=token)
     vk = vk_session.get_api()
-    longpoll = VkLongPoll(vk_session)
+    longpoll = VkBotLongPoll(vk_session, group_id=settings.get('vk_group_id', 0))
 
     # Запускаем поток для отправки уведомлений
     notification_thread = threading.Thread(
@@ -520,7 +520,7 @@ def main():
     active_group = None
 
     for event in longpoll.listen():
-        if event.type == VkEventType.MESSAGE_NEW and event.to_me:
+        if event.type == VkBotEventType.MESSAGE_NEW and event.from_user:
             vk_id = event.user_id
             text = event.text.strip()
             payload = event.payload
