@@ -178,6 +178,28 @@ def get_user_by_vk_id(vk_id):
         conn.close()
 
 
+def find_existing_user(vk_id, vk_url=''):
+    """
+    Находит уже существующего пользователя по VK ID или VK URL.
+    НЕ создаёт новый аккаунт.
+    Возвращает dict пользователя или None, если пользователь не найден.
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            if vk_url:
+                cursor.execute("SELECT * FROM users WHERE vk_url = %s", (vk_url,))
+                user = cursor.fetchone()
+                if user:
+                    return user
+            if vk_id:
+                cursor.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
+                return cursor.fetchone()
+            return None
+    finally:
+        conn.close()
+
+
 def get_active_task_group():
     """Получает активную группу заданий"""
     conn = get_db_connection()

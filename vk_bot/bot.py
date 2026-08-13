@@ -33,6 +33,7 @@ from database import (
     get_request_by_id,
     check_user_agreement,
     set_user_agreement,
+    find_existing_user,
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -225,6 +226,15 @@ def create_agreement_keyboard():
     """Создает клавиатуру для согласия с правилами"""
     keyboard = VkKeyboard(one_time=False)
     keyboard.add_button("✅ Подтверждаю", color=VkKeyboardColor.POSITIVE)
+    return keyboard.get_keyboard()
+
+
+def create_registration_confirm_keyboard():
+    """Клавиатура подтверждения данных аккаунта при регистрации"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("✅ Да", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_line()
+    keyboard.add_button("❌ Нет", color=VkKeyboardColor.NEGATIVE)
     return keyboard.get_keyboard()
 
 
@@ -514,14 +524,88 @@ def main():
                 last_name = user_info.get('last_name', '')
                 vk_url = f"https://vk.com/id{vk_id}"
 
-                db_user = find_or_create_user(vk_id, first_name, last_name, vk_url)
-                logger.info(f"Пользователь найден/создан: ID={db_user['id']}, VK_ID={vk_id}")
+            except Exception as e:
+                logger.error(f"Ошибка получения пользователя: {e}")
+                db_user = get_user_by_vk_id(vk_id)
+                if not db_user:
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="❌ Произошла ошибка при регистрации. Попробуйте позже.",
+                        random_id=0
+                    )
+                    continue
+                first_name = db_user.get('first_name', '')
+                last_name = db_user.get('last_name', '')
+                vk_url = db_user.get('vk_url') or f"https://vk.com/id{vk_id}"
+
+            # ─── КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: НЕ создаём аккаунт автоматически ───
+            # Сначала проверяем, существует ли пользователь в базе.
+            # Если пользователя нет — запускаем сценарий подтверждения ФИО.
+            existing_user = find_existing_user(vk_id, vk_url)
+
+            if existing_user is None:
+                # === НОВЫЙ ПОЛЬЗОВАТЕЛЬ (аккаунта ещё нет) ===
+                settings = get_bot_settings()
+                site_url = settings.get('site_url', '')
+                active_group = get_active_task_group()
+
+                state = user_states.get(vk_id)
+                in_registration = (
+                    isinstance(state, dict)
+                    and state.get('action', '').startswith('registration')
+                )
+
+                if in_registration:
+                    # Состояние регистрации — обрабатывается в секции состояний ниже
+                    pass
+                else:
+                    if text == "✅ Подтверждаю":
+                        # Пользователь принял правила → начинаем подтверждение ФИО
+                        user_states[vk_id] = {
+                            'action': 'registration_confirm',
+                            'first_name': first_name,
+                            'last_name': last_name,
+                        }
+                        keyboard = create_registration_confirm_keyboard()
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message=(
+                                "📝 Для регистрации вам необходимо указать настоящие верные Фамилию и Имя.\n"
+                                "В противном случае ваши заявки на бронирование и ваш профиль могут быть аннулированы.\n\n"
+                                f"Фамилия: {last_name}\n"
+                                f"Имя: {first_name}\n\n"
+                                "Все данные верны?"
+                            ),
+                            random_id=0,
+                            keyboard=keyboard
+                        )
+                        logger.info(f"Запрошено подтверждение ФИО для нового пользователя {vk_id}")
+                        continue
+                    else:
+                        # Отправляем правила (пользователь ещё не принял их)
+                        if vk_id not in agreement_sent:
+                            send_agreement_rules(vk, vk_id)
+                            agreement_sent.add(vk_id)
+                        else:
+                            vk.messages.send(
+                                user_id=vk_id,
+                                message="⚠️ Для продолжения нажмите кнопку «Подтверждаю» в сообщении с правилами.",
+                                random_id=0
+                            )
+                        continue
+            else:
+                # === СУЩЕСТВУЮЩИЙ ПОЛЬЗОВАТЕЛЬ ===
+                db_user = existing_user
+                logger.info(f"Пользователь найден: ID={db_user['id']}, VK_ID={vk_id}")
+
+                settings = get_bot_settings()
+                site_url = settings.get('site_url', '')
+                active_group = get_active_task_group()
 
                 # Проверяем, согласился ли пользователь с правилами (по наличию даты)
                 if not check_user_agreement(db_user['id']):
                     logger.info(f"Пользователь {vk_id} еще не согласился с правилами")
 
-                    # Если пользователь нажал кнопку подтверждения — записываем согласие
                     if text == "✅ Подтверждаю":
                         logger.info(f"Пользователь {vk_id} нажал кнопку подтверждения")
                         success = set_user_agreement(db_user['id'])
@@ -537,7 +621,6 @@ def main():
                         logger.info(f"Главное меню отправлено пользователю {vk_id}")
                         continue
 
-                    # Если пользователь только что создан, отправляем логин/пароль
                     if db_user.get('generated_password'):
                         login_msg = (
                             f"👋 Привет, {first_name}!\n\n"
@@ -553,16 +636,14 @@ def main():
                             random_id=0
                         )
                         logger.info(f"Создан новый пользователь: {first_name} {last_name}, логин: {db_user['login']}")
-                    
-                    # Отправляем правила только если не отправляли ранее
+
                     if vk_id not in agreement_sent:
                         logger.info(f"Отправка правил пользователю {vk_id}")
                         send_agreement_rules(vk, vk_id)
                         agreement_sent.add(vk_id)
                     else:
                         logger.info(f"Правила уже отправлены пользователю {vk_id}, ожидаем подтверждения")
-                    
-                    # Пропускаем дальнейшую обработку
+
                     continue
 
                 # Если пользователь согласился, удаляем из множества отправленных
@@ -570,7 +651,7 @@ def main():
                     agreement_sent.remove(vk_id)
                     logger.info(f"Пользователь {vk_id} удален из множества ожидающих")
 
-                # Если пользователь согласился, но у него был generated_password - отправляем логин/пароль
+                # Если у пользователя был сгенерированный пароль — отправляем один раз
                 if db_user.get('generated_password'):
                     login_msg = (
                         f"👋 Привет, {first_name}!\n\n"
@@ -587,17 +668,6 @@ def main():
                     )
                     logger.info(f"Создан новый пользователь: {first_name} {last_name}, логин: {db_user['login']}")
 
-            except Exception as e:
-                logger.error(f"Ошибка получения пользователя: {e}")
-                db_user = get_user_by_vk_id(vk_id)
-                if not db_user:
-                    vk.messages.send(
-                        user_id=vk_id,
-                        message="❌ Произошла ошибка при регистрации. Попробуйте позже.",
-                        random_id=0
-                    )
-                    continue
-
             settings = get_bot_settings()
             site_url = settings.get('site_url', '')
             active_group = get_active_task_group()
@@ -605,6 +675,129 @@ def main():
             # --- Обработка состояния пользователя ---
             if vk_id in user_states:
                 state = user_states[vk_id]
+
+                # ─── РЕГИСТРАЦИЯ НОВОГО ПОЛЬЗОВАТЕЛЯ: ПОДТВЕРЖДЕНИЕ ФИО ───
+                if isinstance(state, dict) and state.get('action', '').startswith('registration'):
+                    action = state['action']
+                    vk_url_cur = f"https://vk.com/id{vk_id}"
+
+                    # 1) Подтверждение данных из профиля VK (кнопки Да/Нет)
+                    if action == 'registration_confirm':
+                        if text == "✅ Да":
+                            db_user = find_or_create_user(vk_id, state['first_name'], state['last_name'], vk_url_cur)
+                            set_user_agreement(db_user['id'])
+                            if vk_id in agreement_sent:
+                                agreement_sent.remove(vk_id)
+                            if db_user.get('generated_password'):
+                                login_msg = (
+                                    f"👋 Привет, {state['first_name']}!\n\n"
+                                    f"Для тебя создан аккаунт на сайте:\n"
+                                    f"🔑 Логин: {db_user['login']}\n"
+                                    f"🔐 Пароль: {db_user['generated_password']}\n\n"
+                                    f"🌐 Перейти на сайт: {site_url}\n\n"
+                                    f"⚠️ Рекомендуем изменить пароль после первого входа!"
+                                )
+                                vk.messages.send(user_id=vk_id, message=login_msg, random_id=0)
+                            vk.messages.send(
+                                user_id=vk_id,
+                                message="✅ Аккаунт успешно зарегистрирован!\nТеперь вам доступны все функции бота.",
+                                random_id=0,
+                                keyboard=create_main_keyboard(active_group, site_url)
+                            )
+                            del user_states[vk_id]
+                            continue
+                        elif text == "❌ Нет":
+                            user_states[vk_id]['action'] = 'registration_enter_last_name'
+                            vk.messages.send(user_id=vk_id, message="Введите Фамилию:", random_id=0)
+                            continue
+                        else:
+                            vk.messages.send(
+                                user_id=vk_id,
+                                message="⚠️ Пожалуйста, используйте кнопки «✅ Да» или «❌ Нет».",
+                                random_id=0
+                            )
+                            continue
+
+                    # 2) Ввод фамилии
+                    elif action == 'registration_enter_last_name':
+                        name = text.strip()
+                        if len(name) < 2 or len(name) > 50:
+                            vk.messages.send(
+                                user_id=vk_id,
+                                message="⚠️ Фамилия должна содержать не менее 2 символов. Попробуйте ещё раз:",
+                                random_id=0
+                            )
+                            continue
+                        user_states[vk_id]['last_name'] = name
+                        user_states[vk_id]['action'] = 'registration_enter_first_name'
+                        vk.messages.send(user_id=vk_id, message="Введите Имя:", random_id=0)
+                        continue
+
+                    # 3) Ввод имени
+                    elif action == 'registration_enter_first_name':
+                        name = text.strip()
+                        if len(name) < 2 or len(name) > 50:
+                            vk.messages.send(
+                                user_id=vk_id,
+                                message="⚠️ Имя должно содержать не менее 2 символов. Попробуйте ещё раз:",
+                                random_id=0
+                            )
+                            continue
+                        user_states[vk_id]['first_name'] = name
+                        user_states[vk_id]['action'] = 'registration_confirm_custom'
+                        keyboard = create_registration_confirm_keyboard()
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message=(
+                                "Ваши данные для регистрации:\n"
+                                f"Фамилия: {user_states[vk_id]['last_name']}\n"
+                                f"Имя: {user_states[vk_id]['first_name']}\n\n"
+                                "Все данные верны?"
+                            ),
+                            random_id=0,
+                            keyboard=keyboard
+                        )
+                        continue
+
+                    # 4) Подтверждение изменённых ФИО (кнопки Да/Нет)
+                    elif action == 'registration_confirm_custom':
+                        if text == "✅ Да":
+                            db_user = find_or_create_user(vk_id, state['first_name'], state['last_name'], vk_url_cur)
+                            set_user_agreement(db_user['id'])
+                            if vk_id in agreement_sent:
+                                agreement_sent.remove(vk_id)
+                            if db_user.get('generated_password'):
+                                login_msg = (
+                                    f"👋 Привет, {state['first_name']}!\n\n"
+                                    f"Для тебя создан аккаунт на сайте:\n"
+                                    f"🔑 Логин: {db_user['login']}\n"
+                                    f"🔐 Пароль: {db_user['generated_password']}\n\n"
+                                    f"🌐 Перейти на сайт: {site_url}\n\n"
+                                    f"⚠️ Рекомендуем изменить пароль после первого входа!"
+                                )
+                                vk.messages.send(user_id=vk_id, message=login_msg, random_id=0)
+                            vk.messages.send(
+                                user_id=vk_id,
+                                message="✅ Аккаунт успешно зарегистрирован!\nТеперь вам доступны все функции бота.",
+                                random_id=0,
+                                keyboard=create_main_keyboard(active_group, site_url)
+                            )
+                            del user_states[vk_id]
+                            continue
+                        elif text == "❌ Нет":
+                            # Начинаем ввод ФИО заново
+                            user_states[vk_id]['action'] = 'registration_enter_last_name'
+                            user_states[vk_id].pop('last_name', None)
+                            user_states[vk_id].pop('first_name', None)
+                            vk.messages.send(user_id=vk_id, message="Введите Фамилию:", random_id=0)
+                            continue
+                        else:
+                            vk.messages.send(
+                                user_id=vk_id,
+                                message="⚠️ Пожалуйста, используйте кнопки «✅ Да» или «❌ Нет».",
+                                random_id=0
+                            )
+                            continue
 
                 # Если пользователь нажал "Назад" в любом состоянии
                 if text in ["🔙 Назад в меню", "🔙 Назад", "🔙 Назад к заявкам"]:
