@@ -688,19 +688,22 @@ def main():
                             set_user_agreement(db_user['id'])
                             if vk_id in agreement_sent:
                                 agreement_sent.remove(vk_id)
+                            # Единое сообщение с данными аккаунта и главным меню
                             if db_user.get('generated_password'):
                                 login_msg = (
-                                    f"👋 Привет, {state['first_name']}!\n\n"
-                                    f"Для тебя создан аккаунт на сайте:\n"
+                                    "✅ Аккаунт успешно зарегистрирован!\n\n"
+                                    f"👤 Фамилия: {db_user['last_name']}\n"
+                                    f"Имя: {db_user['first_name']}\n"
                                     f"🔑 Логин: {db_user['login']}\n"
                                     f"🔐 Пароль: {db_user['generated_password']}\n\n"
-                                    f"🌐 Перейти на сайт: {site_url}\n\n"
-                                    f"⚠️ Рекомендуем изменить пароль после первого входа!"
+                                    "⚠️ Сохраните эти данные для входа на сайт.\n"
+                                    f"🌐 Сайт: {site_url}"
                                 )
-                                vk.messages.send(user_id=vk_id, message=login_msg, random_id=0)
+                            else:
+                                login_msg = "✅ Аккаунт успешно зарегистрирован!\nТеперь вам доступны все функции бота."
                             vk.messages.send(
                                 user_id=vk_id,
-                                message="✅ Аккаунт успешно зарегистрирован!\nТеперь вам доступны все функции бота.",
+                                message=login_msg,
                                 random_id=0,
                                 keyboard=create_main_keyboard(active_group, site_url)
                             )
@@ -766,19 +769,22 @@ def main():
                             set_user_agreement(db_user['id'])
                             if vk_id in agreement_sent:
                                 agreement_sent.remove(vk_id)
+                            # Единое сообщение с данными аккаунта и главным меню
                             if db_user.get('generated_password'):
                                 login_msg = (
-                                    f"👋 Привет, {state['first_name']}!\n\n"
-                                    f"Для тебя создан аккаунт на сайте:\n"
+                                    "✅ Аккаунт успешно зарегистрирован!\n\n"
+                                    f"👤 Фамилия: {db_user['last_name']}\n"
+                                    f"Имя: {db_user['first_name']}\n"
                                     f"🔑 Логин: {db_user['login']}\n"
                                     f"🔐 Пароль: {db_user['generated_password']}\n\n"
-                                    f"🌐 Перейти на сайт: {site_url}\n\n"
-                                    f"⚠️ Рекомендуем изменить пароль после первого входа!"
+                                    "⚠️ Сохраните эти данные для входа на сайт.\n"
+                                    f"🌐 Сайт: {site_url}"
                                 )
-                                vk.messages.send(user_id=vk_id, message=login_msg, random_id=0)
+                            else:
+                                login_msg = "✅ Аккаунт успешно зарегистрирован!\nТеперь вам доступны все функции бота."
                             vk.messages.send(
                                 user_id=vk_id,
-                                message="✅ Аккаунт успешно зарегистрирован!\nТеперь вам доступны все функции бота.",
+                                message=login_msg,
                                 random_id=0,
                                 keyboard=create_main_keyboard(active_group, site_url)
                             )
