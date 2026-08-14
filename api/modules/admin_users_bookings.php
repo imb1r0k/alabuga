@@ -61,17 +61,22 @@ if ($uri === 'admin/users') {
                         jsonError('У вас нет доступа к редактированию этого пользователя', 403);
                     }
         
-                    // При архивации сбрасываем team_id, чтобы избежать FK-ошибки
-                    if ($status === 'archived') {
-                        $teamId = 0;
-                    }
-        
                     $fullName = $lastName . ' ' . $firstName . ($patronymic ? ' ' . $patronymic : '');
                     $teamNameResolved = $teamName;
-                    if ($teamId > 0 && $role !== 'curator') {
+                    // Если команда не выбрана или не существует — пишем NULL, иначе FK-ошибка
+                    if ($teamId <= 0) {
+                        $teamId = null;
+                        $teamNameResolved = null;
+                    } elseif ($role !== 'curator') {
                         $stmt = $pdo->prepare("SELECT name FROM teams WHERE id = ?");
                         $stmt->execute([$teamId]);
-                        $teamNameResolved = $stmt->fetchColumn() ?: $teamName;
+                        $resolved = $stmt->fetchColumn();
+                        if ($resolved) {
+                            $teamNameResolved = $resolved;
+                        } else {
+                            $teamId = null;
+                            $teamNameResolved = null;
+                        }
                     }
         
                     if ($role === 'curator') {

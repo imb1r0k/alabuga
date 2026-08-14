@@ -827,9 +827,13 @@ export const AdminBookingsPage: React.FC = () => {
                   style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                 >
                   <option value={0} disabled>— Выберите корпус —</option>
-                  {manualBuildings.map((b) => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
+                  {manualBuildings.map((b) => {
+                    return (
+                      <option key={b.id} value={b.id} style={{ fontWeight: manualForm.building_id === b.id ? 700 : 400 }}>
+                        {b.name} {b.gender === 'M' ? '♂' : b.gender === 'F' ? '♀' : '♂♀'}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
@@ -843,9 +847,14 @@ export const AdminBookingsPage: React.FC = () => {
                   style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                 >
                   <option value={0} disabled>— Выберите этаж —</option>
-                  {manualFloors.map((f) => (
-                    <option key={f.id} value={f.id}>Этаж {f.floor_number}</option>
-                  ))}
+                  {manualFloors.map((f) => {
+                    const fg = f.gender && f.gender !== 'DEFAULT' ? f.gender : manualBuildings.find((b) => b.id === manualForm.building_id)?.gender;
+                    return (
+                      <option key={f.id} value={f.id}>
+                        Этаж {f.floor_number} {fg === 'M' ? '♂' : fg === 'F' ? '♀' : '♂♀'}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
@@ -859,11 +868,22 @@ export const AdminBookingsPage: React.FC = () => {
                   style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                 >
                   <option value={0} disabled>— Выберите комнату —</option>
-                  {manualRooms.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      №{r.room_number} {r.name ? `(${r.name})` : ''} — вместимость: {r.capacity}
-                    </option>
-                  ))}
+                  {manualRooms.map((r) => {
+                    const occupied = Number(r.occupied) || 0;
+                    const capacity = Number(r.capacity) || 1;
+                    const free = capacity - occupied;
+                    const isFull = free <= 0;
+                    const curFloor = manualFloors.find((f) => f.id === manualForm.floor_id);
+                    const curBuilding = manualBuildings.find((b) => b.id === manualForm.building_id);
+                    const rg = r.gender && r.gender !== 'DEFAULT' ? r.gender
+                      : (curFloor?.gender && curFloor.gender !== 'DEFAULT' ? curFloor.gender
+                      : (curBuilding?.gender && curBuilding.gender !== 'DEFAULT' ? curBuilding.gender : null));
+                    return (
+                      <option key={r.id} value={r.id} disabled={isFull} style={{ color: isFull ? '#94a3b8' : '#0f172a' }}>
+                        №{r.room_number}{r.name ? ` (${r.name})` : ''} — {rg === 'M' ? '♂' : rg === 'F' ? '♀' : '♂♀'} — {isFull ? '❌ ЗАПОЛНЕНА' : `свободно ${free} из ${capacity}`}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 

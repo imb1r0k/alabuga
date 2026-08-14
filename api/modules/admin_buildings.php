@@ -82,7 +82,14 @@ if ($uri === 'admin/rooms') {
     requireStrictAdmin($pdo);
     if ($method === 'GET') {
         $floorId = (int)($_GET['floor_id'] ?? 0);
-        $stmt = $pdo->prepare("SELECT * FROM rooms WHERE floor_id = ? ORDER BY y_pos ASC, x_pos ASC");
+        $stmt = $pdo->prepare("
+            SELECT r.*,
+                   (SELECT COUNT(*) FROM bookings b
+                    WHERE b.room_id = r.id AND b.status IN ('approved','approved_bot','pending')) as occupied
+            FROM rooms r
+            WHERE r.floor_id = ?
+            ORDER BY r.y_pos ASC, r.x_pos ASC
+        ");
         $stmt->execute([$floorId]);
         jsonResponse($stmt->fetchAll());
     }
