@@ -22,6 +22,7 @@ export const HomePage: React.FC = () => {
   // Модальные окна
   const [previewRoom, setPreviewRoom] = useState<any>(null); // Окно предпросмотра жильцов
   const [selectedRoomForBooking, setSelectedRoomForBooking] = useState<any>(null); // Окно непосредственного бронирования
+  const [selectedRoomGender, setSelectedRoomGender] = useState<string>(''); // Эффективный пол выбранной комнаты
 
   const [loadingBuildings, setLoadingBuildings] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -107,6 +108,14 @@ export const HomePage: React.FC = () => {
     setPreviewRoom(room);
     setSelectedBuildingName(building.name);
     setSelectedFloorNumber(floor.floor_number);
+    // Вычисляем эффективный пол комнаты с учётом наследования: комната → этаж → корпус
+    for (const g of [room.gender, floor.gender, building.gender]) {
+      if (g && g !== 'DEFAULT') {
+        setSelectedRoomGender(g);
+        return;
+      }
+    }
+    setSelectedRoomGender('');
   };
 
   // Вызывается при нажатии кнопки "Забронировать место" из окна предпросмотра
@@ -399,6 +408,7 @@ export const HomePage: React.FC = () => {
           room={selectedRoomForBooking}
           buildingName={selectedBuildingName}
           floorNumber={selectedFloorNumber}
+          roomGender={selectedRoomGender}
           onClose={() => setSelectedRoomForBooking(null)}
         />
       )}

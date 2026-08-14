@@ -52,6 +52,20 @@ interface PublicFloorMapProps {
   onRoomSelect: (room: Room, building: Building, floor: Floor) => void;
 }
 
+// Вычисляет итоговый пол с учётом наследования: комната → этаж → корпус.
+// Значение 'DEFAULT' означает «использовать значение родителя».
+const getEffectiveGender = (
+  roomGender?: string,
+  floorGender?: string,
+  buildingGender?: string,
+): string => {
+  for (const g of [roomGender, floorGender, buildingGender]) {
+    if (g && g !== 'DEFAULT') return g;
+  }
+  return 'DEFAULT';
+};
+
+
 const GenderBadge: React.FC<{ gender?: string; size?: number }> = ({ gender = 'MIXED', size = 18 }) => {
   let label = 'С';
   let bg = '#8b5cf6';
@@ -166,7 +180,7 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
       >
         {room && room.room_type === 'room' && (
           <div style={{ position: 'absolute', top: '3px', right: '4px' }}>
-            <GenderBadge gender={room.gender} size={18} />
+            <GenderBadge gender={getEffectiveGender(room.gender, floor?.gender, layout?.building?.gender)} size={18} />
           </div>
         )}
 
