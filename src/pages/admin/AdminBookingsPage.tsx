@@ -7,6 +7,21 @@ import { X, Search, CopyCheck, ChevronLeft, ChevronRight, SlidersHorizontal, Bot
 
 const ITEMS_PER_PAGE = 15;
 
+// Короткая подпись пола: М / Ж / СМЕШ
+const genderShort = (g?: string): string => {
+  if (g === 'M') return 'М';
+  if (g === 'F') return 'Ж';
+  return 'СМЕШ';
+};
+
+// Эффективный пол с учётом наследования: комната → этаж → корпус
+const effectiveGender = (room?: any, floor?: any, building?: any): string => {
+  for (const g of [room?.gender, floor?.gender, building?.gender]) {
+    if (g && g !== 'DEFAULT') return g;
+  }
+  return 'MIXED';
+};
+
 export const AdminBookingsPage: React.FC = () => {
   const [bookings, setBookings] = useState<any[]>([]);
   const [bookingsLoading, setBookingsLoading] = useState(false);
@@ -40,6 +55,12 @@ export const AdminBookingsPage: React.FC = () => {
   });
   const [manualResult, setManualResult] = useState<any>(null);
   const [manualSaving, setManualSaving] = useState(false);
+
+  // Модалка управления бронированием — каскадные списки
+  const [editBuildings, setEditBuildings] = useState<any[]>([]);
+  const [editFloors, setEditFloors] = useState<any[]>([]);
+  const [editRooms, setEditRooms] = useState<any[]>([]);
+  const [editForm, setEditForm] = useState({ building_id: 0, floor_id: 0, room_id: 0 });
 
   // Поиск
   const [searchTerm, setSearchTerm] = useState('');
@@ -215,9 +236,48 @@ export const AdminBookingsPage: React.FC = () => {
     return filteredBookings.slice(start, start + ITEMS_PER_PAGE);
   }, [filteredBookings, currentPage]);
 
-  const handleSelectBooking = (b: any) => {
+  const handleSelectBooking = async (b: any) => {
     setSelectedBooking({ ...b });
     setBookingMsg('');
+    // Загружаем корпуса и подбираем этаж/комнату для каскадного редактора
+    try {
+      const bData = await getAdminBuildings();
+      setEditBuildings(bData || []);
+    } catch (_) { /* ignore */ }
+    // Находим комнату в allAvailableRooms, чтобы понять building_id
+    const roomInfo = allAvailableRooms.find((r) => r.id === b.room_id);
+    const initBuildingId = roomInfo?.building_id || 0;
+    const initFloorId = roomInfo?.floor_id || 0;
+    setEditForm({ building_id: initBuildingId, floor_id: initFloorId, room_id: b.room_id });
+    if (initBuildingId > 0) {
+      try {
+        const fData = await getAdminFloors(initBuildingId);
+        setEditFloors(fData || []);
+      } catch (_) { setEditFloors([]); }
+    }
+    if (initFloorId > 0) {
+      try {
+        const rData = await getAdminRooms(initFloorId);
+        setEditRooms((rData || []).filter((r: any) => r.room_type === 'room' && Number(r.is_technical) === 0));
+      } catch (_) { setEditRooms([]); }
+    }
+  };
+
+  const handleEditBuildingChange = async (buildingId: number) => {
+    setEditForm((p) => ({ ...p, building_id: buildingId, floor_id: 0, room_id: 0 }));
+    setEditRooms([]);
+    try {
+      const data = await getAdminFloors(buildingId);
+      setEditFloors(data || []);
+    } catch (_) { setEditFloors([]); }
+  };
+
+  const handleEditFloorChange = async (floorId: number) => {
+    setEditForm((p) => ({ ...p, floor_id: floorId, room_id: 0 }));
+    try {
+      const data = await getAdminRooms(floorId);
+      setEditRooms((data || []).filter((r: any) => r.room_type === 'room' && Number(r.is_technical) === 0));
+    } catch (_) { setEditRooms([]); }
   };
 
   const handleSaveBooking = async (e: React.FormEvent) => {
@@ -666,18 +726,74 @@ export const AdminBookingsPage: React.FC = () => {
                       />
                     </div>
 
-                    <div className="input-group" style={{ gridColumn: '1 / -1' }}>
-                      <label>Выберите комнату из базы</label>
+                    {/* Корпус */}
+                    <div className="input-group">
+                      <label>Корпус</label>
                       <select
-                        value={selectedBooking.room_id}
-                        onChange={(e) => setSelectedBooking({ ...selectedBooking, room_id: Number(e.target.value) })}
+                        value={editForm.building_id}
+                        onChange={(e) => {
+                          const bid = Number(e.target.value);
+                          handleEditBuildingChange(bid);
+                          setSelectedBooking({ ...selectedBooking, room_id: 0 });
+                        }}
                         style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                       >
-                        {allAvailableRooms.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.building_name} — Этаж {r.floor_number} — Комната {r.room_number} ({r.name || 'Без названия'})
+                        <option value={0} disabled>— Выберите корпус —</option>
+                        {editBuildings.map((b) => (
+                          <option key={b.id} value={b.id}>{b.name} ({genderShort(b.gender)})</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Этаж */}
+                    <div className="input-group">
+                      <label>Этаж</label>
+                      <select
+                        value={editForm.floor_id}
+                        onChange={(e) => {
+                          const fid = Number(e.target.value);
+                          handleEditFloorChange(fid);
+                          setSelectedBooking({ ...selectedBooking, room_id: 0 });
+                        }}
+                        disabled={!editForm.building_id}
+                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                      >
+                        <option value={0} disabled>— Выберите этаж —</option>
+                        {editFloors.map((f) => (
+                          <option key={f.id} value={f.id}>
+                            Этаж {f.floor_number} ({genderShort(effectiveGender(null, f, editBuildings.find((b) => b.id === editForm.building_id)))})
                           </option>
                         ))}
+                      </select>
+                    </div>
+
+                    {/* Комната */}
+                    <div className="input-group" style={{ gridColumn: '1 / -1' }}>
+                      <label>Комната</label>
+                      <select
+                        value={editForm.room_id}
+                        onChange={(e) => {
+                          const rid = Number(e.target.value);
+                          setEditForm((p) => ({ ...p, room_id: rid }));
+                          setSelectedBooking({ ...selectedBooking, room_id: rid });
+                        }}
+                        disabled={!editForm.floor_id}
+                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                      >
+                        <option value={0} disabled>— Выберите комнату —</option>
+                        {editRooms.map((r) => {
+                          const occupied = Number(r.occupied) || 0;
+                          const capacity = Number(r.capacity) || 1;
+                          const free = capacity - occupied;
+                          const isFull = free <= 0;
+                          const curFloor = editFloors.find((f) => f.id === editForm.floor_id);
+                          const curBuilding = editBuildings.find((b) => b.id === editForm.building_id);
+                          return (
+                            <option key={r.id} value={r.id} disabled={isFull} style={{ color: isFull ? '#94a3b8' : '#0f172a' }}>
+                              №{r.room_number}{r.name ? ` (${r.name})` : ''} ({genderShort(effectiveGender(r, curFloor, curBuilding))}) — {isFull ? '❌ ЗАПОЛНЕНА' : `свободно ${free} из ${capacity}`}
+                            </option>
+                          );
+                        })}
                       </select>
                     </div>
 
@@ -830,7 +946,7 @@ export const AdminBookingsPage: React.FC = () => {
                   {manualBuildings.map((b) => {
                     return (
                       <option key={b.id} value={b.id} style={{ fontWeight: manualForm.building_id === b.id ? 700 : 400 }}>
-                        {b.name} {b.gender === 'M' ? '♂' : b.gender === 'F' ? '♀' : '♂♀'}
+                        {b.name} ({genderShort(b.gender)})
                       </option>
                     );
                   })}
@@ -848,10 +964,10 @@ export const AdminBookingsPage: React.FC = () => {
                 >
                   <option value={0} disabled>— Выберите этаж —</option>
                   {manualFloors.map((f) => {
-                    const fg = f.gender && f.gender !== 'DEFAULT' ? f.gender : manualBuildings.find((b) => b.id === manualForm.building_id)?.gender;
+                    const fg = effectiveGender(null, f, manualBuildings.find((b) => b.id === manualForm.building_id));
                     return (
                       <option key={f.id} value={f.id}>
-                        Этаж {f.floor_number} {fg === 'M' ? '♂' : fg === 'F' ? '♀' : '♂♀'}
+                        Этаж {f.floor_number} ({genderShort(fg)})
                       </option>
                     );
                   })}
@@ -875,12 +991,10 @@ export const AdminBookingsPage: React.FC = () => {
                     const isFull = free <= 0;
                     const curFloor = manualFloors.find((f) => f.id === manualForm.floor_id);
                     const curBuilding = manualBuildings.find((b) => b.id === manualForm.building_id);
-                    const rg = r.gender && r.gender !== 'DEFAULT' ? r.gender
-                      : (curFloor?.gender && curFloor.gender !== 'DEFAULT' ? curFloor.gender
-                      : (curBuilding?.gender && curBuilding.gender !== 'DEFAULT' ? curBuilding.gender : null));
+                    const rg = genderShort(effectiveGender(r, curFloor, curBuilding));
                     return (
                       <option key={r.id} value={r.id} disabled={isFull} style={{ color: isFull ? '#94a3b8' : '#0f172a' }}>
-                        №{r.room_number}{r.name ? ` (${r.name})` : ''} — {rg === 'M' ? '♂' : rg === 'F' ? '♀' : '♂♀'} — {isFull ? '❌ ЗАПОЛНЕНА' : `свободно ${free} из ${capacity}`}
+                        №{r.room_number}{r.name ? ` (${r.name})` : ''} ({rg}) — {isFull ? '❌ ЗАПОЛНЕНА' : `свободно ${free} из ${capacity}`}
                       </option>
                     );
                   })}
