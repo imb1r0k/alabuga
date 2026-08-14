@@ -200,7 +200,8 @@ if ($uri === 'admin/room-bookings') {
         SELECT b.*, u.first_name, u.last_name, u.name as user_name, u.phone as user_phone
         FROM bookings b
         JOIN users u ON b.user_id = u.id
-        WHERE b.room_id = ? ORDER BY b.id DESC
+        WHERE b.room_id = ? AND b.status IN ('pending', 'approved', 'approved_bot')
+        ORDER BY b.id DESC
     ");
     $stmt->execute([$roomId]);
     jsonResponse($stmt->fetchAll());

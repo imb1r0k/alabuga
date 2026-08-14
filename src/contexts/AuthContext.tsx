@@ -10,6 +10,7 @@ interface User {
   last_name?: string;
   patronymic?: string;
   phone?: string;
+  status?: string;
 }
 
 interface AuthContextType {
@@ -20,6 +21,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   isAuthenticated: boolean;
+  isArchived: boolean;
   isAdmin: boolean;
   isCurator: boolean;
   isModerator: boolean;
@@ -34,7 +36,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const fetchUser = async () => {
     try {
       const response = await api.get('/user');
-      setUser(response.data);
+      const data = response.data;
+      // Если аккаунт деактивирован — не авторизуем пользователя
+      if (data && data.status === 'archived') {
+        localStorage.removeItem('token');
+        setUser({ ...data, status: 'archived' });
+        return;
+      }
+      setUser(data);
     } catch (error) {
       localStorage.removeItem('token');
       setUser(null);
@@ -103,6 +112,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const roleNormalized = user?.role ? String(user.role).trim().toLowerCase() : '';
+  const isArchived = user?.status === 'archived';
   const isAdmin = roleNormalized === 'admin';
   const isCurator = roleNormalized === 'curator' || roleNormalized === 'moderator' || isAdmin;
 
@@ -115,7 +125,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         register,
         logout,
         refreshUser: fetchUser,
-        isAuthenticated: !!user,
+        isAuthenticated: !!user && !isArchived,
+        isArchived,
         isAdmin,
         isCurator,
         isModerator: isCurator,

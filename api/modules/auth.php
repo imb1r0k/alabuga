@@ -100,7 +100,6 @@ if ($uri === 'login') {
         WHERE (login = :input
            OR phone = :input
            OR (CHAR_LENGTH(:digits) >= 10 AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, '+', ''), ' ', ''), '(', ''), ')', ''), '-', '') LIKE CONCAT('%', :digits2)))
-          AND status = 'active'
         LIMIT 1
     ");
     $stmt->execute([
@@ -109,6 +108,10 @@ if ($uri === 'login') {
         'digits2' => $phoneDigits,
     ]);
     $user = $stmt->fetch();
+
+    if ($user && strtolower(trim($user['status'])) === 'archived') {
+        jsonError('Ваш аккаунт деактивирован. Свяжитесь с администратором.', 403);
+    }
 
     if (!$user || !password_verify($password, $user['password'])) {
         jsonError('Неверный логин/телефон или пароль', 401);
