@@ -2,8 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Skeleton } from '../../components/Skeleton';
 import { AdminLayout } from '../../components/AdminLayout';
 import { useToast } from '../../components/Toast';
-import { getAdminBookings, updateAdminBooking, getAllRooms, getSettings, updateSettings, runAutoApproveBookings } from '../../services/api';
-import { X, Search, CopyCheck, ChevronLeft, ChevronRight, SlidersHorizontal, Bot } from 'lucide-react';
+import { getAdminBookings, updateAdminBooking, getAllRooms, getSettings, updateSettings, runAutoApproveBookings, getAdminUsers, getAdminBuildings, getAdminFloors, getAdminRooms, createManualBooking } from '../../services/api';
+import { X, Search, CopyCheck, ChevronLeft, ChevronRight, SlidersHorizontal, Bot, UserPlus } from 'lucide-react';
 
 const ITEMS_PER_PAGE = 15;
 
@@ -18,6 +18,28 @@ export const AdminBookingsPage: React.FC = () => {
 
   // Автоодобрение ботом
   const [autoApproveEnabled, setAutoApproveEnabled] = useState(false);
+
+  // Ручное бронирование
+  const [showManualBooking, setShowManualBooking] = useState(false);
+  const [manualUsers, setManualUsers] = useState<any[]>([]);
+  const [manualBuildings, setManualBuildings] = useState<any[]>([]);
+  const [manualFloors, setManualFloors] = useState<any[]>([]);
+  const [manualRooms, setManualRooms] = useState<any[]>([]);
+  const [manualForm, setManualForm] = useState({
+    mode: 'existing', // 'existing' | 'new'
+    user_id: 0,
+    first_name: '',
+    last_name: '',
+    patronymic: '',
+    phone: '',
+    building_id: 0,
+    floor_id: 0,
+    room_id: 0,
+    status: 'approved',
+    comment: '',
+  });
+  const [manualResult, setManualResult] = useState<any>(null);
+  const [manualSaving, setManualSaving] = useState(false);
 
   // Поиск
   const [searchTerm, setSearchTerm] = useState('');
@@ -226,6 +248,90 @@ export const AdminBookingsPage: React.FC = () => {
     }
   };
 
+  // ─── Ручное бронирование ──────────────────────────────────────────────────
+
+  const openManualBooking = async () => {
+    setShowManualBooking(true);
+    setManualResult(null);
+    setManualForm({
+      mode: 'existing',
+      user_id: 0,
+      first_name: '',
+      last_name: '',
+      patronymic: '',
+      phone: '',
+      building_id: 0,
+      floor_id: 0,
+      room_id: 0,
+      status: 'approved',
+      comment: '',
+    });
+    setManualFloors([]);
+    setManualRooms([]);
+    try {
+      const [uData, bData] = await Promise.all([getAdminUsers(), getAdminBuildings()]);
+      setManualUsers(uData || []);
+      setManualBuildings(bData || []);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleManualBuildingChange = async (buildingId: number) => {
+    setManualForm((p) => ({ ...p, building_id: buildingId, floor_id: 0, room_id: 0 }));
+    setManualRooms([]);
+    try {
+      const data = await getAdminFloors(buildingId);
+      setManualFloors(data || []);
+    } catch (err) {
+      console.error(err);
+      setManualFloors([]);
+    }
+  };
+
+  const handleManualFloorChange = async (floorId: number) => {
+    setManualForm((p) => ({ ...p, floor_id: floorId, room_id: 0 }));
+    try {
+      const data = await getAdminRooms(floorId);
+      const rooms = (data || []).filter((r: any) => r.room_type === 'room' && Number(r.is_technical) === 0);
+      setManualRooms(rooms);
+    } catch (err) {
+      console.error(err);
+      setManualRooms([]);
+    }
+  };
+
+  const handleCreateManualBooking = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setManualSaving(true);
+    setManualResult(null);
+    try {
+      const payload: any = {
+        room_id: manualForm.room_id,
+        status: manualForm.status,
+        comment: manualForm.comment || null,
+      };
+      if (manualForm.mode === 'existing') {
+        payload.user_id = manualForm.user_id;
+      } else {
+        payload.first_name = manualForm.first_name;
+        payload.last_name = manualForm.last_name;
+        payload.patronymic = manualForm.patronymic;
+        payload.phone = manualForm.phone;
+      }
+      const res = await createManualBooking(payload);
+      setManualResult(res);
+      showToast('Бронирование создано', 'success');
+      loadBookings();
+    } catch (err: any) {
+      const errorText = 'Ошибка: ' + (err.response?.data?.error || err.message);
+      showToast(errorText, 'error');
+      setManualResult({ error: errorText });
+    } finally {
+      setManualSaving(false);
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     if (status === 'approved') return { label: 'Одобрено', bg: '#16a34a' };
     if (status === 'approved_bot') return { label: 'Одобрено ботом', bg: '#0891b2' };
@@ -246,30 +352,40 @@ export const AdminBookingsPage: React.FC = () => {
             </p>
           </div>
 
-          {/* Поиск */}
-          <div style={{ position: 'relative', width: '320px', maxWidth: '100%' }}>
-            <Search size={18} color="#94a3b8" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
-            <input
-              type="text"
-              placeholder="Поиск (ФИО, тел, логин, комната)..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px 12px 8px 36px',
-                borderRadius: '8px',
-                border: '1px solid #cbd5e1',
-                fontSize: '13px',
-              }}
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm('')}
-                style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8' }}
-              >
-                <X size={16} />
-              </button>
-            )}
+          {/* Поиск и ручное бронирование */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <button
+              className="btn btn-primary"
+              onClick={openManualBooking}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', whiteSpace: 'nowrap' }}
+            >
+              <UserPlus size={16} />
+              Заселить вручную
+            </button>
+            <div style={{ position: 'relative', width: '320px', maxWidth: '100%' }}>
+              <Search size={18} color="#94a3b8" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
+              <input
+                type="text"
+                placeholder="Поиск (ФИО, тел, логин, комната)..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px 8px 36px',
+                  borderRadius: '8px',
+                  border: '1px solid #cbd5e1',
+                  fontSize: '13px',
+                }}
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8' }}
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -607,6 +723,183 @@ export const AdminBookingsPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* МОДАЛЬНОЕ ОКНО: ЗАСЕЛИТЬ ВРУЧНУЮ */}
+      {showManualBooking && (
+        <div style={{
+          position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1100, padding: '16px',
+        }}>
+          <div style={{
+            backgroundColor: '#fff', borderRadius: '12px',
+            maxWidth: '700px', width: '100%', maxHeight: '90vh',
+            overflowY: 'auto', boxShadow: '0 10px 25px rgba(0,0,0,0.25)',
+            position: 'relative', padding: '24px',
+          }}>
+            <button
+              onClick={() => setShowManualBooking(false)}
+              style={{ position: 'absolute', top: '16px', right: '16px', border: 'none', background: 'none', cursor: 'pointer', color: '#64748b' }}
+            >
+              <X size={20} />
+            </button>
+
+            <h3 style={{ marginTop: 0, marginBottom: '16px', fontSize: '18px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <UserPlus size={22} color="#0284c7" />
+              Заселить вручную
+            </h3>
+
+            {manualResult?.booking_id && !manualResult?.error && (
+              <div style={{ backgroundColor: '#d4edda', border: '1px solid #c3e6cb', borderRadius: '8px', padding: '12px', marginBottom: '16px', fontSize: '14px' }}>
+                <strong style={{ color: '#155724' }}>✓ Бронирование #{manualResult.booking_id} создано!</strong>
+                <div style={{ marginTop: '6px', color: '#155724' }}>
+                  {manualResult.booking?.building_name} — Этаж {manualResult.booking?.floor_number} — Комната №{manualResult.booking?.room_number}
+                  <br />Статус: {manualResult.booking?.status}
+                </div>
+                {manualResult.new_user && manualResult.user && (
+                  <div style={{ marginTop: '8px', padding: '10px', backgroundColor: '#fff3cd', borderRadius: '6px', color: '#856404', fontSize: '13px' }}>
+                    <strong>Создан новый пользователь:</strong>
+                    <p style={{ margin: '4px 0' }}>Логин: <strong>{manualResult.user.login}</strong></p>
+                    <p style={{ margin: '4px 0' }}>Пароль: <strong>{manualResult.user.password}</strong></p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateManualBooking} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+              {/* Выбор режима */}
+              <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '12px', marginBottom: '8px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: manualForm.mode === 'existing' ? 700 : 400, color: '#334155' }}>
+                  <input type="radio" name="mode" value="existing" checked={manualForm.mode === 'existing'} onChange={() => setManualForm({ ...manualForm, mode: 'existing' })} />
+                  Существующий пользователь
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: manualForm.mode === 'new' ? 700 : 400, color: '#334155' }}>
+                  <input type="radio" name="mode" value="new" checked={manualForm.mode === 'new'} onChange={() => setManualForm({ ...manualForm, mode: 'new' })} />
+                  Новый пользователь
+                </label>
+              </div>
+
+              {manualForm.mode === 'existing' ? (
+                <div className="input-group" style={{ gridColumn: '1 / -1' }}>
+                  <label>Выберите пользователя</label>
+                  <select
+                    value={manualForm.user_id}
+                    onChange={(e) => setManualForm({ ...manualForm, user_id: Number(e.target.value) })}
+                    required
+                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', maxHeight: '200px' }}
+                  >
+                    <option value={0} disabled>— Выберите пользователя —</option>
+                    {manualUsers.filter((u) => u.status !== 'archived').map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.last_name} {u.first_name} (логин: {u.email || u.login}, тел: {u.phone || '-'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <>
+                  <div className="input-group">
+                    <label>Фамилия *</label>
+                    <input type="text" value={manualForm.last_name} onChange={(e) => setManualForm({ ...manualForm, last_name: e.target.value })} required />
+                  </div>
+                  <div className="input-group">
+                    <label>Имя *</label>
+                    <input type="text" value={manualForm.first_name} onChange={(e) => setManualForm({ ...manualForm, first_name: e.target.value })} required />
+                  </div>
+                  <div className="input-group">
+                    <label>Отчество</label>
+                    <input type="text" value={manualForm.patronymic} onChange={(e) => setManualForm({ ...manualForm, patronymic: e.target.value })} />
+                  </div>
+                  <div className="input-group">
+                    <label>Телефон</label>
+                    <input type="text" value={manualForm.phone} onChange={(e) => setManualForm({ ...manualForm, phone: e.target.value })} />
+                  </div>
+                </>
+              )}
+
+              {/* Выбор корпуса, этажа, комнаты */}
+              <div className="input-group">
+                <label>Корпус</label>
+                <select
+                  value={manualForm.building_id}
+                  onChange={(e) => handleManualBuildingChange(Number(e.target.value))}
+                  required
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                >
+                  <option value={0} disabled>— Выберите корпус —</option>
+                  {manualBuildings.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="input-group">
+                <label>Этаж</label>
+                <select
+                  value={manualForm.floor_id}
+                  onChange={(e) => handleManualFloorChange(Number(e.target.value))}
+                  required
+                  disabled={!manualForm.building_id}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                >
+                  <option value={0} disabled>— Выберите этаж —</option>
+                  {manualFloors.map((f) => (
+                    <option key={f.id} value={f.id}>Этаж {f.floor_number}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="input-group" style={{ gridColumn: '1 / -1' }}>
+                <label>Комната</label>
+                <select
+                  value={manualForm.room_id}
+                  onChange={(e) => setManualForm({ ...manualForm, room_id: Number(e.target.value) })}
+                  required
+                  disabled={!manualForm.floor_id}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                >
+                  <option value={0} disabled>— Выберите комнату —</option>
+                  {manualRooms.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      №{r.room_number} {r.name ? `(${r.name})` : ''} — вместимость: {r.capacity}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="input-group">
+                <label>Статус бронирования</label>
+                <select
+                  value={manualForm.status}
+                  onChange={(e) => setManualForm({ ...manualForm, status: e.target.value })}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                >
+                  <option value="pending">Ожидает</option>
+                  <option value="approved">Одобрено</option>
+                  <option value="approved_bot">Одобрено ботом</option>
+                  <option value="rejected">Отклонено</option>
+                  <option value="recalled">Отозвано</option>
+                  <option value="archived">В архиве</option>
+                </select>
+              </div>
+
+              <div className="input-group">
+                <label>Комментарий</label>
+                <input type="text" value={manualForm.comment} onChange={(e) => setManualForm({ ...manualForm, comment: e.target.value })} placeholder="Необязательно" style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }} />
+              </div>
+
+              <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '10px', marginTop: '10px' }}>
+                <button type="submit" className="btn btn-primary flex-1" disabled={manualSaving || manualResult?.booking_id}>
+                  {manualSaving ? 'Создание...' : manualResult?.booking_id ? 'Создано ✓' : 'Создать бронирование'}
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowManualBooking(false)}>
+                  Закрыть
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </AdminLayout>
   );
 };
