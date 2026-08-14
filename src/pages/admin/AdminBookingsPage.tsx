@@ -22,6 +22,11 @@ const effectiveGender = (room?: any, floor?: any, building?: any): string => {
   return 'MIXED';
 };
 
+// Поиск объекта по id с приведением к числу (PDO возвращает id строками,
+// а из select приходят числа — строгое === не сработает)
+const byId = (list: any[], id: any): any =>
+  list.find((x) => Number(x.id) === Number(id));
+
 export const AdminBookingsPage: React.FC = () => {
   const [bookings, setBookings] = useState<any[]>([]);
   const [bookingsLoading, setBookingsLoading] = useState(false);
@@ -245,9 +250,9 @@ export const AdminBookingsPage: React.FC = () => {
       setEditBuildings(bData || []);
     } catch (_) { /* ignore */ }
     // Находим комнату в allAvailableRooms, чтобы понять building_id
-    const roomInfo = allAvailableRooms.find((r) => r.id === b.room_id);
-    const initBuildingId = roomInfo?.building_id || 0;
-    const initFloorId = roomInfo?.floor_id || 0;
+    const roomInfo = byId(allAvailableRooms, b.room_id);
+    const initBuildingId = Number(roomInfo?.building_id) || 0;
+    const initFloorId = Number(roomInfo?.floor_id) || 0;
     setEditForm({ building_id: initBuildingId, floor_id: initFloorId, room_id: b.room_id });
     if (initBuildingId > 0) {
       try {
@@ -740,7 +745,7 @@ export const AdminBookingsPage: React.FC = () => {
                       >
                         <option value={0} disabled>— Выберите корпус —</option>
                         {editBuildings.map((b) => (
-                          <option key={b.id} value={b.id}>{b.name} ({genderShort(b.gender)})</option>
+                          <option key={b.id} value={Number(b.id)}>{b.name} ({genderShort(b.gender)})</option>
                         ))}
                       </select>
                     </div>
@@ -760,8 +765,8 @@ export const AdminBookingsPage: React.FC = () => {
                       >
                         <option value={0} disabled>— Выберите этаж —</option>
                         {editFloors.map((f) => (
-                          <option key={f.id} value={f.id}>
-                            Этаж {f.floor_number} ({genderShort(effectiveGender(null, f, editBuildings.find((b) => b.id === editForm.building_id)))})
+                          <option key={f.id} value={Number(f.id)}>
+                            Этаж {f.floor_number} ({genderShort(effectiveGender(null, f, byId(editBuildings, editForm.building_id)))})
                           </option>
                         ))}
                       </select>
@@ -786,10 +791,10 @@ export const AdminBookingsPage: React.FC = () => {
                           const capacity = Number(r.capacity) || 1;
                           const free = capacity - occupied;
                           const isFull = free <= 0;
-                          const curFloor = editFloors.find((f) => f.id === editForm.floor_id);
-                          const curBuilding = editBuildings.find((b) => b.id === editForm.building_id);
+                          const curFloor = byId(editFloors, editForm.floor_id);
+                          const curBuilding = byId(editBuildings, editForm.building_id);
                           return (
-                            <option key={r.id} value={r.id} disabled={isFull} style={{ color: isFull ? '#94a3b8' : '#0f172a' }}>
+                            <option key={r.id} value={Number(r.id)} disabled={isFull} style={{ color: isFull ? '#94a3b8' : '#0f172a' }}>
                               №{r.room_number}{r.name ? ` (${r.name})` : ''} ({genderShort(effectiveGender(r, curFloor, curBuilding))}) — {isFull ? '❌ ЗАПОЛНЕНА' : `свободно ${free} из ${capacity}`}
                             </option>
                           );
@@ -945,7 +950,7 @@ export const AdminBookingsPage: React.FC = () => {
                   <option value={0} disabled>— Выберите корпус —</option>
                   {manualBuildings.map((b) => {
                     return (
-                      <option key={b.id} value={b.id} style={{ fontWeight: manualForm.building_id === b.id ? 700 : 400 }}>
+                      <option key={b.id} value={Number(b.id)} style={{ fontWeight: manualForm.building_id === b.id ? 700 : 400 }}>
                         {b.name} ({genderShort(b.gender)})
                       </option>
                     );
@@ -964,9 +969,9 @@ export const AdminBookingsPage: React.FC = () => {
                 >
                   <option value={0} disabled>— Выберите этаж —</option>
                   {manualFloors.map((f) => {
-                    const fg = effectiveGender(null, f, manualBuildings.find((b) => b.id === manualForm.building_id));
+                    const fg = effectiveGender(null, f, byId(manualBuildings, manualForm.building_id));
                     return (
-                      <option key={f.id} value={f.id}>
+                      <option key={f.id} value={Number(f.id)}>
                         Этаж {f.floor_number} ({genderShort(fg)})
                       </option>
                     );
@@ -989,11 +994,11 @@ export const AdminBookingsPage: React.FC = () => {
                     const capacity = Number(r.capacity) || 1;
                     const free = capacity - occupied;
                     const isFull = free <= 0;
-                    const curFloor = manualFloors.find((f) => f.id === manualForm.floor_id);
-                    const curBuilding = manualBuildings.find((b) => b.id === manualForm.building_id);
+                    const curFloor = byId(manualFloors, manualForm.floor_id);
+                    const curBuilding = byId(manualBuildings, manualForm.building_id);
                     const rg = genderShort(effectiveGender(r, curFloor, curBuilding));
                     return (
-                      <option key={r.id} value={r.id} disabled={isFull} style={{ color: isFull ? '#94a3b8' : '#0f172a' }}>
+                      <option key={r.id} value={Number(r.id)} disabled={isFull} style={{ color: isFull ? '#94a3b8' : '#0f172a' }}>
                         №{r.room_number}{r.name ? ` (${r.name})` : ''} ({rg}) — {isFull ? '❌ ЗАПОЛНЕНА' : `свободно ${free} из ${capacity}`}
                       </option>
                     );
