@@ -585,6 +585,16 @@ def get_user_request_by_id(request_id, user_id):
         conn.close()
 
 
+def get_request_by_id(request_id):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM vk_bot_requests WHERE id = %s", (request_id,))
+            return cursor.fetchone()
+    finally:
+        conn.close()
+
+
 def get_request_messages(request_id):
     conn = get_db_connection()
     try:
