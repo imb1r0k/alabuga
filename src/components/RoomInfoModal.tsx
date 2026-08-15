@@ -232,10 +232,14 @@ export const RoomInfoModal: React.FC<RoomInfoModalProps> = ({
               alignItems: 'center',
               justifyContent: 'center',
               gap: '8px',
+              opacity: freeSeats <= 0 ? 0.55 : 1,
+              cursor: freeSeats <= 0 ? 'not-allowed' : 'pointer',
+              backgroundColor: freeSeats <= 0 ? '#94a3b8' : undefined,
+              borderColor: freeSeats <= 0 ? '#94a3b8' : undefined,
             }}
           >
             <KeyRound size={18} />
-            {freeSeats > 0 ? 'Забронировать место' : 'Мест нет'}
+            {freeSeats > 0 ? 'Забронировать место' : 'Все места заняты'}
           </button>
           <button
             onClick={onClose}
