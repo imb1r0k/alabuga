@@ -17,6 +17,11 @@ try:
 except ImportError:
     bcrypt = None
 
+try:
+    from dbutils.pooled_db import PooledDB
+except ImportError:
+    PooledDB = None
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -24,18 +29,55 @@ UPLOAD_DIR = 'uploads/vk_bot/'
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
 _db_initialized = False
+_pool = None
+
+def init_pool():
+    global _pool
+    if PooledDB is not None:
+        try:
+            _pool = PooledDB(
+                creator=pymysql,
+                maxconnections=10,
+                mincached=2,
+                maxcached=5,
+                maxshared=3,
+                blocking=True,
+                maxusage=None,
+                setsession=[],
+                host=config.DB_HOST,
+                port=config.DB_PORT,
+                user=config.DB_USER,
+                password=config.DB_PASSWORD,
+                database=config.DB_NAME,
+                charset='utf8mb4',
+                cursorclass=DictCursor,
+                autocommit=True,
+                connect_timeout=4,
+                read_timeout=10,
+                write_timeout=10
+            )
+            logger.info("✅ Пул постоянных соединений к БД инициализирован!")
+        except Exception as e:
+            logger.error(f"Не удалось инициализировать PooledDB: {e}")
+            _pool = None
+
+init_pool()
 
 def get_db_connection():
-    """Создает подключение к базе данных с автореконнектом и fallback'ом"""
-    global _db_initialized
+    """Получает соединение из пула или создает прямое"""
+    global _db_initialized, _pool
     
-    hosts_to_try = [config.DB_HOST]
-    if config.DB_HOST not in ['localhost', '127.0.0.1']:
-        hosts_to_try.extend(['VH310.spaceweb.ru', 'localhost', '127.0.0.1'])
-    else:
-        hosts_to_try.extend(['127.0.0.1', 'localhost'])
-    
-    # Убираем дубликаты сохраняя порядок
+    if _pool:
+        try:
+            conn = _pool.connection()
+            if not _db_initialized:
+                ensure_schema(conn)
+                _db_initialized = True
+            return conn
+        except Exception as e:
+            logger.warning(f"Ошибка получения соединения из пула: {e}, пробуем создать напрямую")
+
+    hosts_to_try = [config.DB_HOST, '127.0.0.1', 'localhost']
     seen = set()
     unique_hosts = [h for h in hosts_to_try if not (h in seen or seen.add(h))]
     
@@ -53,7 +95,7 @@ def get_db_connection():
                 charset='utf8mb4',
                 cursorclass=DictCursor,
                 autocommit=True,
-                connect_timeout=5,
+                connect_timeout=3,
                 read_timeout=10,
                 write_timeout=10
             )
@@ -71,8 +113,8 @@ def get_db_connection():
             ensure_schema(conn)
             _db_initialized = True
         except Exception as e:
-            logger.warning(f"⚠️ Ошибка при инициализации схемы (продолжаем работу): {e}")
-            _db_initialized = True
+            logger.warning(f"⚠️ Ошибка при инициализации схемы: {e}")
+        _db_initialized = True
         
     return conn
 
@@ -184,7 +226,6 @@ def ensure_schema(conn):
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
             """)
 
-            # Добавляем колонки в таблицу users при их отсутствии
             columns_to_add = [
                 ("vk_id", "BIGINT NULL"),
                 ("vk_url", "VARCHAR(255) NULL"),
