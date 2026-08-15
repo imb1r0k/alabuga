@@ -29,7 +29,12 @@ def get_db_connection():
     """Создает подключение к базе данных с автореконнектом и fallback'ом"""
     global _db_initialized
     
-    hosts_to_try = [config.DB_HOST, '127.0.0.1', 'localhost']
+    hosts_to_try = [config.DB_HOST]
+    if config.DB_HOST not in ['localhost', '127.0.0.1']:
+        hosts_to_try.extend(['VH310.spaceweb.ru', 'localhost', '127.0.0.1'])
+    else:
+        hosts_to_try.extend(['127.0.0.1', 'localhost'])
+    
     # Убираем дубликаты сохраняя порядок
     seen = set()
     unique_hosts = [h for h in hosts_to_try if not (h in seen or seen.add(h))]
@@ -48,7 +53,7 @@ def get_db_connection():
                 charset='utf8mb4',
                 cursorclass=DictCursor,
                 autocommit=True,
-                connect_timeout=3,
+                connect_timeout=5,
                 read_timeout=10,
                 write_timeout=10
             )
