@@ -3,7 +3,6 @@ from pymysql.cursors import DictCursor
 import config
 import logging
 import re
-import bcrypt
 import random
 import string
 import os
@@ -11,16 +10,24 @@ import json
 from urllib.parse import urlparse
 from datetime import datetime
 
+# Безопасный импорт bcrypt с фоллбеком
+try:
+    import bcrypt
+except ImportError:
+    bcrypt = None
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Конфигурация загрузки файлов
 UPLOAD_DIR = 'uploads/vk_bot/'
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
+_db_initialized = False
+
 def get_db_connection():
-    """Создает быстрое подключение к базе данных"""
-    return pymysql.connect(
+    """Создает подключение к базе данных с автореконнектом"""
+    global _db_initialized
+    conn = pymysql.connect(
         host=config.DB_HOST,
         port=config.DB_PORT,
         user=config.DB_USER,
@@ -33,6 +40,140 @@ def get_db_connection():
         read_timeout=10,
         write_timeout=10
     )
+    
+    if not _db_initialized:
+        ensure_schema(conn)
+        _db_initialized = True
+        
+    return conn
+
+
+def ensure_schema(conn):
+    """Проверяет и создает необходимые таблицы и колонки при первом подключении"""
+    try:
+        with conn.cursor() as cursor:
+            # Создаем таблицы если их нет
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS vk_bot_settings (
+                    `key` VARCHAR(64) PRIMARY KEY,
+                    `value` TEXT NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS vk_bot_task_groups (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    title VARCHAR(255) NOT NULL,
+                    start_date DATE NOT NULL,
+                    end_date DATE NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS vk_bot_tasks (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    group_id INT NOT NULL,
+                    title VARCHAR(255) NOT NULL,
+                    description TEXT NOT NULL,
+                    difficulty ENUM('easy', 'medium', 'hard') NOT NULL DEFAULT 'easy',
+                    points INT NOT NULL DEFAULT 10,
+                    task_type ENUM('repost', 'post', 'other') NOT NULL DEFAULT 'other',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS vk_bot_reports (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    task_id INT NOT NULL,
+                    submission_text TEXT NOT NULL,
+                    has_attachments TINYINT(1) NOT NULL DEFAULT 0,
+                    status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
+                    reject_reason VARCHAR(255) DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS vk_bot_tickets (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    group_id INT NOT NULL,
+                    ticket_number VARCHAR(64) UNIQUE NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS vk_bot_notifications (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    report_id INT NULL,
+                    message TEXT NOT NULL,
+                    is_sent TINYINT(1) NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    sent_at TIMESTAMP NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS vk_bot_report_media (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    report_id INT NOT NULL,
+                    file_url VARCHAR(512) NOT NULL,
+                    file_type ENUM('image', 'file') NOT NULL DEFAULT 'image',
+                    original_name VARCHAR(255) NOT NULL,
+                    file_size INT DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS vk_bot_requests (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    category ENUM('site', 'bot', 'housing') NOT NULL DEFAULT 'site',
+                    subject VARCHAR(255) NOT NULL,
+                    description TEXT NOT NULL,
+                    status ENUM('open', 'in_progress', 'resolved', 'rejected') NOT NULL DEFAULT 'open',
+                    resolved_by INT NULL,
+                    resolution_text TEXT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS vk_bot_request_messages (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    request_id INT NOT NULL,
+                    user_id INT NOT NULL,
+                    message TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """)
+
+            # Добавляем колонки в таблицу users при их отсутствии
+            columns_to_add = [
+                ("vk_id", "BIGINT NULL"),
+                ("vk_url", "VARCHAR(255) NULL"),
+                ("rating", "INT NOT NULL DEFAULT 0"),
+                ("completed_tasks", "INT NOT NULL DEFAULT 0"),
+                ("bot_registered", "TINYINT(1) NOT NULL DEFAULT 0"),
+                ("agreement_accepted_at", "DATETIME NULL"),
+                ("social_vk", "VARCHAR(255) NULL")
+            ]
+            for col_name, col_type in columns_to_add:
+                try:
+                    cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type};")
+                except Exception:
+                    pass  # Колонка уже существует
+
+    except Exception as e:
+        logger.warning(f"Замечание при проверке схемы БД: {e}")
 
 
 def get_bot_settings():
@@ -52,17 +193,20 @@ def get_bot_settings():
 
 def hash_password(password):
     """Хеширование пароля совместимое с PHP password_hash (bcrypt)"""
-    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=8)).decode('utf-8')
+    if bcrypt:
+        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=8)).decode('utf-8')
+    import hashlib
+    # Резервный вариант, если bcrypt не установлен
+    salt = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+    return '$2y$08$' + hashlib.sha256((password + salt).encode('utf-8')).hexdigest()[:53]
 
 
 def generate_password(length=10):
-    """Генерирует случайный пароль"""
     chars = string.ascii_letters + string.digits
     return ''.join(random.choices(chars, k=length))
 
 
 def generate_login(first_name, last_name):
-    """Генерирует логин на основе имени и фамилии"""
     base_login = re.sub(r'[^a-zA-Zа-яА-Я0-9]', '', f"{last_name.lower()}{first_name.lower()}")
     if len(base_login) < 3:
         base_login = f"user{random.randint(100, 999)}"
@@ -78,18 +222,15 @@ def generate_login(first_name, last_name):
 
 
 def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
-    """Находит или создает пользователя в таблице users"""
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            # 1. Проверяем по VK ID
             if vk_id:
                 cursor.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
                 user = cursor.fetchone()
                 if user:
                     return user
 
-            # 2. Проверяем по VK URL
             if vk_url:
                 cursor.execute("SELECT * FROM users WHERE vk_url = %s", (vk_url,))
                 user = cursor.fetchone()
@@ -98,7 +239,6 @@ def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
                         cursor.execute("UPDATE users SET vk_id = %s WHERE id = %s", (vk_id, user['id']))
                     return user
 
-            # 3. Создаем нового пользователя
             login = generate_login(first_name, last_name)
             password = generate_password()
             hashed_password = hash_password(password)
