@@ -7,6 +7,7 @@ import random
 import string
 import os
 import json
+import time
 from urllib.parse import urlparse
 from datetime import datetime
 
@@ -16,7 +17,7 @@ try:
 except ImportError:
     bcrypt = None
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 UPLOAD_DIR = 'uploads/vk_bot/'
@@ -25,25 +26,48 @@ MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 _db_initialized = False
 
 def get_db_connection():
-    """Создает подключение к базе данных с автореконнектом"""
+    """Создает подключение к базе данных с автореконнектом и fallback'ом"""
     global _db_initialized
-    conn = pymysql.connect(
-        host=config.DB_HOST,
-        port=config.DB_PORT,
-        user=config.DB_USER,
-        password=config.DB_PASSWORD,
-        database=config.DB_NAME,
-        charset='utf8mb4',
-        cursorclass=DictCursor,
-        autocommit=True,
-        connect_timeout=5,
-        read_timeout=10,
-        write_timeout=10
-    )
     
+    hosts_to_try = [config.DB_HOST, '127.0.0.1', 'localhost']
+    # Убираем дубликаты сохраняя порядок
+    seen = set()
+    unique_hosts = [h for h in hosts_to_try if not (h in seen or seen.add(h))]
+    
+    last_error = None
+    conn = None
+
+    for host in unique_hosts:
+        try:
+            conn = pymysql.connect(
+                host=host,
+                port=config.DB_PORT,
+                user=config.DB_USER,
+                password=config.DB_PASSWORD,
+                database=config.DB_NAME,
+                charset='utf8mb4',
+                cursorclass=DictCursor,
+                autocommit=True,
+                connect_timeout=3,
+                read_timeout=10,
+                write_timeout=10
+            )
+            break
+        except Exception as e:
+            last_error = e
+            continue
+
+    if not conn:
+        logger.error(f"❌ Не удалось подключиться к БД: {last_error}")
+        raise last_error
+
     if not _db_initialized:
-        ensure_schema(conn)
-        _db_initialized = True
+        try:
+            ensure_schema(conn)
+            _db_initialized = True
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка при инициализации схемы (продолжаем работу): {e}")
+            _db_initialized = True
         
     return conn
 
@@ -52,7 +76,6 @@ def ensure_schema(conn):
     """Проверяет и создает необходимые таблицы и колонки при первом подключении"""
     try:
         with conn.cursor() as cursor:
-            # Создаем таблицы если их нет
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS vk_bot_settings (
                     `key` VARCHAR(64) PRIMARY KEY,
@@ -170,7 +193,7 @@ def ensure_schema(conn):
                 try:
                     cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type};")
                 except Exception:
-                    pass  # Колонка уже существует
+                    pass
 
     except Exception as e:
         logger.warning(f"Замечание при проверке схемы БД: {e}")
@@ -178,8 +201,8 @@ def ensure_schema(conn):
 
 def get_bot_settings():
     """Получает настройки бота из таблицы vk_bot_settings"""
-    conn = get_db_connection()
     try:
+        conn = get_db_connection()
         with conn.cursor() as cursor:
             cursor.execute("SELECT `key`, `value` FROM vk_bot_settings")
             rows = cursor.fetchall()
@@ -188,7 +211,10 @@ def get_bot_settings():
         logger.error(f"Ошибка получения настроек бота: {e}")
         return {}
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def hash_password(password):
@@ -196,7 +222,6 @@ def hash_password(password):
     if bcrypt:
         return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=8)).decode('utf-8')
     import hashlib
-    # Резервный вариант, если bcrypt не установлен
     salt = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
     return '$2y$08$' + hashlib.sha256((password + salt).encode('utf-8')).hexdigest()[:53]
 
