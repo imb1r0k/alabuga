@@ -1,12 +1,15 @@
+import sys
 import time
-import vk_api
-from vk_api.longpoll import VkLongPoll, VkEventType
-from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 import threading
 import logging
 import re
 import os
 from concurrent.futures import ThreadPoolExecutor
+
+import vk_api
+from vk_api.longpoll import VkLongPoll, VkEventType
+from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
+from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
 from database import (
     get_bot_settings,
@@ -37,7 +40,12 @@ from database import (
     find_existing_user,
 )
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Вывод логов без буферизации для systemd
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 logger = logging.getLogger(__name__)
 
 user_states = {}
@@ -45,17 +53,14 @@ UPLOAD_DIR = 'uploads/vk_bot/'
 sent_notifications = {}
 agreement_sent = set()
 
-# ============ Кэширование ============
 _cache_lock = threading.Lock()
 _cached_settings = {}
 _cached_active_group = None
 _cache_updated = 0
-CACHE_TTL = 30  # секунд
+CACHE_TTL = 20
 
-# Кэш пользователей в памяти по vk_id для мгновенного ответа
 _user_cache = {}
 _user_cache_lock = threading.Lock()
-
 user_states_lock = threading.Lock()
 agreement_sent_lock = threading.Lock()
 
@@ -85,12 +90,6 @@ def set_cached_user(vk_id, user):
     with _user_cache_lock:
         _user_cache[vk_id] = user
 
-def invalidate_cached_user(vk_id):
-    with _user_cache_lock:
-        _user_cache.pop(vk_id, None)
-
-# =====================================================
-
 def send_notification_worker(vk):
     """Фоновый поток для отправки уведомлений"""
     while True:
@@ -108,15 +107,11 @@ def send_notification_worker(vk):
                             mark_notification_sent(notif['id'])
                         else:
                             mark_notification_sent(notif['id'])
-                        time.sleep(0.1)
-                    except vk_api.exceptions.ApiError as e:
-                        logger.error(f"VK API ошибка при отправке уведомления: {e}")
-                        if 'message' in str(e) and ('blocked' in str(e) or 'disabled' in str(e)):
-                            mark_notification_sent(notif['id'])
+                        time.sleep(0.05)
                     except Exception as e:
-                        logger.error(f"Ошибка отправки уведомления: {e}")
-            else:
-                time.sleep(5)
+                        logger.error(f"Ошибка отправки уведомления #{notif.get('id')}: {e}")
+                        mark_notification_sent(notif['id'])
+            time.sleep(4)
         except Exception as e:
             logger.error(f"Ошибка в потоке уведомлений: {e}")
             time.sleep(5)
@@ -125,7 +120,6 @@ def send_notification_worker(vk):
 def check_request_messages_worker(vk):
     """Фоновый поток для проверки новых сообщений в заявках"""
     global sent_notifications
-    
     while True:
         try:
             requests = get_all_requests_for_admin('open') + get_all_requests_for_admin('in_progress')
@@ -158,14 +152,14 @@ def check_request_messages_worker(vk):
                     )
                     sent_notifications[msg_key] = True
                 except Exception as e:
-                    logger.error(f"Ошибка отправки сообщения в заявке #{request_id}: {e}")
-                time.sleep(0.1)
+                    logger.error(f"Ошибка отправки сообщения заявки #{request_id}: {e}")
+                time.sleep(0.05)
             
             if len(sent_notifications) > 100:
                 sent_notifications = dict(list(sent_notifications.items())[-50:])
         except Exception as e:
             logger.error(f"Ошибка в потоке проверки заявок: {e}")
-        time.sleep(10)
+        time.sleep(8)
 
 
 def create_main_keyboard(active_group, site_url=''):
@@ -311,25 +305,6 @@ def get_task_from_button(text, tasks):
     return None
 
 
-def get_status_label(status):
-    labels = {
-        'open': '🟡 Открыта',
-        'in_progress': '🔵 В работе',
-        'resolved': '✅ Решена',
-        'rejected': '❌ Отклонена'
-    }
-    return labels.get(status, status)
-
-
-def get_category_label(category):
-    labels = {
-        'site': '🌐 Сайт',
-        'bot': '🤖 Бот ВК',
-        'housing': '🏠 Жильё'
-    }
-    return labels.get(category, category)
-
-
 def format_request_message(request, messages):
     status_emoji = {'open': '🟡', 'in_progress': '🔵', 'resolved': '✅', 'rejected': '❌'}
     status_text = {'open': 'Открыта', 'in_progress': 'В работе', 'resolved': 'Решена', 'rejected': 'Отклонена'}
@@ -394,35 +369,11 @@ def send_agreement_rules(vk, user_id):
     )
 
 
-def process_message(event, vk, vk_session):
-    """Быстрая обработка сообщения с замером времени"""
+def handle_incoming_message(vk_id, text, attachments_list, vk, vk_session):
     t_start = time.time()
     try:
-        vk_id = event.user_id
-        text = event.text.strip()
-        logger.info(f"📩 [VK ID {vk_id}] Получено сообщение: {text[:40]}")
+        logger.info(f"📩 [VK ID {vk_id}] Получено: '{text[:30]}'")
 
-        attachments = {}
-        if getattr(event, 'attachments', None):
-            try:
-                message_data = vk.messages.getById(message_ids=event.message_id)
-                if message_data and 'items' in message_data and len(message_data['items']) > 0:
-                    msg_attachments = message_data['items'][0].get('attachments', [])
-                    for i, att in enumerate(msg_attachments):
-                        att_type = att.get('type')
-                        att_data = att.get(att_type, {})
-                        attachments[f'attach{i+1}'] = {
-                            'type': att_type,
-                            'id': att_data.get('id'),
-                            'owner_id': att_data.get('owner_id'),
-                            'access_key': att_data.get('access_key', ''),
-                            'data': att_data
-                        }
-                        attachments[f'attach{i+1}_type'] = att_type
-            except Exception as e:
-                logger.error(f"Ошибка получения вложений: {e}")
-
-        # Проверяем пользователя в памяти / базе
         db_user = get_cached_user(vk_id)
         if not db_user:
             db_user = find_existing_user(vk_id, f"https://vk.com/id{vk_id}")
@@ -433,7 +384,7 @@ def process_message(event, vk, vk_session):
         site_url = settings.get('site_url', '')
         active_group = get_active_group_cached()
 
-        # Новый пользователь (еще нет в базе)
+        # Новый пользователь
         if not db_user:
             with user_states_lock:
                 state = user_states.get(vk_id)
@@ -468,7 +419,7 @@ def process_message(event, vk, vk_session):
                         random_id=0,
                         keyboard=create_registration_confirm_keyboard()
                     )
-                    logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
+                    logger.info(f"⚡ [VK ID {vk_id}] Ответ за {time.time() - t_start:.2f} с")
                     return
                 else:
                     with agreement_sent_lock:
@@ -481,10 +432,9 @@ def process_message(event, vk, vk_session):
                                 message="⚠️ Для продолжения нажмите кнопку «Подтверждаю» в сообщении с правилами.",
                                 random_id=0
                             )
-                    logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
+                    logger.info(f"⚡ [VK ID {vk_id}] Ответ за {time.time() - t_start:.2f} с")
                     return
         else:
-            # Пользователь найден, проверяем согласие с правилами
             if not check_user_agreement(db_user['id']):
                 if text == "✅ Подтверждаю":
                     set_user_agreement(db_user['id'])
@@ -496,7 +446,7 @@ def process_message(event, vk, vk_session):
                         random_id=0,
                         keyboard=create_main_keyboard(active_group, site_url)
                     )
-                    logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
+                    logger.info(f"⚡ [VK ID {vk_id}] Ответ за {time.time() - t_start:.2f} с")
                     return
 
                 with agreement_sent_lock:
@@ -509,13 +459,13 @@ def process_message(event, vk, vk_session):
                             message="⚠️ Для продолжения нажмите кнопку «Подтверждаю» в сообщении с правилами.",
                             random_id=0
                         )
-                logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
+                logger.info(f"⚡ [VK ID {vk_id}] Ответ за {time.time() - t_start:.2f} с")
                 return
 
         with user_states_lock:
             state = user_states.get(vk_id)
 
-        # --- Обработка регистрации ---
+        # Регистрация
         if isinstance(state, dict) and state.get('action', '').startswith('registration'):
             action = state['action']
             vk_url_cur = f"https://vk.com/id{vk_id}"
@@ -544,13 +494,12 @@ def process_message(event, vk, vk_session):
                         login_msg = "✅ Аккаунт успешно зарегистрирован!\nТеперь вам доступны все функции бота."
 
                     vk.messages.send(user_id=vk_id, message=login_msg, random_id=0, keyboard=create_main_keyboard(active_group, site_url))
-                    logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
+                    logger.info(f"⚡ [VK ID {vk_id}] Ответ за {time.time() - t_start:.2f} с")
                     return
                 elif text == "❌ Нет":
                     with user_states_lock:
                         user_states[vk_id]['action'] = 'registration_enter_last_name'
                     vk.messages.send(user_id=vk_id, message="Введите вашу настоящую Фамилию:", random_id=0)
-                    logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
                     return
 
             elif action == 'registration_enter_last_name':
@@ -562,7 +511,6 @@ def process_message(event, vk, vk_session):
                     user_states[vk_id]['last_name'] = name
                     user_states[vk_id]['action'] = 'registration_enter_first_name'
                 vk.messages.send(user_id=vk_id, message="Введите ваше Имя:", random_id=0)
-                logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
                 return
 
             elif action == 'registration_enter_first_name':
@@ -573,7 +521,6 @@ def process_message(event, vk, vk_session):
                 with user_states_lock:
                     user_states[vk_id]['first_name'] = name
                     user_states[vk_id]['action'] = 'registration_confirm_custom'
-                keyboard = create_registration_confirm_keyboard()
                 vk.messages.send(
                     user_id=vk_id,
                     message=(
@@ -583,9 +530,8 @@ def process_message(event, vk, vk_session):
                         "Все данные верны?"
                     ),
                     random_id=0,
-                    keyboard=keyboard
+                    keyboard=create_registration_confirm_keyboard()
                 )
-                logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
                 return
 
             elif action == 'registration_confirm_custom':
@@ -612,21 +558,18 @@ def process_message(event, vk, vk_session):
                         login_msg = "✅ Аккаунт успешно зарегистрирован!\nТеперь вам доступны все функции бота."
 
                     vk.messages.send(user_id=vk_id, message=login_msg, random_id=0, keyboard=create_main_keyboard(active_group, site_url))
-                    logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
                     return
                 elif text == "❌ Нет":
                     with user_states_lock:
                         user_states[vk_id]['action'] = 'registration_enter_last_name'
                     vk.messages.send(user_id=vk_id, message="Введите Фамилию:", random_id=0)
-                    logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
                     return
 
-        # Кнопка возврата назад
+        # Назад
         if text in ["🔙 Назад в меню", "🔙 Назад", "🔙 Назад к заявкам"]:
             with user_states_lock:
                 user_states.pop(vk_id, None)
             vk.messages.send(user_id=vk_id, message="🔙 Возврат в главное меню.", random_id=0, keyboard=create_main_keyboard(active_group, site_url))
-            logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
             return
 
         # Чат по заявке
@@ -634,7 +577,6 @@ def process_message(event, vk, vk_session):
             request_id = state.get('request_id')
             if text == "✏️ Написать сообщение":
                 vk.messages.send(user_id=vk_id, message="✏️ Напишите ваше сообщение:", random_id=0)
-                logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
                 return
             elif text == "🔄 Обновить":
                 if request_id:
@@ -642,7 +584,6 @@ def process_message(event, vk, vk_session):
                     if request:
                         messages = get_request_messages(request_id)
                         vk.messages.send(user_id=vk_id, message=format_request_message(request, messages), random_id=0, keyboard=create_request_chat_keyboard(request_id))
-                logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
                 return
             elif request_id and text not in ["✏️ Написать сообщение", "🔄 Обновить", "🔙 Назад к заявкам"]:
                 add_request_message(request_id, db_user['id'], text)
@@ -650,7 +591,6 @@ def process_message(event, vk, vk_session):
                 if request:
                     messages = get_request_messages(request_id)
                     vk.messages.send(user_id=vk_id, message=format_request_message(request, messages), random_id=0, keyboard=create_request_chat_keyboard(request_id))
-                logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
                 return
 
         # Создание заявки
@@ -661,7 +601,6 @@ def process_message(event, vk, vk_session):
                     user_states[vk_id]['subject'] = text
                     user_states[vk_id]['step'] = 'description'
                 vk.messages.send(user_id=vk_id, message="📝 Теперь опишите проблему подробно:", random_id=0)
-                logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
                 return
             elif step == 'description':
                 category = state.get('category', 'other')
@@ -672,14 +611,10 @@ def process_message(event, vk, vk_session):
                     user_states.pop(vk_id, None)
                 vk.messages.send(
                     user_id=vk_id,
-                    message=f"✅ Ваша заявка #{request_id} успешно создана!\n"
-                            f"📋 Категория: {get_category_label(category)}\n"
-                            f"📝 Тема: {subject}\n\n"
-                            f"Администратор рассмотрит её в ближайшее время.",
+                    message=f"✅ Ваша заявка #{request_id} успешно создана!\n📝 Тема: {subject}\n\nАдминистратор рассмотрит её в ближайшее время.",
                     random_id=0,
                     keyboard=create_main_keyboard(active_group, site_url)
                 )
-                logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
                 return
 
         # Отправка отчета по заданию
@@ -688,9 +623,9 @@ def process_message(event, vk, vk_session):
             saved_files = []
             attachment_text = ""
 
-            if attachments:
+            if attachments_list:
                 try:
-                    saved_files, attachment_text = process_vk_attachments(attachments, vk_session)
+                    saved_files, attachment_text = process_vk_attachments(attachments_list, vk_session)
                     if attachment_text:
                         text = f"{text}\n\n📎 Прикрепленные файлы:\n{attachment_text}" if text else f"📎 Прикрепленные файлы:\n{attachment_text}"
                 except Exception as e:
@@ -722,10 +657,10 @@ def process_message(event, vk, vk_session):
                 keyboard = create_main_keyboard(active_group, site_url)
 
             vk.messages.send(user_id=vk_id, message=response_msg, random_id=0, keyboard=keyboard)
-            logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
+            logger.info(f"⚡ [VK ID {vk_id}] Ответ за {time.time() - t_start:.2f} с")
             return
 
-        # --- Обработка команд меню ---
+        # Команды меню
         if text in ["📋 Задания", "/start", "Начать", "Старт"]:
             if not active_group:
                 vk.messages.send(user_id=vk_id, message="📢 В данный момент нет активных заданий.\n\nСледите за обновлениями!", random_id=0, keyboard=create_main_keyboard(active_group, site_url))
@@ -735,7 +670,6 @@ def process_message(event, vk, vk_session):
                 welcome += f"\n\n⏰ Задания действуют до: {active_group['end_date']}"
                 welcome += "\n📎 Для подтверждения прикрепляйте фото, файлы или ссылки!"
                 vk.messages.send(user_id=vk_id, message=welcome, random_id=0, keyboard=build_tasks_keyboard(tasks, db_user['id']))
-            logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
             return
 
         elif text == "👤 Мой профиль":
@@ -761,7 +695,6 @@ def process_message(event, vk, vk_session):
                 msg += f"\n\n🌐 {site_url}"
 
             vk.messages.send(user_id=vk_id, message=msg, random_id=0, keyboard=create_main_keyboard(active_group, site_url))
-            logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
             return
 
         elif text == "📋 Заявки":
@@ -770,14 +703,12 @@ def process_message(event, vk, vk_session):
                 vk.messages.send(user_id=vk_id, message="📋 У вас пока нет заявок.\n\n➕ Создайте новую заявку с помощью кнопки ниже.", random_id=0, keyboard=create_requests_keyboard([]))
             else:
                 vk.messages.send(user_id=vk_id, message="📋 Ваши заявки\n\nНажмите на заявку для просмотра и общения:", random_id=0, keyboard=create_requests_keyboard(requests))
-            logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
             return
 
         elif text == "➕ Создать заявку":
             with user_states_lock:
                 user_states[vk_id] = {'action': 'create_request', 'step': 'category'}
             vk.messages.send(user_id=vk_id, message="📋 Выберите категорию проблемы:", random_id=0, keyboard=create_category_keyboard())
-            logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
             return
 
         elif text in ["🌐 Сайт", "🤖 Бот ВК", "🏠 Жильё"]:
@@ -791,12 +722,10 @@ def process_message(event, vk, vk_session):
                 vk.messages.send(user_id=vk_id, message="📝 Опишите суть проблемы кратко (одной строкой):", random_id=0)
             else:
                 vk.messages.send(user_id=vk_id, message="🤖 Воспользуйтесь кнопками меню:", random_id=0, keyboard=create_main_keyboard(active_group, site_url))
-            logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
             return
 
         elif text == "🌐 Личный кабинет" and site_url:
             vk.messages.send(user_id=vk_id, message=f"🌐 Перейдите в личный кабинет по ссылке:\n{site_url}", random_id=0, keyboard=create_main_keyboard(active_group, site_url))
-            logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
             return
 
         # Нажатие на заявку
@@ -810,7 +739,6 @@ def process_message(event, vk, vk_session):
                     with user_states_lock:
                         user_states[vk_id] = {'action': 'request_chat', 'request_id': request_id}
                     vk.messages.send(user_id=vk_id, message=format_request_message(request, messages), random_id=0, keyboard=create_request_chat_keyboard(request_id))
-                    logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
                     return
 
         # Нажатие на задание
@@ -823,49 +751,69 @@ def process_message(event, vk, vk_session):
                 with user_states_lock:
                     user_states[vk_id] = matched_task
                 vk.messages.send(user_id=vk_id, message=format_task_message(matched_task, report, task_status), random_id=0)
-                logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
                 return
 
         vk.messages.send(user_id=vk_id, message="🤖 Воспользуйтесь кнопками меню:", random_id=0, keyboard=create_main_keyboard(active_group, site_url))
-        logger.info(f"⚡ [VK ID {vk_id}] Ответ отправлен за {time.time() - t_start:.2f} сек")
 
     except Exception as e:
-        logger.error(f"Ошибка при обработке сообщения от {event.user_id}: {e}", exc_info=True)
+        logger.error(f"Ошибка при обработке сообщения от {vk_id}: {e}", exc_info=True)
 
 
 def main():
-    logger.info("🚀 Запуск бота ВКонтакте...")
+    print("🚀 Старт инициализации бота...", flush=True)
 
     while True:
         try:
             settings = get_bot_settings()
             token = settings.get('vk_token', '')
+            group_id = settings.get('vk_group_id', '')
 
             if not token:
-                logger.error("❌ Внимание: VK Token не указан в админ-панели. Ожидание 10 сек...")
+                print("❌ VK Token не указан в настройках. Проверка через 10 сек...", flush=True)
                 time.sleep(10)
                 continue
 
             vk_session = vk_api.VkApi(token=token)
             vk = vk_session.get_api()
-            longpoll = VkLongPoll(vk_session)
+
+            # Пробуем запустить BotLongPoll если есть group_id, иначе стандартный VkLongPoll
+            longpoll = None
+            if group_id and group_id.isdigit():
+                try:
+                    longpoll = VkBotLongPoll(vk_session, int(group_id))
+                    print(f"✅ Используется VkBotLongPoll для сообщества ID {group_id}", flush=True)
+                except Exception as e:
+                    logger.warning(f"Не удалось инициализировать VkBotLongPoll: {e}, переключаемся на VkLongPoll")
+
+            if not longpoll:
+                longpoll = VkLongPoll(vk_session)
+                print("✅ Используется VkLongPoll", flush=True)
 
             # Фоновые потоки
             threading.Thread(target=send_notification_worker, args=(vk,), daemon=True).start()
             threading.Thread(target=check_request_messages_worker, args=(vk,), daemon=True).start()
 
-            # Пул потоков для параллельной обработки событий
             executor = ThreadPoolExecutor(max_workers=10)
-
-            logger.info("✅ Бот успешно подключен к ВКонтакте и ожидает сообщений!")
+            print("🚀 Бот успешно слушает события сообщений!", flush=True)
 
             for event in longpoll.listen():
-                if event.type == VkEventType.MESSAGE_NEW and event.to_me:
-                    executor.submit(process_message, event, vk, vk_session)
+                # Поддержка как VkLongPoll, так и VkBotLongPoll
+                if hasattr(event, 'type') and event.type == VkEventType.MESSAGE_NEW and event.to_me:
+                    vk_id = event.user_id
+                    text = event.text.strip()
+                    atts = getattr(event, 'attachments', [])
+                    executor.submit(handle_incoming_message, vk_id, text, atts, vk, vk_session)
+
+                elif hasattr(event, 'type') and event.type == VkBotEventType.MESSAGE_NEW:
+                    msg_obj = event.object.message if hasattr(event.object, 'message') else event.object
+                    vk_id = msg_obj.get('from_id')
+                    text = msg_obj.get('text', '').strip()
+                    atts = msg_obj.get('attachments', [])
+                    executor.submit(handle_incoming_message, vk_id, text, atts, vk, vk_session)
 
         except Exception as e:
-            logger.error(f"Критическая ошибка в главном цикле бота: {e}", exc_info=True)
-            time.sleep(5)
+            logger.error(f"Критическая ошибка цикла бота: {e}", exc_info=True)
+            time.sleep(4)
 
 
 if __name__ == '__main__':

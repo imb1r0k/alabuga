@@ -17,232 +17,63 @@ try:
 except ImportError:
     bcrypt = None
 
-try:
-    from dbutils.pooled_db import PooledDB
-except ImportError:
-    PooledDB = None
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 UPLOAD_DIR = 'uploads/vk_bot/'
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
-_db_initialized = False
-_pool = None
-
-def init_pool():
-    global _pool
-    if PooledDB is not None:
-        try:
-            _pool = PooledDB(
-                creator=pymysql,
-                maxconnections=10,
-                mincached=2,
-                maxcached=5,
-                maxshared=3,
-                blocking=True,
-                maxusage=None,
-                setsession=[],
-                host=config.DB_HOST,
-                port=config.DB_PORT,
-                user=config.DB_USER,
-                password=config.DB_PASSWORD,
-                database=config.DB_NAME,
-                charset='utf8mb4',
-                cursorclass=DictCursor,
-                autocommit=True,
-                connect_timeout=4,
-                read_timeout=10,
-                write_timeout=10
-            )
-            logger.info("✅ Пул постоянных соединений к БД инициализирован!")
-        except Exception as e:
-            logger.error(f"Не удалось инициализировать PooledDB: {e}")
-            _pool = None
-
-init_pool()
+_cached_connection = None
+_last_conn_time = 0
 
 def get_db_connection():
-    """Получает соединение из пула или создает прямое"""
-    global _db_initialized, _pool
+    """Возвращает живое переиспользуемое соединение с удаленной БД"""
+    global _cached_connection, _last_conn_time
+    now = time.time()
     
-    if _pool:
+    # Переиспользуем существующее соединение, если оно живо (до 30 сек)
+    if _cached_connection is not None and (now - _last_conn_time < 30):
         try:
-            conn = _pool.connection()
-            if not _db_initialized:
-                ensure_schema(conn)
-                _db_initialized = True
-            return conn
-        except Exception as e:
-            logger.warning(f"Ошибка получения соединения из пула: {e}, пробуем создать напрямую")
+            _cached_connection.ping(reconnect=True)
+            _last_conn_time = now
+            return _cached_connection
+        except Exception:
+            _cached_connection = None
 
-    hosts_to_try = [config.DB_HOST, '127.0.0.1', 'localhost']
-    seen = set()
-    unique_hosts = [h for h in hosts_to_try if not (h in seen or seen.add(h))]
-    
-    last_error = None
-    conn = None
-
-    for host in unique_hosts:
-        try:
-            conn = pymysql.connect(
-                host=host,
-                port=config.DB_PORT,
-                user=config.DB_USER,
-                password=config.DB_PASSWORD,
-                database=config.DB_NAME,
-                charset='utf8mb4',
-                cursorclass=DictCursor,
-                autocommit=True,
-                connect_timeout=3,
-                read_timeout=10,
-                write_timeout=10
-            )
-            break
-        except Exception as e:
-            last_error = e
-            continue
-
-    if not conn:
-        logger.error(f"❌ Не удалось подключиться к БД: {last_error}")
-        raise last_error
-
-    if not _db_initialized:
-        try:
-            ensure_schema(conn)
-            _db_initialized = True
-        except Exception as e:
-            logger.warning(f"⚠️ Ошибка при инициализации схемы: {e}")
-        _db_initialized = True
-        
-    return conn
-
-
-def ensure_schema(conn):
-    """Проверяет и создает необходимые таблицы и колонки при первом подключении"""
     try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS vk_bot_settings (
-                    `key` VARCHAR(64) PRIMARY KEY,
-                    `value` TEXT NOT NULL
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-            """)
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS vk_bot_task_groups (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    title VARCHAR(255) NOT NULL,
-                    start_date DATE NOT NULL,
-                    end_date DATE NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-            """)
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS vk_bot_tasks (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    group_id INT NOT NULL,
-                    title VARCHAR(255) NOT NULL,
-                    description TEXT NOT NULL,
-                    difficulty ENUM('easy', 'medium', 'hard') NOT NULL DEFAULT 'easy',
-                    points INT NOT NULL DEFAULT 10,
-                    task_type ENUM('repost', 'post', 'other') NOT NULL DEFAULT 'other',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-            """)
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS vk_bot_reports (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    user_id INT NOT NULL,
-                    task_id INT NOT NULL,
-                    submission_text TEXT NOT NULL,
-                    has_attachments TINYINT(1) NOT NULL DEFAULT 0,
-                    status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
-                    reject_reason VARCHAR(255) DEFAULT '',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-            """)
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS vk_bot_tickets (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    user_id INT NOT NULL,
-                    group_id INT NOT NULL,
-                    ticket_number VARCHAR(64) UNIQUE NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-            """)
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS vk_bot_notifications (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    user_id INT NOT NULL,
-                    report_id INT NULL,
-                    message TEXT NOT NULL,
-                    is_sent TINYINT(1) NOT NULL DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    sent_at TIMESTAMP NULL
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-            """)
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS vk_bot_report_media (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    report_id INT NOT NULL,
-                    file_url VARCHAR(512) NOT NULL,
-                    file_type ENUM('image', 'file') NOT NULL DEFAULT 'image',
-                    original_name VARCHAR(255) NOT NULL,
-                    file_size INT DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS vk_bot_requests (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    user_id INT NOT NULL,
-                    category ENUM('site', 'bot', 'housing') NOT NULL DEFAULT 'site',
-                    subject VARCHAR(255) NOT NULL,
-                    description TEXT NOT NULL,
-                    status ENUM('open', 'in_progress', 'resolved', 'rejected') NOT NULL DEFAULT 'open',
-                    resolved_by INT NULL,
-                    resolution_text TEXT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS vk_bot_request_messages (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    request_id INT NOT NULL,
-                    user_id INT NOT NULL,
-                    message TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-            """)
-
-            columns_to_add = [
-                ("vk_id", "BIGINT NULL"),
-                ("vk_url", "VARCHAR(255) NULL"),
-                ("rating", "INT NOT NULL DEFAULT 0"),
-                ("completed_tasks", "INT NOT NULL DEFAULT 0"),
-                ("bot_registered", "TINYINT(1) NOT NULL DEFAULT 0"),
-                ("agreement_accepted_at", "DATETIME NULL"),
-                ("social_vk", "VARCHAR(255) NULL")
-            ]
-            for col_name, col_type in columns_to_add:
-                try:
-                    cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type};")
-                except Exception:
-                    pass
-
+        conn = pymysql.connect(
+            host=config.DB_HOST,
+            port=config.DB_PORT,
+            user=config.DB_USER,
+            password=config.DB_PASSWORD,
+            database=config.DB_NAME,
+            charset='utf8mb4',
+            cursorclass=DictCursor,
+            autocommit=True,
+            connect_timeout=6,
+            read_timeout=10,
+            write_timeout=10
+        )
+        _cached_connection = conn
+        _last_conn_time = now
+        return conn
     except Exception as e:
-        logger.warning(f"Замечание при проверке схемы БД: {e}")
+        logger.error(f"❌ Ошибка подключения к базе {config.DB_HOST}: {e}")
+        # Запасная попытка подключения
+        conn = pymysql.connect(
+            host='127.0.0.1',
+            port=config.DB_PORT,
+            user=config.DB_USER,
+            password=config.DB_PASSWORD,
+            database=config.DB_NAME,
+            charset='utf8mb4',
+            cursorclass=DictCursor,
+            autocommit=True,
+            connect_timeout=3
+        )
+        _cached_connection = conn
+        _last_conn_time = now
+        return conn
 
 
 def get_bot_settings():
@@ -256,11 +87,6 @@ def get_bot_settings():
     except Exception as e:
         logger.error(f"Ошибка получения настроек бота: {e}")
         return {}
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
 
 
 def hash_password(password):
@@ -283,188 +109,151 @@ def generate_login(first_name, last_name):
         base_login = f"user{random.randint(100, 999)}"
     
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT COUNT(*) as cnt FROM users WHERE login LIKE %s", (f"{base_login}%",))
-            count = cursor.fetchone()['cnt']
-            return f"{base_login}{count + 1}" if count > 0 else base_login
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT COUNT(*) as cnt FROM users WHERE login LIKE %s", (f"{base_login}%",))
+        count = cursor.fetchone()['cnt']
+        return f"{base_login}{count + 1}" if count > 0 else base_login
 
 
 def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            if vk_id:
-                cursor.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
-                user = cursor.fetchone()
-                if user:
-                    return user
-
-            if vk_url:
-                cursor.execute("SELECT * FROM users WHERE vk_url = %s", (vk_url,))
-                user = cursor.fetchone()
-                if user:
-                    if user.get('vk_id') != vk_id:
-                        cursor.execute("UPDATE users SET vk_id = %s WHERE id = %s", (vk_id, user['id']))
-                    return user
-
-            login = generate_login(first_name, last_name)
-            password = generate_password()
-            hashed_password = hash_password(password)
-            full_name = f"{last_name} {first_name}".strip()
-
-            cursor.execute("""
-                INSERT INTO users
-                (vk_id, vk_url, first_name, last_name, name, login, phone, password, role, status, rating, completed_tasks, social_vk, bot_registered)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                vk_id, vk_url, first_name, last_name, full_name,
-                login, '', hashed_password, 'user', 'active', 0, 0, vk_url, 1
-            ))
-
-            user_id = cursor.lastrowid
-            cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+    with conn.cursor() as cursor:
+        if vk_id:
+            cursor.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
             user = cursor.fetchone()
-            user['generated_password'] = password
-            logger.info(f"Создан новый пользователь: {first_name} {last_name}, логин: {login}")
-            return user
+            if user:
+                return user
 
-    except Exception as e:
-        logger.error(f"Ошибка в find_or_create_user: {e}")
-        raise
-    finally:
-        conn.close()
+        if vk_url:
+            cursor.execute("SELECT * FROM users WHERE vk_url = %s", (vk_url,))
+            user = cursor.fetchone()
+            if user:
+                if user.get('vk_id') != vk_id:
+                    cursor.execute("UPDATE users SET vk_id = %s WHERE id = %s", (vk_id, user['id']))
+                return user
+
+        login = generate_login(first_name, last_name)
+        password = generate_password()
+        hashed_password = hash_password(password)
+        full_name = f"{last_name} {first_name}".strip()
+
+        cursor.execute("""
+            INSERT INTO users
+            (vk_id, vk_url, first_name, last_name, name, login, phone, password, role, status, rating, completed_tasks, social_vk, bot_registered)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            vk_id, vk_url, first_name, last_name, full_name,
+            login, '', hashed_password, 'user', 'active', 0, 0, vk_url, 1
+        ))
+
+        user_id = cursor.lastrowid
+        cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+        user = cursor.fetchone()
+        user['generated_password'] = password
+        logger.info(f"Создан новый пользователь: {first_name} {last_name}, логин: {login}")
+        return user
 
 
 def get_user_by_vk_id(vk_id):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
-            return cursor.fetchone()
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
+        return cursor.fetchone()
 
 
 def find_existing_user(vk_id, vk_url=''):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            if vk_id:
-                cursor.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
-                user = cursor.fetchone()
-                if user:
-                    return user
-            if vk_url:
-                cursor.execute("SELECT * FROM users WHERE vk_url = %s", (vk_url,))
-                user = cursor.fetchone()
-                if user:
-                    return user
-            return None
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        if vk_id:
+            cursor.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
+            user = cursor.fetchone()
+            if user:
+                return user
+        if vk_url:
+            cursor.execute("SELECT * FROM users WHERE vk_url = %s", (vk_url,))
+            user = cursor.fetchone()
+            if user:
+                return user
+        return None
 
 
 def get_active_task_group():
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT * FROM vk_bot_task_groups 
-                WHERE start_date <= CURDATE() AND end_date >= CURDATE()
-                ORDER BY start_date ASC LIMIT 1
-            """)
-            return cursor.fetchone()
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT * FROM vk_bot_task_groups 
+            WHERE start_date <= CURDATE() AND end_date >= CURDATE()
+            ORDER BY start_date ASC LIMIT 1
+        """)
+        return cursor.fetchone()
 
 
 def get_tasks_for_group(group_id):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT * FROM vk_bot_tasks 
-                WHERE group_id = %s 
-                ORDER BY FIELD(difficulty, 'easy', 'medium', 'hard'), id ASC
-            """, (group_id,))
-            return cursor.fetchall()
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT * FROM vk_bot_tasks 
+            WHERE group_id = %s 
+            ORDER BY FIELD(difficulty, 'easy', 'medium', 'hard'), id ASC
+        """, (group_id,))
+        return cursor.fetchall()
 
 
 def get_user_task_report(user_id, task_id):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT * FROM vk_bot_reports
-                WHERE user_id = %s AND task_id = %s
-                ORDER BY id DESC LIMIT 1
-            """, (user_id, task_id))
-            return cursor.fetchone()
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT * FROM vk_bot_reports
+            WHERE user_id = %s AND task_id = %s
+            ORDER BY id DESC LIMIT 1
+        """, (user_id, task_id))
+        return cursor.fetchone()
 
 
 def get_user_task_status(user_id, task_id):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT id FROM vk_bot_reports
-                WHERE user_id = %s AND task_id = %s AND status = 'approved'
-                LIMIT 1
-            """, (user_id, task_id))
-            if cursor.fetchone():
-                return 'approved'
-            cursor.execute("""
-                SELECT status FROM vk_bot_reports
-                WHERE user_id = %s AND task_id = %s
-                ORDER BY id DESC LIMIT 1
-            """, (user_id, task_id))
-            row = cursor.fetchone()
-            return row['status'] if row else None
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT id FROM vk_bot_reports
+            WHERE user_id = %s AND task_id = %s AND status = 'approved'
+            LIMIT 1
+        """, (user_id, task_id))
+        if cursor.fetchone():
+            return 'approved'
+        cursor.execute("""
+            SELECT status FROM vk_bot_reports
+            WHERE user_id = %s AND task_id = %s
+            ORDER BY id DESC LIMIT 1
+        """, (user_id, task_id))
+        row = cursor.fetchone()
+        return row['status'] if row else None
 
 
 def create_report(user_id, task_id, submission_text, has_attachments=False):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                INSERT INTO vk_bot_reports (user_id, task_id, submission_text, has_attachments, status) 
-                VALUES (%s, %s, %s, %s, 'pending')
-            """, (user_id, task_id, submission_text, 1 if has_attachments else 0))
-            return cursor.lastrowid
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            INSERT INTO vk_bot_reports (user_id, task_id, submission_text, has_attachments, status) 
+            VALUES (%s, %s, %s, %s, 'pending')
+        """, (user_id, task_id, submission_text, 1 if has_attachments else 0))
+        return cursor.lastrowid
 
 
 def save_report_media(report_id, file_url, file_type, original_name, file_size):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                INSERT INTO vk_bot_report_media (report_id, file_url, file_type, original_name, file_size) 
-                VALUES (%s, %s, %s, %s, %s)
-            """, (report_id, file_url, file_type, original_name, file_size))
-            return cursor.lastrowid
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            INSERT INTO vk_bot_report_media (report_id, file_url, file_type, original_name, file_size) 
+            VALUES (%s, %s, %s, %s, %s)
+        """, (report_id, file_url, file_type, original_name, file_size))
+        return cursor.lastrowid
 
 
 def get_report_media(report_id):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM vk_bot_report_media WHERE report_id = %s ORDER BY id ASC", (report_id,))
-            return cursor.fetchall()
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT * FROM vk_bot_report_media WHERE report_id = %s ORDER BY id ASC", (report_id,))
+        return cursor.fetchall()
 
 
 def process_vk_attachments(attachments, vk_session):
@@ -545,179 +334,137 @@ def process_vk_attachments(attachments, vk_session):
 
 def get_user_tickets(user_id):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT tk.*, g.title as group_title
-                FROM vk_bot_tickets tk
-                JOIN vk_bot_task_groups g ON tk.group_id = g.id
-                WHERE tk.user_id = %s
-                AND tk.created_at >= NOW() - INTERVAL 30 DAY
-                ORDER BY tk.created_at DESC
-            """, (user_id,))
-            return cursor.fetchall()
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT tk.*, g.title as group_title
+            FROM vk_bot_tickets tk
+            JOIN vk_bot_task_groups g ON tk.group_id = g.id
+            WHERE tk.user_id = %s
+            AND tk.created_at >= NOW() - INTERVAL 30 DAY
+            ORDER BY tk.created_at DESC
+        """, (user_id,))
+        return cursor.fetchall()
 
 
 def get_pending_notifications(limit=10):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT n.*, u.vk_id, u.vk_url, u.first_name, u.last_name
-                FROM vk_bot_notifications n
-                JOIN users u ON n.user_id = u.id
-                WHERE n.is_sent = 0
-                ORDER BY n.created_at ASC
-                LIMIT %s
-            """, (limit,))
-            return cursor.fetchall()
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT n.*, u.vk_id, u.vk_url, u.first_name, u.last_name
+            FROM vk_bot_notifications n
+            JOIN users u ON n.user_id = u.id
+            WHERE n.is_sent = 0
+            ORDER BY n.created_at ASC
+            LIMIT %s
+        """, (limit,))
+        return cursor.fetchall()
 
 
 def mark_notification_sent(notification_id):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("UPDATE vk_bot_notifications SET is_sent = 1, sent_at = NOW() WHERE id = %s", (notification_id,))
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("UPDATE vk_bot_notifications SET is_sent = 1, sent_at = NOW() WHERE id = %s", (notification_id,))
 
 
 def add_notification(user_id, message, report_id=None):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                INSERT INTO vk_bot_notifications (user_id, report_id, message)
-                VALUES (%s, %s, %s)
-            """, (user_id, report_id, message))
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            INSERT INTO vk_bot_notifications (user_id, report_id, message)
+            VALUES (%s, %s, %s)
+        """, (user_id, report_id, message))
 
 
 def create_request(user_id, category, subject, description):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                INSERT INTO vk_bot_requests (user_id, category, subject, description, status)
-                VALUES (%s, %s, %s, %s, 'open')
-            """, (user_id, category, subject, description))
-            return cursor.lastrowid
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            INSERT INTO vk_bot_requests (user_id, category, subject, description, status)
+            VALUES (%s, %s, %s, %s, 'open')
+        """, (user_id, category, subject, description))
+        return cursor.lastrowid
 
 
 def get_user_requests(user_id):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM vk_bot_requests WHERE user_id = %s ORDER BY created_at DESC", (user_id,))
-            return cursor.fetchall()
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT * FROM vk_bot_requests WHERE user_id = %s ORDER BY created_at DESC", (user_id,))
+        return cursor.fetchall()
 
 
 def get_user_request_by_id(request_id, user_id):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM vk_bot_requests WHERE id = %s AND user_id = %s", (request_id, user_id))
-            return cursor.fetchone()
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT * FROM vk_bot_requests WHERE id = %s AND user_id = %s", (request_id, user_id))
+        return cursor.fetchone()
 
 
 def get_request_by_id(request_id):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM vk_bot_requests WHERE id = %s", (request_id,))
-            return cursor.fetchone()
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT * FROM vk_bot_requests WHERE id = %s", (request_id,))
+        return cursor.fetchone()
 
 
 def get_request_messages(request_id):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT m.*, u.first_name, u.last_name, u.vk_id
-                FROM vk_bot_request_messages m
-                JOIN users u ON m.user_id = u.id
-                WHERE m.request_id = %s
-                ORDER BY m.created_at ASC
-            """, (request_id,))
-            return cursor.fetchall()
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT m.*, u.first_name, u.last_name, u.vk_id
+            FROM vk_bot_request_messages m
+            JOIN users u ON m.user_id = u.id
+            WHERE m.request_id = %s
+            ORDER BY m.created_at ASC
+        """, (request_id,))
+        return cursor.fetchall()
 
 
 def add_request_message(request_id, user_id, message):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                INSERT INTO vk_bot_request_messages (request_id, user_id, message)
-                VALUES (%s, %s, %s)
-            """, (request_id, user_id, message))
-            return cursor.lastrowid
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            INSERT INTO vk_bot_request_messages (request_id, user_id, message)
+            VALUES (%s, %s, %s)
+        """, (request_id, user_id, message))
+        return cursor.lastrowid
 
 
 def get_all_requests_for_admin(status=None):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            sql = "SELECT r.*, u.first_name, u.last_name, u.vk_id FROM vk_bot_requests r JOIN users u ON r.user_id = u.id"
-            if status and status != 'all':
-                sql += " WHERE r.status = %s"
-                cursor.execute(sql, (status,))
-            else:
-                cursor.execute(sql)
-            return cursor.fetchall()
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        sql = "SELECT r.*, u.first_name, u.last_name, u.vk_id FROM vk_bot_requests r JOIN users u ON r.user_id = u.id"
+        if status and status != 'all':
+            sql += " WHERE r.status = %s"
+            cursor.execute(sql, (status,))
+        else:
+            cursor.execute(sql)
+        return cursor.fetchall()
 
 
 def get_last_request_message(request_id):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT m.*, u.first_name, u.last_name, u.vk_id
-                FROM vk_bot_request_messages m
-                JOIN users u ON m.user_id = u.id
-                WHERE m.request_id = %s
-                ORDER BY m.created_at DESC
-                LIMIT 1
-            """, (request_id,))
-            return cursor.fetchone()
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT m.*, u.first_name, u.last_name, u.vk_id
+            FROM vk_bot_request_messages m
+            JOIN users u ON m.user_id = u.id
+            WHERE m.request_id = %s
+            ORDER BY m.created_at DESC
+            LIMIT 1
+        """, (request_id,))
+        return cursor.fetchone()
 
 
 def check_user_agreement(user_id):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT agreement_accepted_at FROM users WHERE id = %s", (user_id,))
-            result = cursor.fetchone()
-            return bool(result and result.get('agreement_accepted_at'))
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT agreement_accepted_at FROM users WHERE id = %s", (user_id,))
+        result = cursor.fetchone()
+        return bool(result and result.get('agreement_accepted_at'))
 
 
 def set_user_agreement(user_id):
     conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("UPDATE users SET agreement_accepted_at = NOW() WHERE id = %s", (user_id,))
-            return cursor.rowcount > 0
-    finally:
-        conn.close()
+    with conn.cursor() as cursor:
+        cursor.execute("UPDATE users SET agreement_accepted_at = NOW() WHERE id = %s", (user_id,))
+        return cursor.rowcount > 0
