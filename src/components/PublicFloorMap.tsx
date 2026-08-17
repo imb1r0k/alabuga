@@ -148,7 +148,7 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
     ) : null;
 
     const IconComp = tmpl?.icon || Bed;
-    const clickable = room && room.room_type === 'room';
+    const clickable = room && room.room_type === 'room' && !isFull;
 
     return (
       <div
@@ -158,7 +158,7 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
             onRoomSelect(room, layout.building, floor);
           }
         }}
-        title={room ? (room.room_type === 'room' ? (isFull ? 'Комната заполнена — нажмите для просмотра информации' : 'Нажмите для бронирования или просмотра') : undefined) : undefined}
+        title={isFull ? 'Комната полностью заполнена' : undefined}
         style={{
           height: '110px',
           width: '100%',
@@ -170,7 +170,7 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          cursor: clickable ? 'pointer' : 'default',
+          cursor: clickable ? 'pointer' : 'not-allowed',
           fontSize: '13px',
           padding: '4px',
           textAlign: 'center',
