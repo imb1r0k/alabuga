@@ -291,8 +291,11 @@ if ($uri === 'admin/vk-bot/reports') {
             $sql .= " WHERE r.status = " . $pdo->quote($status);
         }
         $sql .= " ORDER BY r.created_at DESC";
+        error_log("VK-BOT-REPORTS SQL: " . $sql); // Временное логирование
         $stmt = $pdo->query($sql);
-        jsonResponse($stmt->fetchAll());
+        $reports = $stmt->fetchAll();
+        error_log("VK-BOT-REPORTS fetched " . count($reports) . " rows."); // Временное логирование
+        jsonResponse($reports);
     }
 
     if ($method === 'POST') {
