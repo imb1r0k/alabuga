@@ -1,4 +1,3 @@
-cat > /root/alabuga/vk_bot/bot.py << 'EOF'
 import sys
 import time
 import threading
@@ -838,4 +837,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-EOF
