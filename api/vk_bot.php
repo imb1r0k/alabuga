@@ -26,6 +26,15 @@ try {
         FOREIGN KEY (group_id) REFERENCES vk_bot_task_groups(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
+    // Устаревшая колонка uuid больше не используется (задания привязываются по id).
+    // Если она осталась в таблице от прежней схемы, удаляем её, чтобы обычные
+    // INSERT без uuid не падали с ошибкой 500.
+    try {
+        $pdo->exec("ALTER TABLE vk_bot_tasks DROP COLUMN uuid");
+    } catch (PDOException $ex) {
+        // колонки нет — игнорируем
+    }
+
     $pdo->exec("CREATE TABLE IF NOT EXISTS vk_bot_reports (
         id INT AUTO_INCREMENT PRIMARY KEY,
         user_id INT NOT NULL,
