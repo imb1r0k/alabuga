@@ -258,7 +258,7 @@ def get_report_media(report_id):
 
 def process_vk_attachments(attachments, vk_session):
     """
-    Обработка вложений от VK Bot LongPoll.
+    Обработка вложений от VK.
     Получаем прямые ссылки на фото через photo['sizes'][-1]['url']
     """
     if not attachments:
@@ -267,25 +267,53 @@ def process_vk_attachments(attachments, vk_session):
     saved_files = []
     text_parts = []
 
-    # attachments уже должен быть списком из VkBotLongPoll
-    # Но на всякий случай проверяем
-    if not isinstance(attachments, list):
-        logger.warning(f"attachments не является списком: {type(attachments)}")
-        return [], ""
+    # attachments может быть списком или dict
+    if isinstance(attachments, dict):
+        # Преобразуем dict в список
+        attach_list = []
+        for key, value in attachments.items():
+            if key.startswith('attach') and not key.endswith('_type'):
+                if isinstance(value, dict):
+                    attach_list.append(value)
+                else:
+                    attach_type = attachments.get(f"{key}_type", 'photo')
+                    attach_list.append({'type': attach_type, 'id': value})
+        attachments = attach_list
+    elif not isinstance(attachments, list):
+        attachments = [attachments]
 
     for attachment in attachments:
         if not isinstance(attachment, dict):
             continue
 
+        # Определяем тип вложения
         attach_type = attachment.get('type', '')
         
+        # Если тип не указан, пробуем определить по ключам
+        if not attach_type:
+            if 'photo' in attachment:
+                attach_type = 'photo'
+            elif 'doc' in attachment:
+                attach_type = 'doc'
+            elif 'video' in attachment:
+                attach_type = 'video'
+            elif 'link' in attachment:
+                attach_type = 'link'
+            elif 'wall' in attachment:
+                attach_type = 'wall'
+            elif 'audio' in attachment:
+                attach_type = 'audio'
+        
         if attach_type == 'photo':
-            # Для фото используем прямой доступ к photo['sizes']
+            # Получаем объект photo
             photo = attachment.get('photo', {})
-            
             if not photo:
-                logger.warning("Пустой объект photo в вложении")
-                continue
+                # Если photo нет на верхнем уровне, возможно это сам объект photo
+                if 'sizes' in attachment:
+                    photo = attachment
+                else:
+                    logger.warning("Пустой объект photo в вложении")
+                    continue
             
             # Получаем URL самого качественного фото (последний элемент в sizes)
             sizes = photo.get('sizes', [])
@@ -311,8 +339,27 @@ def process_vk_attachments(attachments, vk_session):
                 else:
                     logger.warning("Не удалось получить URL фото из sizes")
             else:
-                logger.warning("Нет sizes в фото")
-                
+                # Пробуем получить через прямые ключи
+                for size_key in ['photo_2560', 'photo_1280', 'photo_807', 'photo_604', 'photo_130', 'photo_75']:
+                    if photo.get(size_key):
+                        file_url = photo[size_key]
+                        if file_url:
+                            photo_id = photo.get('id', '')
+                            owner_id = photo.get('owner_id', '')
+                            file_name = f"photo_{owner_id}_{photo_id}.jpg" if owner_id and photo_id else f"photo_{int(time.time())}.jpg"
+                            
+                            saved_files.append({
+                                'file_type': 'photo',
+                                'file_url': file_url,
+                                'original_name': file_name,
+                                'file_size': 0
+                            })
+                            text_parts.append(f"📎 {file_name}")
+                            logger.info(f"Получена прямая ссылка на фото из {size_key}: {file_url[:100]}...")
+                            break
+                else:
+                    logger.warning("Нет sizes и нет прямых ключей в фото")
+                    
         elif attach_type == 'doc':
             # Для документов
             doc = attachment.get('doc', {})
