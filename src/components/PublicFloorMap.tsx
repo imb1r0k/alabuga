@@ -52,6 +52,20 @@ interface PublicFloorMapProps {
   onRoomSelect: (room: Room, building: Building, floor: Floor) => void;
 }
 
+// Вычисляет итоговый пол с учётом наследования: комната → этаж → корпус.
+// Значение 'DEFAULT' означает «использовать значение родителя».
+const getEffectiveGender = (
+  roomGender?: string,
+  floorGender?: string,
+  buildingGender?: string,
+): string => {
+  for (const g of [roomGender, floorGender, buildingGender]) {
+    if (g && g !== 'DEFAULT') return g;
+  }
+  return 'DEFAULT';
+};
+
+
 const GenderBadge: React.FC<{ gender?: string; size?: number }> = ({ gender = 'MIXED', size = 18 }) => {
   let label = 'С';
   let bg = '#8b5cf6';
@@ -134,7 +148,7 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
     ) : null;
 
     const IconComp = tmpl?.icon || Bed;
-    const clickable = room && room.room_type === 'room' && !isFull;
+    const clickable = room && room.room_type === 'room';
 
     return (
       <div
@@ -144,7 +158,7 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
             onRoomSelect(room, layout.building, floor);
           }
         }}
-        title={isFull ? 'Комната полностью заполнена' : undefined}
+        title={room ? (room.room_type === 'room' ? (isFull ? 'Комната заполнена — нажмите для просмотра информации' : 'Нажмите для бронирования или просмотра') : undefined) : undefined}
         style={{
           height: '110px',
           width: '100%',
@@ -156,7 +170,7 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          cursor: clickable ? 'pointer' : 'not-allowed',
+          cursor: clickable ? 'pointer' : 'default',
           fontSize: '13px',
           padding: '4px',
           textAlign: 'center',
@@ -166,7 +180,7 @@ export const PublicFloorMap: React.FC<PublicFloorMapProps> = ({ buildingId, onRo
       >
         {room && room.room_type === 'room' && (
           <div style={{ position: 'absolute', top: '3px', right: '4px' }}>
-            <GenderBadge gender={room.gender} size={18} />
+            <GenderBadge gender={getEffectiveGender(room.gender, floor?.gender, layout?.building?.gender)} size={18} />
           </div>
         )}
 

@@ -1,0 +1,11 @@
+RewriteEngine On
+RewriteBase /
+
+# Не трогаем запросы к API и загруженным файлам
+RewriteCond %{REQUEST_URI} !^/api/
+RewriteCond %{REQUEST_URI} !^/uploads/
+
+# Если запрошенный файл или директория не существуют — перенаправляем на index.html
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ /index.html [L]

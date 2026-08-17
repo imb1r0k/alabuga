@@ -10,12 +10,13 @@ interface BookingModalProps {
   room: any;
   buildingName: string;
   floorNumber: number;
+  roomGender?: string;
   onClose: () => void;
 }
 
 type Stage = 'auth' | 'login' | 'register' | 'confirm' | 'result';
 
-export const BookingModal: React.FC<BookingModalProps> = ({ room, buildingName, floorNumber, onClose }) => {
+export const BookingModal: React.FC<BookingModalProps> = ({ room, buildingName, floorNumber, roomGender: roomGenderFromProps, onClose }) => {
   const { isAuthenticated, user, refreshUser } = useAuth();
   const { showToast } = useToast();
 
@@ -46,7 +47,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({ room, buildingName, 
     // ─── Фронтенд-проверка соответствия пола пользователя и комнаты ───
     // Логика определения пола скопирована из PHP (detectGenderByLastName)
     const detectedGender = detectGenderByLastName(lastName);
-    const roomGender = room?.gender;
+    const roomGender = roomGenderFromProps || room?.gender;
     if (
       detectedGender &&
       (roomGender === 'M' || roomGender === 'F') &&
