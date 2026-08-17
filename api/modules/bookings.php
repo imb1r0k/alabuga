@@ -58,28 +58,6 @@ if ($uri === 'public/layout') {
             ORDER BY r.y_pos ASC, r.x_pos ASC
         ");
         $rooms->execute([$floor['id']]);
-        $roomsData = $rooms->fetchAll();
-
-        // Заселившиеся жильцы по комнатам этажа (совпадает с подсчётом occupied)
-        $occupantsStmt = $pdo->prepare("
-            SELECT b.room_id, u.first_name, u.last_name, u.patronymic, u.login
-            FROM bookings b
-            JOIN users u ON u.id = b.user_id
-            JOIN rooms rr ON rr.id = b.room_id
-            WHERE rr.floor_id = ? AND rr.room_type = 'room' AND b.status IN ('approved','approved_bot','pending')
-            ORDER BY u.last_name ASC, u.first_name ASC
-        ");
-        $occupantsStmt->execute([$floor['id']]);
-        $occupantsByRoom = [];
-        foreach ($occupantsStmt->fetchAll() as $occ) {
-            $occupantsByRoom[$occ['room_id']][] = [
-                'first_name' => $occ['first_name'],
-                'last_name'  => $occ['last_name'],
-                'patronymic' => $occ['patronymic'],
-                'login'      => $occ['login'],
-            ];
-        }
-
         $floorsData[] = [
             'id' => (int)$floor['id'],
             'floor_number' => (int)$floor['floor_number'],
@@ -87,11 +65,10 @@ if ($uri === 'public/layout') {
             'start_room_number' => $floor['start_room_number'],
             'room_order_type' => $floor['room_order_type'],
             'gender' => $floor['gender'],
-            'rooms' => array_map(function($r) use ($occupantsByRoom) {
+            'rooms' => array_map(function($r) {
                 $r['occupied'] = (int)$r['occupied'];
-                $r['occupants'] = $occupantsByRoom[$r['id']] ?? [];
                 return $r;
-            }, $roomsData),
+            }, $rooms->fetchAll()),
         ];
     }
 

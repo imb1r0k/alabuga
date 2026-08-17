@@ -165,7 +165,7 @@ if ($uri === 'admin/archive-bookings') {
 if ($uri === 'admin/archive-users') {
     $user = requireStrictAdmin($pdo);
     if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
-    $stmt = $pdo->prepare("UPDATE users SET status = 'archived' WHERE role NOT IN ('admin', 'curator') AND status = 'active'");
+    $stmt = $pdo->prepare("UPDATE users SET status = 'archived' WHERE role <> 'admin' AND status = 'active'");
     $stmt->execute();
     jsonResponse(['success' => true, 'affected' => $stmt->rowCount()]);
 }

@@ -25,7 +25,6 @@
     "@types/react-dom": "^18.2.15",
     "@vitejs/plugin-react": "^4.0.4",
     "typescript": "^5.2.2",
-    "vite": "^5.0.0",
-    "@dyad-sh/react-vite-component-tagger": "^0.9.0"
+    "vite": "^5.0.0"
   }
 }

@@ -226,11 +226,6 @@ export const getRoomBookings = async (roomId: number) => {
   return response.data;
 };
 
-export const createManualBooking = async (payload: any) => {
-  const response = await api.post('/admin/manual-booking', payload);
-  return response.data;
-};
-
 // ─── Корпуса ──────────────────────────────────────────────────────────────────
 
 export const getAdminBuildings = async () => {

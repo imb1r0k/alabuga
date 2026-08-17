@@ -95,7 +95,6 @@ if ($uri === 'login') {
 
     $phoneDigits = preg_replace('/\D/', '', $loginInput);
 
-    // Основной вход — только для активных пользователей
     $stmt = $pdo->prepare("
         SELECT * FROM users
         WHERE (login = :input
@@ -111,30 +110,17 @@ if ($uri === 'login') {
     ]);
     $user = $stmt->fetch();
 
-    if ($user && password_verify($password, $user['password'])) {
-        $token = bin2hex(random_bytes(32));
-        $expiresAt = date('Y-m-d H:i:s', strtotime('+30 days'));
-        $stmt = $pdo->prepare("INSERT INTO tokens (user_id, token, expires_at) VALUES (?, ?, ?)");
-        $stmt->execute([$user['id'], $token, $expiresAt]);
-
-        unset($user['password']);
-        jsonResponse(['token' => $token, 'user' => $user]);
+    if (!$user || !password_verify($password, $user['password'])) {
+        jsonError('Неверный логин/телефон или пароль', 401);
     }
 
-    // Понятное сообщение, если аккаунт существует, но деактивирован
-    // (по точному совпадению логина/телефона, без поиска по подстроке)
-    $archStmt = $pdo->prepare("
-        SELECT * FROM users
-        WHERE (login = :input OR phone = :input) AND status = 'archived'
-        LIMIT 1
-    ");
-    $archStmt->execute(['input' => $loginInput]);
-    $archUser = $archStmt->fetch();
-    if ($archUser && password_verify($password, $archUser['password'])) {
-        jsonError('Ваш аккаунт деактивирован. Свяжитесь с администратором.', 403);
-    }
+    $token = bin2hex(random_bytes(32));
+    $expiresAt = date('Y-m-d H:i:s', strtotime('+30 days'));
+    $stmt = $pdo->prepare("INSERT INTO tokens (user_id, token, expires_at) VALUES (?, ?, ?)");
+    $stmt->execute([$user['id'], $token, $expiresAt]);
 
-    jsonError('Неверный логин/телефон или пароль', 401);
+    unset($user['password']);
+    jsonResponse(['token' => $token, 'user' => $user]);
 }
 
 // ─── Текущий пользователь и выход ───────────────────────────────────────────

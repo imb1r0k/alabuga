@@ -255,11 +255,7 @@ export const AdminBuildingsPage: React.FC = () => {
   };
 
   const getRoomOccupancy = (roomId: number) => {
-    return allBookings.filter(
-      (b) =>
-        Number(b.room_id) === Number(roomId) &&
-        ['pending', 'approved', 'approved_bot'].includes(b.status)
-    ).length;
+    return allBookings.filter((b) => Number(b.room_id) === Number(roomId) && b.status !== 'rejected').length;
   };
 
   const handleAddBuilding = async (e: React.FormEvent) => {
