@@ -257,184 +257,129 @@ def get_report_media(report_id):
 
 
 def process_vk_attachments(attachments, vk_session):
-    """Обработка вложений от VK - получаем прямые ссылки на файлы"""
+    """
+    Обработка вложений от VK Bot LongPoll.
+    Получаем прямые ссылки на фото через photo['sizes'][-1]['url']
+    """
     if not attachments:
         return [], ""
 
     saved_files = []
     text_parts = []
-    attach_list = []
 
-    # Нормализация вложений в список
-    if isinstance(attachments, dict):
-        for key, value in attachments.items():
-            if key.startswith('attach') and not key.endswith('_type'):
-                if isinstance(value, dict):
-                    attach_list.append(value)
-                else:
-                    attach_type = attachments.get(f"{key}_type", 'photo')
-                    attach_list.append({'type': attach_type, 'id': value})
-    elif isinstance(attachments, list):
-        attach_list = attachments
-    else:
-        attach_list = [attachments]
+    # attachments уже должен быть списком из VkBotLongPoll
+    # Но на всякий случай проверяем
+    if not isinstance(attachments, list):
+        logger.warning(f"attachments не является списком: {type(attachments)}")
+        return [], ""
 
-    for attach in attach_list:
-        file_url = None
-        file_name = None
-        file_size = 0
-        attach_type = 'unknown'
-        attach_id = None
-        owner_id = None
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
 
-        if isinstance(attach, dict):
-            attach_type = attach.get('type', 'photo')
+        attach_type = attachment.get('type', '')
+        
+        if attach_type == 'photo':
+            # Для фото используем прямой доступ к photo['sizes']
+            photo = attachment.get('photo', {})
             
-            # Извлекаем вложенные данные
-            nested = attach.get(attach_type, {})
-            if not nested:
-                nested = attach
-
-            attach_id = nested.get('id') or attach.get('id') or ''
-            owner_id = nested.get('owner_id') or attach.get('owner_id') or ''
-
-            # Если id пришёл в формате "ownerId_mediaId"
-            if isinstance(attach_id, str) and '_' in attach_id:
-                parts = attach_id.split('_', 1)
-                owner_id = parts[0]
-                attach_id = parts[1]
-
-            if attach_type == 'photo':
-                # 1. Пытаемся получить прямую ссылку через sizes
-                sizes = nested.get('sizes', [])
-                if sizes:
-                    # Берем изображение с максимальным разрешением
-                    best = max(sizes, key=lambda s: s.get('width', 0) * s.get('height', s.get('width', 0)))
-                    file_url = best.get('url', '')
-                    if file_url:
-                        logger.info(f"Получена прямая ссылка на фото из sizes: {file_url[:100]}...")
+            if not photo:
+                logger.warning("Пустой объект photo в вложении")
+                continue
+            
+            # Получаем URL самого качественного фото (последний элемент в sizes)
+            sizes = photo.get('sizes', [])
+            if sizes:
+                # Берем последний элемент - он самый качественный
+                best_photo = sizes[-1]
+                file_url = best_photo.get('url', '')
                 
-                # 2. Если нет sizes, пробуем через прямые ключи
-                if not file_url:
-                    for size_key in ['photo_2560', 'photo_1280', 'photo_807', 'photo_604', 'photo_130', 'photo_75']:
-                        if nested.get(size_key):
-                            file_url = nested[size_key]
-                            logger.info(f"Получена прямая ссылка на фото из {size_key}: {file_url[:100]}...")
-                            break
+                if file_url:
+                    # Извлекаем ID фото для имени файла
+                    photo_id = photo.get('id', '')
+                    owner_id = photo.get('owner_id', '')
+                    file_name = f"photo_{owner_id}_{photo_id}.jpg" if owner_id and photo_id else f"photo_{int(time.time())}.jpg"
+                    
+                    saved_files.append({
+                        'file_type': 'photo',
+                        'file_url': file_url,
+                        'original_name': file_name,
+                        'file_size': 0
+                    })
+                    text_parts.append(f"📎 {file_name}")
+                    logger.info(f"Получена прямая ссылка на фото: {file_url[:100]}...")
+                else:
+                    logger.warning("Не удалось получить URL фото из sizes")
+            else:
+                logger.warning("Нет sizes в фото")
                 
-                # 3. Если всё ещё нет URL, используем VK API
-                if not file_url and attach_id and vk_session:
-                    try:
-                        vk = vk_session.get_api()
-                        photo_id = f"{owner_id}_{attach_id}" if owner_id else attach_id
-                        
-                        # Метод photos.getById
-                        try:
-                            resp = vk.photos.getById(photos=photo_id, extended=0)
-                            if resp:
-                                photo_data = resp[0]
-                                # Сначала ищем sizes
-                                sizes = photo_data.get('sizes', [])
-                                if sizes:
-                                    best = max(sizes, key=lambda s: s.get('width', 0) * s.get('height', s.get('width', 0)))
-                                    file_url = best.get('url', '')
-                                    logger.info(f"Получена прямая ссылка на фото через API (sizes): {file_url[:100]}...")
-                                else:
-                                    # Ищем по прямым ключам
-                                    for size_key in ['photo_2560', 'photo_1280', 'photo_807', 'photo_604', 'photo_130', 'photo_75']:
-                                        if photo_data.get(size_key):
-                                            file_url = photo_data[size_key]
-                                            logger.info(f"Получена прямая ссылка на фото через API ({size_key}): {file_url[:100]}...")
-                                            break
-                        except Exception as e:
-                            logger.debug(f"photos.getById не сработал: {e}")
-                    except Exception as e:
-                        logger.error(f"Ошибка получения фото через VK API: {e}")
-
-                # 4. Если вообще не удалось получить прямую ссылку
-                if not file_url:
-                    # Формируем ссылку на страницу как fallback
-                    file_url = f"https://vk.com/photo{owner_id}_{attach_id}" if owner_id else f"https://vk.com/photo{attach_id}"
-                    logger.warning(f"Не удалось получить прямую ссылку на фото, используем страницу: {file_url}")
+        elif attach_type == 'doc':
+            # Для документов
+            doc = attachment.get('doc', {})
+            if doc:
+                file_url = doc.get('url', '')
+                file_name = doc.get('title', 'document')
+                file_size = doc.get('size', 0)
                 
-                file_name = f"photo_{attach_id}.jpg"
-
-            elif attach_type == 'doc':
-                # Для документов сразу берем URL
-                file_url = nested.get('url', '')
-                file_name = nested.get('title', 'document')
-                file_size = nested.get('size', 0)
+                if file_url:
+                    saved_files.append({
+                        'file_type': 'doc',
+                        'file_url': file_url,
+                        'original_name': file_name,
+                        'file_size': file_size
+                    })
+                    text_parts.append(f"📎 {file_name}")
+                    logger.info(f"Получена ссылка на документ: {file_url[:100]}...")
+                    
+        elif attach_type == 'video':
+            # Для видео
+            video = attachment.get('video', {})
+            if video:
+                file_url = video.get('player', '')
+                video_id = video.get('id', '')
+                owner_id = video.get('owner_id', '')
+                file_name = f"video_{owner_id}_{video_id}.mp4" if owner_id and video_id else f"video_{int(time.time())}.mp4"
                 
-                # Если нет прямой ссылки, пробуем через API
-                if not file_url and attach_id and vk_session:
-                    try:
-                        vk = vk_session.get_api()
-                        doc_id = f"{owner_id}_{attach_id}" if owner_id else attach_id
-                        resp = vk.docs.getById(docs=doc_id)
-                        if resp:
-                            doc_data = resp[0] if isinstance(resp, list) else resp
-                            file_url = doc_data.get('url', '')
-                            file_name = doc_data.get('title', file_name)
-                            file_size = doc_data.get('size', file_size)
-                            if file_url:
-                                logger.info(f"Получена прямая ссылка на документ: {file_url[:100]}...")
-                    except Exception as e:
-                        logger.error(f"Ошибка получения документа: {e}")
-
-            elif attach_type == 'video':
-                file_url = nested.get('player', '')
-                file_name = f"video_{attach_id}"
-                if not file_url:
-                    file_url = f"https://vk.com/video{owner_id}_{attach_id}" if owner_id else f"https://vk.com/video{attach_id}"
-
-            elif attach_type == 'link':
-                url = nested.get('url') or nested.get('link', {}).get('url', '')
+                if file_url:
+                    saved_files.append({
+                        'file_type': 'video',
+                        'file_url': file_url,
+                        'original_name': file_name,
+                        'file_size': 0
+                    })
+                    text_parts.append(f"📎 {file_name}")
+                    logger.info(f"Получена ссылка на видео: {file_url[:100]}...")
+                    
+        elif attach_type == 'link':
+            # Для ссылок
+            link = attachment.get('link', {})
+            if link:
+                url = link.get('url', '')
                 if url:
                     text_parts.append(f"🔗 {url}")
-                continue
-
-            elif attach_type == 'wall':
-                text_parts.append(f"🔗 https://vk.com/wall{owner_id}_{attach_id}")
-                continue
-
-            else:
-                text_parts.append(f"📎 Вложение ({attach_type})")
-                continue
-
-        elif isinstance(attach, str) and '_' in attach:
-            parts = attach.split('_')
-            if len(parts) >= 2:
-                owner_id, media_id = parts[0], parts[1]
-                # Пробуем получить прямую ссылку через API
-                direct_url = None
-                if vk_session:
-                    try:
-                        vk = vk_session.get_api()
-                        photo_id = f"{owner_id}_{media_id}"
-                        resp = vk.photos.getById(photos=photo_id, extended=0)
-                        if resp:
-                            photo_data = resp[0]
-                            for size_key in ['photo_2560', 'photo_1280', 'photo_807', 'photo_604']:
-                                if photo_data.get(size_key):
-                                    direct_url = photo_data[size_key]
-                                    break
-                    except Exception as e:
-                        logger.debug(f"Не удалось получить фото через API: {e}")
-                
-                file_url = direct_url if direct_url else f"https://vk.com/photo{owner_id}_{media_id}"
-                file_name = f"photo_{media_id}.jpg"
-                attach_type = 'photo'
-            else:
-                continue
-
-        if file_url:
-            saved_files.append({
-                'file_type': attach_type,
-                'file_url': file_url,
-                'original_name': file_name or f"{attach_type}_{attach_id or 'file'}",
-                'file_size': file_size
-            })
-            text_parts.append(f"📎 {file_name or 'файл'}")
+                    
+        elif attach_type == 'wall':
+            # Для постов на стене
+            wall = attachment.get('wall', {})
+            if wall:
+                wall_id = wall.get('id', '')
+                owner_id = wall.get('owner_id', '')
+                if wall_id and owner_id:
+                    text_parts.append(f"🔗 https://vk.com/wall{owner_id}_{wall_id}")
+                    
+        elif attach_type == 'audio':
+            # Для аудио
+            audio = attachment.get('audio', {})
+            if audio:
+                artist = audio.get('artist', '')
+                title = audio.get('title', '')
+                if artist or title:
+                    text_parts.append(f"🎵 {artist} - {title}")
+                    
+        else:
+            # Другие типы вложений
+            text_parts.append(f"📎 Вложение ({attach_type})")
+            logger.debug(f"Неизвестный тип вложения: {attach_type}")
 
     return saved_files, "\n".join(text_parts)
 
