@@ -44,151 +44,119 @@ logger = logging.getLogger(__name__)
 user_states = {}
 sent_notifications = {}
 agreement_sent = set()
-executor = ThreadPoolExecutor(max_workers=4)
+executor = ThreadPoolExecutor(max_workers=8)  # Увеличил количество потоков
 
-# Кэш для данных, чтобы не ходить в БД при каждом сообщении
-_cache = {
-    'settings': {},
-    'active_group': None,
-    'tasks': {},
-    'users': {},
-    'user_agreement': {},
-}
-_cache_time = {}
-CACHE_TTL = 10  # секунд
-
-
-def get_cached(key, fetch_func, ttl=CACHE_TTL):
-    """Универсальная функция получения данных с кэшированием"""
-    now = time.time()
-    if key in _cache and key in _cache_time and (now - _cache_time[key]) < ttl:
-        return _cache[key]
+# Улучшенный кэш с использованием словаря с временем жизни
+class TTLCache:
+    def __init__(self, ttl=10):
+        self._cache = {}
+        self._times = {}
+        self.ttl = ttl
     
-    try:
-        result = fetch_func()
-        _cache[key] = result
-        _cache_time[key] = now
-        return result
-    except Exception as e:
-        logger.error(f"Ошибка получения кэша для {key}: {e}")
-        return _cache.get(key)
+    def get(self, key):
+        if key in self._cache and key in self._times:
+            if time.time() - self._times[key] < self.ttl:
+                return self._cache.get(key)
+        return None
+    
+    def set(self, key, value):
+        self._cache[key] = value
+        self._times[key] = time.time()
+    
+    def invalidate(self, key=None):
+        if key:
+            self._cache.pop(key, None)
+            self._times.pop(key, None)
+        else:
+            self._cache.clear()
+            self._times.clear()
 
+# Кэши с разным TTL для разных типов данных
+cache_settings = TTLCache(ttl=30)  # Настройки - 30 сек
+cache_group = TTLCache(ttl=10)    # Группы - 10 сек
+cache_tasks = TTLCache(ttl=10)    # Задания - 10 сек
+cache_user = TTLCache(ttl=30)     # Пользователи - 30 сек
+cache_agreement = TTLCache(ttl=60) # Согласие - 60 сек
+cache_status = TTLCache(ttl=5)    # Статусы - 5 сек (самое частое)
 
+# Упрощенные функции получения кэшированных данных
 def get_settings_cached():
-    return get_cached('settings', get_bot_settings, CACHE_TTL)
-
+    data = cache_settings.get('settings')
+    if data is None:
+        data = get_bot_settings()
+        cache_settings.set('settings', data)
+    return data
 
 def get_active_group_cached():
-    return get_cached('active_group', get_active_task_group, CACHE_TTL)
-
+    data = cache_group.get('active_group')
+    if data is None:
+        data = get_active_task_group()
+        cache_group.set('active_group', data)
+    return data
 
 def get_tasks_cached(group_id):
     if not group_id:
         return []
     key = f'tasks_{group_id}'
-    return get_cached(key, lambda: get_tasks_for_group(group_id), CACHE_TTL)
-
+    data = cache_tasks.get(key)
+    if data is None:
+        data = get_tasks_for_group(group_id)
+        cache_tasks.set(key, data)
+    return data
 
 def get_user_cached(vk_id):
     key = f'user_{vk_id}'
-    return get_cached(key, lambda: get_user_by_vk_id(vk_id), CACHE_TTL)
-
+    data = cache_user.get(key)
+    if data is None:
+        data = get_user_by_vk_id(vk_id)
+        cache_user.set(key, data)
+    return data
 
 def get_user_agreement_cached(user_id):
     key = f'agreement_{user_id}'
-    return get_cached(key, lambda: check_user_agreement(user_id), CACHE_TTL)
+    data = cache_agreement.get(key)
+    if data is None:
+        data = check_user_agreement(user_id)
+        cache_agreement.set(key, data)
+    return data
 
+def get_task_status_cached(user_id, task_id):
+    key = f'status_{user_id}_{task_id}'
+    data = cache_status.get(key)
+    if data is None:
+        data = get_user_task_status(user_id, task_id)
+        cache_status.set(key, data)
+    return data
 
 def invalidate_cache():
-    """Сбрасывает кэш (вызывается при изменении данных)"""
-    global _cache, _cache_time
-    _cache = {}
-    _cache_time = {}
+    """Сбрасывает все кэши"""
+    cache_settings.invalidate()
+    cache_group.invalidate()
+    cache_tasks.invalidate()
+    cache_user.invalidate()
+    cache_agreement.invalidate()
+    cache_status.invalidate()
 
 
-# ============ Фоновые потоки ============
+# ============ Оптимизированные клавиатуры ============
 
-def send_notification_worker(vk):
-    """Фоновый поток для отправки уведомлений"""
-    while True:
-        try:
-            notifications = get_pending_notifications(limit=20)
-            if notifications:
-                for notif in notifications:
-                    try:
-                        if notif.get('vk_id'):
-                            vk.messages.send(
-                                user_id=notif['vk_id'],
-                                message=notif['message'],
-                                random_id=0
-                            )
-                            mark_notification_sent(notif['id'])
-                        else:
-                            mark_notification_sent(notif['id'])
-                        time.sleep(0.1)
-                    except Exception as e:
-                        logger.error(f"Ошибка отправки уведомления: {e}")
-                        mark_notification_sent(notif['id'])
-            time.sleep(3)
-        except Exception as e:
-            logger.error(f"Ошибка в потоке уведомлений: {e}")
-            time.sleep(5)
+# Кэш для клавиатур (чтобы не пересобирать каждый раз)
+keyboard_cache = {}
+KEYBOARD_CACHE_TTL = 30
 
-
-def check_request_messages_worker(vk):
-    """Фоновый поток для проверки новых сообщений в заявках"""
-    global sent_notifications
+def get_cached_keyboard(key, build_func, *args):
+    """Получает клавиатуру из кэша или создает новую"""
+    cache_key = f"{key}_{'_'.join(str(a) for a in args)}"
+    now = time.time()
     
-    while True:
-        try:
-            requests = get_all_requests_for_admin('open')
-            requests += get_all_requests_for_admin('in_progress')
-            
-            for req in requests:
-                request_id = req['id']
-                user_vk_id = req.get('vk_id')
-                
-                if not user_vk_id:
-                    continue
-                
-                last_msg = get_last_request_message(request_id)
-                if not last_msg or last_msg['user_id'] == req['user_id']:
-                    continue
-                
-                msg_key = f"{request_id}_{last_msg['id']}"
-                if sent_notifications.get(msg_key):
-                    continue
-                
-                try:
-                    sender_name = last_msg.get('first_name', 'Администратор')
-                    msg_text = f"📋 Новое сообщение по заявке #{request_id}\n"
-                    msg_text += f"📝 {req['subject']}\n"
-                    msg_text += "━" * 30 + "\n\n"
-                    msg_text += f"💬 {sender_name}: {last_msg['message']}\n\n"
-                    msg_text += "🔗 Чтобы ответить, перейдите в раздел '📋 Заявки' в боте."
-                    
-                    vk.messages.send(
-                        user_id=user_vk_id,
-                        message=msg_text,
-                        random_id=0
-                    )
-                    sent_notifications[msg_key] = True
-                    
-                except Exception as e:
-                    logger.error(f"Ошибка отправки уведомления о сообщении в заявке #{request_id}: {e}")
-                
-                time.sleep(0.1)
-            
-            if len(sent_notifications) > 100:
-                sent_notifications = dict(list(sent_notifications.items())[-50:])
-                
-        except Exception as e:
-            logger.error(f"Ошибка в потоке проверки заявок: {e}")
-        
-        time.sleep(8)
-
-
-# ============ Клавиатуры ============
+    if cache_key in keyboard_cache:
+        cached_data, timestamp = keyboard_cache[cache_key]
+        if now - timestamp < KEYBOARD_CACHE_TTL:
+            return cached_data
+    
+    keyboard = build_func(*args)
+    keyboard_cache[cache_key] = (keyboard, now)
+    return keyboard
 
 def create_main_keyboard(active_group, site_url=''):
     keyboard = VkKeyboard(one_time=False)
@@ -201,43 +169,41 @@ def create_main_keyboard(active_group, site_url=''):
         keyboard.add_button("🌐 Личный кабинет", color=VkKeyboardColor.POSITIVE)
     return keyboard.get_keyboard()
 
-
 def build_tasks_keyboard(tasks, user_id):
+    """Оптимизированная сборка клавиатуры заданий"""
     keyboard = VkKeyboard(one_time=False)
     
+    # Разделяем задания по сложности
     easy_tasks = [t for t in tasks if t['difficulty'] == 'easy']
     medium_tasks = [t for t in tasks if t['difficulty'] == 'medium']
     hard_tasks = [t for t in tasks if t['difficulty'] == 'hard']
     
     def add_task_buttons(task_list, prefix, emoji):
         for t in task_list:
-            # Быстрое получение статуса с кэшированием
-            status_key = f'status_{user_id}_{t["id"]}'
-            status = get_cached(status_key, lambda: get_user_task_status(user_id, t['id']), 5)
+            # Используем кэшированный статус
+            status = get_task_status_cached(user_id, t['id'])
             
             prefix_part = f" {prefix}: "
             max_title_len = 38 - len(emoji) - len(prefix_part)
-            title_display = t['title']
-            if len(title_display) > max_title_len:
-                title_display = t['title'][:max_title_len].rstrip() + '…'
+            title_display = t['title'][:max_title_len].rstrip() + '…' if len(t['title']) > max_title_len else t['title']
             
-            label = f"{emoji}{prefix_part}{title_display}"
-            color = VkKeyboardColor.PRIMARY
-            
-            if status:
-                if status == 'approved':
-                    label = f"✅{prefix_part}{title_display}"
-                    color = VkKeyboardColor.POSITIVE
-                elif status == 'pending':
-                    label = f"⏳{prefix_part}{title_display}"
-                    color = VkKeyboardColor.SECONDARY
-                elif status == 'rejected':
-                    label = f"❌{prefix_part}{title_display}"
-                    color = VkKeyboardColor.NEGATIVE
+            if status == 'approved':
+                label = f"✅{prefix_part}{title_display}"
+                color = VkKeyboardColor.POSITIVE
+            elif status == 'pending':
+                label = f"⏳{prefix_part}{title_display}"
+                color = VkKeyboardColor.SECONDARY
+            elif status == 'rejected':
+                label = f"❌{prefix_part}{title_display}"
+                color = VkKeyboardColor.NEGATIVE
+            else:
+                label = f"{emoji}{prefix_part}{title_display}"
+                color = VkKeyboardColor.PRIMARY
             
             keyboard.add_button(label, color=color)
             keyboard.add_line()
     
+    # Добавляем задания
     if easy_tasks:
         add_task_buttons(easy_tasks, "Легкое", "🟢")
     if medium_tasks:
@@ -252,12 +218,10 @@ def build_tasks_keyboard(tasks, user_id):
     keyboard.add_button("🔙 Назад в меню", color=VkKeyboardColor.SECONDARY)
     return keyboard.get_keyboard()
 
-
 def create_agreement_keyboard():
     keyboard = VkKeyboard(one_time=False)
     keyboard.add_button("✅ Подтверждаю", color=VkKeyboardColor.POSITIVE)
     return keyboard.get_keyboard()
-
 
 def create_requests_keyboard(requests):
     keyboard = VkKeyboard(one_time=False)
@@ -274,7 +238,6 @@ def create_requests_keyboard(requests):
     keyboard.add_button("🔙 Назад в меню", color=VkKeyboardColor.SECONDARY)
     return keyboard.get_keyboard()
 
-
 def create_request_chat_keyboard(request_id):
     keyboard = VkKeyboard(one_time=False)
     keyboard.add_button("✏️ Написать сообщение", color=VkKeyboardColor.PRIMARY)
@@ -283,7 +246,6 @@ def create_request_chat_keyboard(request_id):
     keyboard.add_line()
     keyboard.add_button("🔙 Назад к заявкам", color=VkKeyboardColor.SECONDARY)
     return keyboard.get_keyboard()
-
 
 def create_category_keyboard():
     keyboard = VkKeyboard(one_time=False)
@@ -297,38 +259,38 @@ def create_category_keyboard():
     return keyboard.get_keyboard()
 
 
-# ============ Вспомогательные функции ============
+# ============ Вспомогательные функции (оптимизированные) ============
 
 def get_task_from_button(text, tasks):
-    status_emoji = ['✅', '⏳', '❌']
-    diff_emoji = ['🟢', '🟡', '🔴', '📌']
-    prefixes = ['Легкое:', 'Среднее:', 'Сложное:']
-    
-    clean_text = text
-    for emoji in status_emoji + diff_emoji:
-        clean_text = clean_text.replace(emoji, '')
-    for prefix in prefixes:
+    """Быстрый поиск задания по тексту кнопки"""
+    # Удаляем эмодзи и префиксы
+    clean_text = re.sub(r'[✅⏳❌🟢🟡🔴📌]', '', text)
+    for prefix in ['Легкое:', 'Среднее:', 'Сложное:']:
         clean_text = clean_text.replace(prefix, '')
     clean_text = clean_text.strip()
     
+    # Поиск по точному совпадению
     for t in tasks:
-        full_title = t['title'].strip()
-        if full_title == clean_text or clean_text in full_title or full_title in clean_text:
-            return t
-        clean_part = clean_text.rstrip('…').rstrip()
-        if clean_part and full_title.startswith(clean_part):
+        if t['title'].strip() == clean_text:
             return t
     
+    # Поиск по началу строки
+    for t in tasks:
+        if clean_text and t['title'].startswith(clean_text.rstrip('…')):
+            return t
+    
+    # Поиск по ID
     match = re.search(r'#(\d+)', text)
     if match:
         task_id = int(match.group(1))
         for t in tasks:
             if t['id'] == task_id:
                 return t
+    
     return None
 
-
 def format_request_message(request, messages):
+    """Быстрое форматирование сообщения заявки"""
     status_emoji = {'open': '🟡', 'in_progress': '🔵', 'resolved': '✅', 'rejected': '❌'}
     status_text = {'open': 'Открыта', 'in_progress': 'В работе', 'resolved': 'Решена', 'rejected': 'Отклонена'}
     
@@ -336,25 +298,22 @@ def format_request_message(request, messages):
     msg += f"📝 {request['subject']}\n"
     msg += f"📊 Статус: {status_emoji.get(request['status'], '🟡')} {status_text.get(request['status'], request['status'])}\n"
     
-    created_at = request.get('created_at')
-    if created_at:
-        if hasattr(created_at, 'strftime'):
-            msg += f"📅 Создана: {created_at.strftime('%d.%m.%Y %H:%M')}\n"
+    if request.get('created_at'):
+        msg += f"📅 Создана: {request['created_at'].strftime('%d.%m.%Y %H:%M')}\n"
     msg += "\n"
     
     if messages:
         msg += "💬 Сообщения:\n"
         for msg_item in messages[-10:]:
             sender = msg_item.get('first_name', 'Пользователь')
-            msg_text = msg_item['message']
-            msg += f"👤 {sender}: {msg_text}\n"
+            msg += f"👤 {sender}: {msg_item['message']}\n"
     else:
         msg += "💬 Сообщений пока нет\n"
     
     return msg
 
-
 def format_task_message(task, report=None, task_status=None):
+    """Быстрое форматирование сообщения задания"""
     diff_emoji = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}
     diff_text = {'easy': 'Легкое', 'medium': 'Среднее', 'hard': 'Сложное'}
     
@@ -373,12 +332,6 @@ def format_task_message(task, report=None, task_status=None):
     
     msg += "\n📎 Для подтверждения выполнения прикрепите фото, видео или ссылку."
     return msg
-
-
-def get_category_label(category):
-    labels = {'site': '🌐 Сайт', 'bot': '🤖 Бот ВК', 'housing': '🏠 Жильё'}
-    return labels.get(category, category)
-
 
 def send_agreement_rules(vk, user_id):
     rules_text = (
@@ -404,16 +357,16 @@ def send_agreement_rules(vk, user_id):
     )
 
 
-# ============ Обработчик сообщений ============
+# ============ Обработчик сообщений (оптимизированный) ============
 
 def process_message(event, vk, vk_session):
-    """Обработка одного сообщения"""
+    """Обработка одного сообщения (оптимизированная)"""
     t_start = time.time()
     vk_id = event.user_id
     text = event.text.strip()
     
     try:
-        # Быстрое получение настроек из кэша
+        # Получаем настройки и группу из кэша
         settings = get_settings_cached()
         site_url = settings.get('site_url', '')
         active_group = get_active_group_cached()
@@ -421,21 +374,16 @@ def process_message(event, vk, vk_session):
         # Быстрый поиск пользователя
         db_user = get_user_cached(vk_id)
         if not db_user:
-            # Если нет в кэше, ищем в БД
             db_user = find_existing_user(vk_id, f"https://vk.com/id{vk_id}")
             if db_user:
-                _cache[f'user_{vk_id}'] = db_user
-                _cache_time[f'user_{vk_id}'] = time.time()
+                cache_user.set(f'user_{vk_id}', db_user)
         
         # Если пользователь новый
         if not db_user:
-            # Проверяем, не в процессе ли регистрации
             if vk_id in user_states and user_states.get(vk_id, {}).get('action', '').startswith('registration'):
-                # Обработка регистрации
                 handle_registration_state(vk_id, text, vk, active_group, site_url)
                 return
             
-            # Запрос согласия
             if text == "✅ Подтверждаю":
                 try:
                     user_info = vk.users.get(user_ids=vk_id)[0]
@@ -482,16 +430,14 @@ def process_message(event, vk, vk_session):
                 )
             return
         
-        # Проверка согласия (с кэшированием)
+        # Проверка согласия
         user_agreed = get_user_agreement_cached(db_user['id'])
         
         if not user_agreed:
             if text == "✅ Подтверждаю":
                 set_user_agreement(db_user['id'])
-                _cache[f'agreement_{db_user["id"]}'] = True
-                _cache_time[f'agreement_{db_user["id"]}'] = time.time()
-                if vk_id in agreement_sent:
-                    agreement_sent.remove(vk_id)
+                cache_agreement.set(f'agreement_{db_user["id"]}', True)
+                agreement_sent.discard(vk_id)
                 vk.messages.send(
                     user_id=vk_id,
                     message="✅ Спасибо! Вы подтвердили согласие с правилами пребывания на Форуме.\n\nТеперь вам доступны все функции бота.",
@@ -513,8 +459,7 @@ def process_message(event, vk, vk_session):
             return
         
         # Если пользователь согласился
-        if vk_id in agreement_sent:
-            agreement_sent.remove(vk_id)
+        agreement_sent.discard(vk_id)
         
         # Проверяем состояние регистрации
         if vk_id in user_states and user_states.get(vk_id, {}).get('action', '').startswith('registration'):
@@ -654,7 +599,7 @@ def process_message(event, vk, vk_session):
                 response_msg += f"\n📎 Прикреплено файлов: {len(saved_files)}"
             
             # Инвалидируем кэш статусов
-            _cache.pop(f'status_{db_user["id"]}_{task["id"]}', None)
+            cache_status.invalidate(f'status_{db_user["id"]}_{task["id"]}')
             
             if active_group:
                 tasks = get_tasks_cached(active_group['id'])
@@ -690,7 +635,6 @@ def process_message(event, vk, vk_session):
         
         elif text == "👤 Мой профиль":
             tickets = get_user_tickets(db_user['id'])
-            # Обновляем данные пользователя
             fresh_user = get_user_by_vk_id(vk_id) or db_user
             
             msg = f"👤 Ваш профиль\n\n"
@@ -792,7 +736,7 @@ def process_message(event, vk, vk_session):
             
             if matched_task:
                 report = get_user_task_report(db_user['id'], matched_task['id'])
-                task_status = get_user_task_status(db_user['id'], matched_task['id'])
+                task_status = get_task_status_cached(db_user['id'], matched_task['id'])
                 user_states[vk_id] = matched_task
                 vk.messages.send(
                     user_id=vk_id,
@@ -813,12 +757,12 @@ def process_message(event, vk, vk_session):
         logger.error(f"Ошибка обработки сообщения от {vk_id}: {e}", exc_info=True)
     
     elapsed = time.time() - t_start
-    if elapsed > 0.5:
+    if elapsed > 0.3:
         logger.warning(f"⚠️ Сообщение от {vk_id} обрабатывалось {elapsed:.2f}с")
 
 
 def handle_registration_state(vk_id, text, vk, active_group, site_url, db_user=None):
-    """Обработка состояния регистрации"""
+    """Обработка состояния регистрации (без изменений)"""
     state = user_states.get(vk_id, {})
     action = state.get('action', '')
     vk_url = f"https://vk.com/id{vk_id}"
@@ -827,10 +771,8 @@ def handle_registration_state(vk_id, text, vk, active_group, site_url, db_user=N
         if text == "✅ Да":
             user = find_or_create_user(vk_id, state['first_name'], state['last_name'], vk_url)
             set_user_agreement(user['id'])
-            _cache[f'user_{vk_id}'] = user
-            _cache[f'agreement_{user["id"]}'] = True
-            _cache_time[f'user_{vk_id}'] = time.time()
-            _cache_time[f'agreement_{user["id"]}'] = time.time()
+            cache_user.set(f'user_{vk_id}', user)
+            cache_agreement.set(f'agreement_{user["id"]}', True)
             agreement_sent.discard(vk_id)
             user_states.pop(vk_id, None)
             
@@ -895,10 +837,8 @@ def handle_registration_state(vk_id, text, vk, active_group, site_url, db_user=N
         if text == "✅ Да":
             user = find_or_create_user(vk_id, state['first_name'], state['last_name'], vk_url)
             set_user_agreement(user['id'])
-            _cache[f'user_{vk_id}'] = user
-            _cache[f'agreement_{user["id"]}'] = True
-            _cache_time[f'user_{vk_id}'] = time.time()
-            _cache_time[f'agreement_{user["id"]}'] = time.time()
+            cache_user.set(f'user_{vk_id}', user)
+            cache_agreement.set(f'agreement_{user["id"]}', True)
             agreement_sent.discard(vk_id)
             user_states.pop(vk_id, None)
             
@@ -952,13 +892,92 @@ def main():
 
     logger.info("✅ Бот успешно подключен к ВКонтакте и ожидает сообщений!")
 
-    # Создаем пул потоков для обработки сообщений
-    executor = ThreadPoolExecutor(max_workers=4)
+    # Увеличиваем количество потоков для обработки сообщений
+    executor = ThreadPoolExecutor(max_workers=8)
 
     for event in longpoll.listen():
         if event.type == VkEventType.MESSAGE_NEW and event.to_me:
-            # Отправляем обработку в отдельный поток
             executor.submit(process_message, event, vk, vk_session)
+
+
+def send_notification_worker(vk):
+    """Фоновый поток для отправки уведомлений"""
+    while True:
+        try:
+            notifications = get_pending_notifications(limit=20)
+            if notifications:
+                for notif in notifications:
+                    try:
+                        if notif.get('vk_id'):
+                            vk.messages.send(
+                                user_id=notif['vk_id'],
+                                message=notif['message'],
+                                random_id=0
+                            )
+                            mark_notification_sent(notif['id'])
+                        else:
+                            mark_notification_sent(notif['id'])
+                        time.sleep(0.1)
+                    except Exception as e:
+                        logger.error(f"Ошибка отправки уведомления: {e}")
+                        mark_notification_sent(notif['id'])
+            time.sleep(3)
+        except Exception as e:
+            logger.error(f"Ошибка в потоке уведомлений: {e}")
+            time.sleep(5)
+
+
+def check_request_messages_worker(vk):
+    """Фоновый поток для проверки новых сообщений в заявках"""
+    global sent_notifications
+    
+    while True:
+        try:
+            requests = get_all_requests_for_admin('open')
+            requests += get_all_requests_for_admin('in_progress')
+            
+            for req in requests:
+                request_id = req['id']
+                user_vk_id = req.get('vk_id')
+                
+                if not user_vk_id:
+                    continue
+                
+                last_msg = get_last_request_message(request_id)
+                if not last_msg or last_msg['user_id'] == req['user_id']:
+                    continue
+                
+                msg_key = f"{request_id}_{last_msg['id']}"
+                if sent_notifications.get(msg_key):
+                    continue
+                
+                try:
+                    sender_name = last_msg.get('first_name', 'Администратор')
+                    msg_text = f"📋 Новое сообщение по заявке #{request_id}\n"
+                    msg_text += f"📝 {req['subject']}\n"
+                    msg_text += "━" * 30 + "\n\n"
+                    msg_text += f"💬 {sender_name}: {last_msg['message']}\n\n"
+                    msg_text += "🔗 Чтобы ответить, перейдите в раздел '📋 Заявки' в боте."
+                    
+                    vk.messages.send(
+                        user_id=user_vk_id,
+                        message=msg_text,
+                        random_id=0
+                    )
+                    sent_notifications[msg_key] = True
+                    
+                except Exception as e:
+                    logger.error(f"Ошибка отправки уведомления о сообщении в заявке #{request_id}: {e}")
+                
+                time.sleep(0.1)
+            
+            if len(sent_notifications) > 100:
+                sent_notifications = dict(list(sent_notifications.items())[-50:])
+                
+        except Exception as e:
+            logger.error(f"Ошибка в потоке проверки заявок: {e}")
+        
+        time.sleep(8)
 
 
 if __name__ == '__main__':
