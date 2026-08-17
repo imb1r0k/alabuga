@@ -3,7 +3,6 @@ import threading
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache
 from datetime import datetime, timedelta
 
 import vk_api
@@ -44,108 +43,87 @@ logger = logging.getLogger(__name__)
 user_states = {}
 sent_notifications = {}
 agreement_sent = set()
-executor = ThreadPoolExecutor(max_workers=8)  # Увеличил количество потоков
+executor = ThreadPoolExecutor(max_workers=10)
 
-# Улучшенный кэш с использованием словаря с временем жизни
-class TTLCache:
-    def __init__(self, ttl=10):
-        self._cache = {}
-        self._times = {}
-        self.ttl = ttl
-    
-    def get(self, key):
-        if key in self._cache and key in self._times:
-            if time.time() - self._times[key] < self.ttl:
-                return self._cache.get(key)
-        return None
-    
-    def set(self, key, value):
-        self._cache[key] = value
-        self._times[key] = time.time()
-    
-    def invalidate(self, key=None):
-        if key:
-            self._cache.pop(key, None)
-            self._times.pop(key, None)
-        else:
-            self._cache.clear()
-            self._times.clear()
+# Простой кэш с временем жизни
+cache = {}
+cache_time = {}
+CACHE_TTL = {
+    'settings': 30,
+    'group': 10,
+    'tasks': 10,
+    'user': 30,
+    'agreement': 60,
+    'status': 3,  # Уменьшил до 3 секунд для статусов
+}
 
-# Кэши с разным TTL для разных типов данных
-cache_settings = TTLCache(ttl=30)  # Настройки - 30 сек
-cache_group = TTLCache(ttl=10)    # Группы - 10 сек
-cache_tasks = TTLCache(ttl=10)    # Задания - 10 сек
-cache_user = TTLCache(ttl=30)     # Пользователи - 30 сек
-cache_agreement = TTLCache(ttl=60) # Согласие - 60 сек
-cache_status = TTLCache(ttl=5)    # Статусы - 5 сек (самое частое)
 
-# Упрощенные функции получения кэшированных данных
+def get_cached(key, fetch_func, ttl_key='default'):
+    """Универсальная функция получения данных с кэшированием"""
+    now = time.time()
+    ttl = CACHE_TTL.get(ttl_key, 10)
+    
+    if key in cache and key in cache_time and (now - cache_time[key]) < ttl:
+        return cache[key]
+    
+    try:
+        result = fetch_func()
+        cache[key] = result
+        cache_time[key] = now
+        return result
+    except Exception as e:
+        logger.error(f"Ошибка получения кэша для {key}: {e}")
+        return cache.get(key)
+
+
+def invalidate_cache(key=None):
+    """Сбрасывает кэш"""
+    global cache, cache_time
+    if key:
+        cache.pop(key, None)
+        cache_time.pop(key, None)
+    else:
+        cache.clear()
+        cache_time.clear()
+
+
 def get_settings_cached():
-    data = cache_settings.get('settings')
-    if data is None:
-        data = get_bot_settings()
-        cache_settings.set('settings', data)
-    return data
+    return get_cached('settings', get_bot_settings, 'settings')
+
 
 def get_active_group_cached():
-    data = cache_group.get('active_group')
-    if data is None:
-        data = get_active_task_group()
-        cache_group.set('active_group', data)
-    return data
+    return get_cached('active_group', get_active_task_group, 'group')
+
 
 def get_tasks_cached(group_id):
     if not group_id:
         return []
     key = f'tasks_{group_id}'
-    data = cache_tasks.get(key)
-    if data is None:
-        data = get_tasks_for_group(group_id)
-        cache_tasks.set(key, data)
-    return data
+    return get_cached(key, lambda: get_tasks_for_group(group_id), 'tasks')
+
 
 def get_user_cached(vk_id):
     key = f'user_{vk_id}'
-    data = cache_user.get(key)
-    if data is None:
-        data = get_user_by_vk_id(vk_id)
-        cache_user.set(key, data)
-    return data
+    return get_cached(key, lambda: get_user_by_vk_id(vk_id), 'user')
+
 
 def get_user_agreement_cached(user_id):
     key = f'agreement_{user_id}'
-    data = cache_agreement.get(key)
-    if data is None:
-        data = check_user_agreement(user_id)
-        cache_agreement.set(key, data)
-    return data
+    return get_cached(key, lambda: check_user_agreement(user_id), 'agreement')
+
 
 def get_task_status_cached(user_id, task_id):
     key = f'status_{user_id}_{task_id}'
-    data = cache_status.get(key)
-    if data is None:
-        data = get_user_task_status(user_id, task_id)
-        cache_status.set(key, data)
-    return data
-
-def invalidate_cache():
-    """Сбрасывает все кэши"""
-    cache_settings.invalidate()
-    cache_group.invalidate()
-    cache_tasks.invalidate()
-    cache_user.invalidate()
-    cache_agreement.invalidate()
-    cache_status.invalidate()
+    return get_cached(key, lambda: get_user_task_status(user_id, task_id), 'status')
 
 
-# ============ Оптимизированные клавиатуры ============
+# ============ Клавиатуры (кэширование) ============
 
-# Кэш для клавиатур (чтобы не пересобирать каждый раз)
 keyboard_cache = {}
 KEYBOARD_CACHE_TTL = 30
 
 def get_cached_keyboard(key, build_func, *args):
-    """Получает клавиатуру из кэша или создает новую"""
+    """Получает клавиатуру из кэша"""
     cache_key = f"{key}_{'_'.join(str(a) for a in args)}"
     now = time.time()
     
@@ -170,17 +148,17 @@ def create_main_keyboard(active_group, site_url=''):
     return keyboard.get_keyboard()
 
 def build_tasks_keyboard(tasks, user_id):
-    """Оптимизированная сборка клавиатуры заданий"""
+    """Быстрая сборка клавиатуры заданий"""
     keyboard = VkKeyboard(one_time=False)
     
-    # Разделяем задания по сложности
+    # Разделяем по сложности
     easy_tasks = [t for t in tasks if t['difficulty'] == 'easy']
     medium_tasks = [t for t in tasks if t['difficulty'] == 'medium']
     hard_tasks = [t for t in tasks if t['difficulty'] == 'hard']
     
     def add_task_buttons(task_list, prefix, emoji):
         for t in task_list:
-            # Используем кэшированный статус
+            # Получаем статус из кэша
             status = get_task_status_cached(user_id, t['id'])
             
             prefix_part = f" {prefix}: "
@@ -203,7 +181,6 @@ def build_tasks_keyboard(tasks, user_id):
             keyboard.add_button(label, color=color)
             keyboard.add_line()
     
-    # Добавляем задания
     if easy_tasks:
         add_task_buttons(easy_tasks, "Легкое", "🟢")
     if medium_tasks:
@@ -259,7 +236,7 @@ def create_category_keyboard():
     return keyboard.get_keyboard()
 
 
-# ============ Вспомогательные функции (оптимизированные) ============
+# ============ Вспомогательные функции ============
 
 def get_task_from_button(text, tasks):
     """Быстрый поиск задания по тексту кнопки"""
@@ -269,14 +246,15 @@ def get_task_from_button(text, tasks):
         clean_text = clean_text.replace(prefix, '')
     clean_text = clean_text.strip()
     
-    # Поиск по точному совпадению
+    # Прямое сравнение
     for t in tasks:
         if t['title'].strip() == clean_text:
             return t
     
-    # Поиск по началу строки
+    # Сравнение по началу
+    clean_part = clean_text.rstrip('…')
     for t in tasks:
-        if clean_text and t['title'].startswith(clean_text.rstrip('…')):
+        if clean_part and t['title'].startswith(clean_part):
             return t
     
     # Поиск по ID
@@ -289,8 +267,29 @@ def get_task_from_button(text, tasks):
     
     return None
 
+def format_task_message(task, report=None, task_status=None):
+    """Форматирование сообщения задания"""
+    diff_emoji = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}
+    diff_text = {'easy': 'Легкое', 'medium': 'Среднее', 'hard': 'Сложное'}
+    
+    msg = f"📌 {task['title']}\n\n"
+    msg += f"📝 {task['description']}\n\n"
+    msg += f"⭐ Сложность: {diff_emoji.get(task['difficulty'], '📌')} {diff_text.get(task['difficulty'], task['difficulty'])}\n"
+    msg += f"🎯 Баллы: {task['points']}\n\n"
+    
+    if task_status == 'approved' or (report and report.get('status') == 'approved'):
+        msg += "✅ Статус: Выполнено! Баллы зачислены.\n"
+    elif report and report.get('status') == 'pending':
+        msg += "⏳ Статус: На рассмотрении администратора.\nПожалуйста, ожидайте проверки.\n"
+    elif report and report.get('status') == 'rejected':
+        reason = report.get('reject_reason', 'Не выполнено')
+        msg += f"❌ Статус: Отклонено\nПричина: {reason}\n\n📝 Отправьте отчет повторно с исправлениями."
+    
+    msg += "\n📎 Для подтверждения выполнения прикрепите фото, видео или ссылку."
+    return msg
+
 def format_request_message(request, messages):
-    """Быстрое форматирование сообщения заявки"""
+    """Форматирование сообщения заявки"""
     status_emoji = {'open': '🟡', 'in_progress': '🔵', 'resolved': '✅', 'rejected': '❌'}
     status_text = {'open': 'Открыта', 'in_progress': 'В работе', 'resolved': 'Решена', 'rejected': 'Отклонена'}
     
@@ -310,27 +309,6 @@ def format_request_message(request, messages):
     else:
         msg += "💬 Сообщений пока нет\n"
     
-    return msg
-
-def format_task_message(task, report=None, task_status=None):
-    """Быстрое форматирование сообщения задания"""
-    diff_emoji = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}
-    diff_text = {'easy': 'Легкое', 'medium': 'Среднее', 'hard': 'Сложное'}
-    
-    msg = f"📌 {task['title']}\n\n"
-    msg += f"📝 {task['description']}\n\n"
-    msg += f"⭐ Сложность: {diff_emoji.get(task['difficulty'], '📌')} {diff_text.get(task['difficulty'], task['difficulty'])}\n"
-    msg += f"🎯 Баллы: {task['points']}\n\n"
-    
-    if task_status == 'approved' or (report and report.get('status') == 'approved'):
-        msg += "✅ Статус: Выполнено! Баллы зачислены.\n"
-    elif report and report.get('status') == 'pending':
-        msg += "⏳ Статус: На рассмотрении администратора.\nПожалуйста, ожидайте проверки.\n"
-    elif report and report.get('status') == 'rejected':
-        reason = report.get('reject_reason', 'Не выполнено')
-        msg += f"❌ Статус: Отклонено\nПричина: {reason}\n\n📝 Отправьте отчет повторно с исправлениями."
-    
-    msg += "\n📎 Для подтверждения выполнения прикрепите фото, видео или ссылку."
     return msg
 
 def send_agreement_rules(vk, user_id):
@@ -357,10 +335,10 @@ def send_agreement_rules(vk, user_id):
     )
 
 
-# ============ Обработчик сообщений (оптимизированный) ============
+# ============ ОБРАБОТЧИК СООБЩЕНИЙ (ОПТИМИЗИРОВАННЫЙ) ============
 
 def process_message(event, vk, vk_session):
-    """Обработка одного сообщения (оптимизированная)"""
+    """Обработка одного сообщения"""
     t_start = time.time()
     vk_id = event.user_id
     text = event.text.strip()
@@ -371,14 +349,15 @@ def process_message(event, vk, vk_session):
         site_url = settings.get('site_url', '')
         active_group = get_active_group_cached()
         
-        # Быстрый поиск пользователя
+        # --- ПОИСК ПОЛЬЗОВАТЕЛЯ ---
         db_user = get_user_cached(vk_id)
         if not db_user:
             db_user = find_existing_user(vk_id, f"https://vk.com/id{vk_id}")
             if db_user:
-                cache_user.set(f'user_{vk_id}', db_user)
+                cache[f'user_{vk_id}'] = db_user
+                cache_time[f'user_{vk_id}'] = time.time()
         
-        # Если пользователь новый
+        # НОВЫЙ ПОЛЬЗОВАТЕЛЬ
         if not db_user:
             if vk_id in user_states and user_states.get(vk_id, {}).get('action', '').startswith('registration'):
                 handle_registration_state(vk_id, text, vk, active_group, site_url)
@@ -430,13 +409,14 @@ def process_message(event, vk, vk_session):
                 )
             return
         
-        # Проверка согласия
+        # --- ПРОВЕРКА СОГЛАСИЯ ---
         user_agreed = get_user_agreement_cached(db_user['id'])
         
         if not user_agreed:
             if text == "✅ Подтверждаю":
                 set_user_agreement(db_user['id'])
-                cache_agreement.set(f'agreement_{db_user["id"]}', True)
+                cache[f'agreement_{db_user["id"]}'] = True
+                cache_time[f'agreement_{db_user["id"]}'] = time.time()
                 agreement_sent.discard(vk_id)
                 vk.messages.send(
                     user_id=vk_id,
@@ -458,43 +438,23 @@ def process_message(event, vk, vk_session):
                 )
             return
         
-        # Если пользователь согласился
         agreement_sent.discard(vk_id)
         
-        # Проверяем состояние регистрации
+        # --- ПРОВЕРКА РЕГИСТРАЦИИ ---
         if vk_id in user_states and user_states.get(vk_id, {}).get('action', '').startswith('registration'):
             handle_registration_state(vk_id, text, vk, active_group, site_url, db_user)
             return
         
-        # Основная обработка
+        # --- ОСНОВНАЯ ОБРАБОТКА ---
         state = user_states.get(vk_id)
         
-        # Обработка вложений
+        # ===== ОБРАБОТКА ВЛОЖЕНИЙ (ОПТИМИЗИРОВАННО) =====
         attachments = []
         if event.attachments:
+            # Используем event.attachments напрямую, без лишних API-запросов
             attachments = event.attachments
-            try:
-                message_data = vk.messages.getById(message_ids=event.message_id)
-                if message_data and 'items' in message_data and len(message_data['items']) > 0:
-                    msg_attachments = message_data['items'][0].get('attachments', [])
-                    if msg_attachments:
-                        new_attachments = {}
-                        for i, att in enumerate(msg_attachments):
-                            att_type = att.get('type')
-                            att_data = att.get(att_type, {})
-                            new_attachments[f'attach{i+1}'] = {
-                                'type': att_type,
-                                'id': att_data.get('id'),
-                                'owner_id': att_data.get('owner_id'),
-                                'access_key': att_data.get('access_key', ''),
-                                'data': att_data
-                            }
-                            new_attachments[f'attach{i+1}_type'] = att_type
-                        attachments = new_attachments
-            except Exception as e:
-                logger.error(f"Ошибка получения вложений: {e}")
         
-        # --- Обработка состояний ---
+        # ===== ОБРАБОТКА СОСТОЯНИЙ =====
         
         # Назад
         if text in ["🔙 Назад в меню", "🔙 Назад", "🔙 Назад к заявкам"]:
@@ -574,6 +534,7 @@ def process_message(event, vk, vk_session):
             
             if attachments:
                 try:
+                    # process_vk_attachments уже использует API, ничего не делаем
                     saved_files, attachment_text = process_vk_attachments(attachments, vk_session)
                     if attachment_text:
                         text = f"{text}\n\n📎 Прикрепленные файлы:\n{attachment_text}" if text else f"📎 Прикрепленные файлы:\n{attachment_text}"
@@ -598,8 +559,8 @@ def process_message(event, vk, vk_session):
             if has_attachments:
                 response_msg += f"\n📎 Прикреплено файлов: {len(saved_files)}"
             
-            # Инвалидируем кэш статусов
-            cache_status.invalidate(f'status_{db_user["id"]}_{task["id"]}')
+            # Инвалидируем кэш статуса
+            invalidate_cache(f'status_{db_user["id"]}_{task["id"]}')
             
             if active_group:
                 tasks = get_tasks_cached(active_group['id'])
@@ -610,7 +571,7 @@ def process_message(event, vk, vk_session):
             vk.messages.send(user_id=vk_id, message=response_msg, random_id=0, keyboard=keyboard)
             return
         
-        # --- Основные команды ---
+        # ===== ОСНОВНЫЕ КОМАНДЫ =====
         
         if text in ["📋 Задания", "/start", "Начать", "Старт"]:
             if not active_group:
@@ -710,7 +671,7 @@ def process_message(event, vk, vk_session):
             )
             return
         
-        # --- Обработка нажатий ---
+        # ===== ОБРАБОТКА НАЖАТИЙ =====
         
         # Заявка
         if 'Заявка #' in text or '#' in text:
@@ -757,12 +718,12 @@ def process_message(event, vk, vk_session):
         logger.error(f"Ошибка обработки сообщения от {vk_id}: {e}", exc_info=True)
     
     elapsed = time.time() - t_start
-    if elapsed > 0.3:
+    if elapsed > 0.5:
         logger.warning(f"⚠️ Сообщение от {vk_id} обрабатывалось {elapsed:.2f}с")
 
 
 def handle_registration_state(vk_id, text, vk, active_group, site_url, db_user=None):
-    """Обработка состояния регистрации (без изменений)"""
+    """Обработка состояния регистрации"""
     state = user_states.get(vk_id, {})
     action = state.get('action', '')
     vk_url = f"https://vk.com/id{vk_id}"
@@ -771,8 +732,10 @@ def handle_registration_state(vk_id, text, vk, active_group, site_url, db_user=N
         if text == "✅ Да":
             user = find_or_create_user(vk_id, state['first_name'], state['last_name'], vk_url)
             set_user_agreement(user['id'])
-            cache_user.set(f'user_{vk_id}', user)
-            cache_agreement.set(f'agreement_{user["id"]}', True)
+            cache[f'user_{vk_id}'] = user
+            cache_time[f'user_{vk_id}'] = time.time()
+            cache[f'agreement_{user["id"]}'] = True
+            cache_time[f'agreement_{user["id"]}'] = time.time()
             agreement_sent.discard(vk_id)
             user_states.pop(vk_id, None)
             
@@ -837,8 +800,10 @@ def handle_registration_state(vk_id, text, vk, active_group, site_url, db_user=N
         if text == "✅ Да":
             user = find_or_create_user(vk_id, state['first_name'], state['last_name'], vk_url)
             set_user_agreement(user['id'])
-            cache_user.set(f'user_{vk_id}', user)
-            cache_agreement.set(f'agreement_{user["id"]}', True)
+            cache[f'user_{vk_id}'] = user
+            cache_time[f'user_{vk_id}'] = time.time()
+            cache[f'agreement_{user["id"]}'] = True
+            cache_time[f'agreement_{user["id"]}'] = time.time()
             agreement_sent.discard(vk_id)
             user_states.pop(vk_id, None)
             
@@ -892,8 +857,7 @@ def main():
 
     logger.info("✅ Бот успешно подключен к ВКонтакте и ожидает сообщений!")
 
-    # Увеличиваем количество потоков для обработки сообщений
-    executor = ThreadPoolExecutor(max_workers=8)
+    executor = ThreadPoolExecutor(max_workers=10)
 
     for event in longpoll.listen():
         if event.type == VkEventType.MESSAGE_NEW and event.to_me:
