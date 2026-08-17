@@ -2,10 +2,7 @@ import time
 import threading
 import logging
 import re
-import asyncio
-import aiohttp
 from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache
 from datetime import datetime, timedelta
 
 import vk_api
@@ -55,12 +52,12 @@ _cache = {
     'tasks': {},
     'users': {},
     'user_agreement': {},
-    'task_by_title': {},  # Быстрый поиск заданий по названию
+    'task_by_title': {},
 }
 _cache_time = {}
-CACHE_TTL_LONG = 300  # 5 минут
-CACHE_TTL_MEDIUM = 60  # 1 минута
-CACHE_TTL_SHORT = 5   # 5 секунд
+CACHE_TTL_LONG = 300
+CACHE_TTL_MEDIUM = 60
+CACHE_TTL_SHORT = 5
 
 
 def get_cached(key, fetch_func, ttl=CACHE_TTL_MEDIUM):
@@ -93,7 +90,6 @@ def get_tasks_cached(group_id):
     key = f'tasks_{group_id}'
     tasks = get_cached(key, lambda: get_tasks_for_group(group_id), CACHE_TTL_MEDIUM)
     
-    # Создаем индекс для быстрого поиска
     if tasks:
         task_by_title_key = f'task_by_title_{group_id}'
         task_by_title = {}
@@ -116,17 +112,14 @@ def get_task_by_title_cached(group_id, text):
     task_by_title = get_cached(task_by_title_key, lambda: {}, CACHE_TTL_MEDIUM)
     
     if not task_by_title:
-        # Загружаем задачи, если индекса нет
         tasks = get_tasks_cached(group_id)
         if not tasks:
             return None
         task_by_title = _cache.get(task_by_title_key, {})
     
-    # Прямой поиск в индексе
     if text in task_by_title:
         return task_by_title[text]
     
-    # Поиск с очисткой эмодзи
     clean_text = text
     for emoji in ['✅', '⏳', '❌', '🟢', '🟡', '🔴', '📌']:
         clean_text = clean_text.replace(emoji, '')
@@ -136,7 +129,6 @@ def get_task_by_title_cached(group_id, text):
     if clean_text in task_by_title:
         return task_by_title[clean_text]
     
-    # Поиск по ID
     match = re.search(r'#(\d+)', text)
     if match:
         task_id = int(match.group(1))
@@ -158,24 +150,20 @@ def get_user_agreement_cached(user_id):
 
 
 def get_task_status_cached(user_id, task_id):
-    """Кэширование статуса задания"""
     key = f'status_{user_id}_{task_id}'
     return get_cached(key, lambda: get_user_task_status(user_id, task_id), CACHE_TTL_SHORT)
 
 
 def invalidate_cache():
-    """Сбрасывает кэш"""
     global _cache, _cache_time
     _cache = {}
     _cache_time = {}
 
 
 def cache_cleaner():
-    """Фоновый поток для очистки старого кэша"""
     while True:
         time.sleep(60)
         now = time.time()
-        # Удаляем старые записи
         old_keys = [k for k, t in _cache_time.items() if (now - t) > 3600]
         for key in old_keys:
             _cache.pop(key, None)
@@ -185,7 +173,6 @@ def cache_cleaner():
 # ============ Фоновые потоки ============
 
 def send_notification_worker(vk):
-    """Фоновый поток для отправки уведомлений"""
     while True:
         try:
             notifications = get_pending_notifications(limit=20)
@@ -212,7 +199,6 @@ def send_notification_worker(vk):
 
 
 def check_request_messages_worker(vk):
-    """Фоновый поток для проверки новых сообщений в заявках"""
     global sent_notifications
     
     while True:
@@ -287,7 +273,6 @@ def build_tasks_keyboard(tasks, user_id):
     
     def add_task_buttons(task_list, prefix, emoji):
         for t in task_list:
-            # Быстрое получение статуса с кэшированием
             status = get_task_status_cached(user_id, t['id'])
             
             prefix_part = f" {prefix}: "
@@ -450,38 +435,66 @@ def send_agreement_rules(vk, user_id):
     )
 
 
+def send_credentials_message(vk, user_id, user_data, site_url=''):
+    """
+    Отправляет пользователю логин и пароль от аккаунта
+    """
+    if user_data.get('generated_password'):
+        login_msg = (
+            "✅ Аккаунт успешно зарегистрирован на сайте!\n\n"
+            "🔐 Данные для входа:\n"
+            f"👤 Фамилия: {user_data.get('last_name', '')}\n"
+            f"Имя: {user_data.get('first_name', '')}\n"
+            f"🔑 Логин: {user_data.get('login', '')}\n"
+            f"🔐 Пароль: {user_data.get('generated_password', '')}\n\n"
+            "⚠️ СОХРАНИТЕ ЭТИ ДАННЫЕ!\n"
+            "Пароль сгенерирован автоматически, вы можете изменить его после входа.\n\n"
+            f"🌐 Сайт: {site_url}\n"
+            "Рекомендуем сразу войти и сменить пароль."
+        )
+    else:
+        login_msg = (
+            "✅ Аккаунт успешно зарегистрирован на сайте!\n"
+            "Теперь вам доступны все функции бота.\n\n"
+            f"🌐 Сайт: {site_url}"
+        )
+    
+    try:
+        vk.messages.send(
+            user_id=user_id,
+            message=login_msg,
+            random_id=0,
+            keyboard=create_main_keyboard(active_group_cached(), site_url)
+        )
+        logger.info(f"✅ Данные для входа отправлены пользователю {user_id}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка отправки данных для входа пользователю {user_id}: {e}")
+
+
 # ============ Обработчик сообщений ============
 
 def process_message(event, vk, vk_session):
-    """Обработка одного сообщения"""
     t_start = time.time()
     vk_id = event.user_id
     text = event.text.strip()
     
     try:
-        # Быстрое получение настроек из кэша
         settings = get_settings_cached()
         site_url = settings.get('site_url', '')
         active_group = get_active_group_cached()
         
-        # Быстрый поиск пользователя
         db_user = get_user_cached(vk_id)
         if not db_user:
-            # Если нет в кэше, ищем в БД
             db_user = find_existing_user(vk_id, f"https://vk.com/id{vk_id}")
             if db_user:
                 _cache[f'user_{vk_id}'] = db_user
                 _cache_time[f'user_{vk_id}'] = time.time()
         
-        # Если пользователь новый
         if not db_user:
-            # Проверяем, не в процессе ли регистрации
             if vk_id in user_states and user_states.get(vk_id, {}).get('action', '').startswith('registration'):
-                # Обработка регистрации
                 handle_registration_state(vk_id, text, vk, active_group, site_url)
                 return
             
-            # Запрос согласия
             if text == "✅ Подтверждаю":
                 try:
                     user_info = vk.users.get(user_ids=vk_id)[0]
@@ -528,7 +541,6 @@ def process_message(event, vk, vk_session):
                 )
             return
         
-        # Проверка согласия (с кэшированием)
         user_agreed = get_user_agreement_cached(db_user['id'])
         
         if not user_agreed:
@@ -558,19 +570,15 @@ def process_message(event, vk, vk_session):
                 )
             return
         
-        # Если пользователь согласился
         if vk_id in agreement_sent:
             agreement_sent.remove(vk_id)
         
-        # Проверяем состояние регистрации
         if vk_id in user_states and user_states.get(vk_id, {}).get('action', '').startswith('registration'):
             handle_registration_state(vk_id, text, vk, active_group, site_url, db_user)
             return
         
-        # Основная обработка
         state = user_states.get(vk_id)
         
-        # Обработка вложений - оптимизированная
         attachments = []
         if event.attachments:
             attachments = event.attachments
@@ -595,9 +603,6 @@ def process_message(event, vk, vk_session):
             except Exception as e:
                 logger.error(f"Ошибка получения вложений: {e}")
         
-        # --- Обработка состояний ---
-        
-        # Назад
         if text in ["🔙 Назад в меню", "🔙 Назад", "🔙 Назад к заявкам"]:
             user_states.pop(vk_id, None)
             vk.messages.send(
@@ -608,7 +613,6 @@ def process_message(event, vk, vk_session):
             )
             return
         
-        # Чат заявки
         if isinstance(state, dict) and state.get('action') == 'request_chat':
             request_id = state.get('request_id')
             
@@ -642,7 +646,6 @@ def process_message(event, vk, vk_session):
                     )
                 return
         
-        # Создание заявки
         if isinstance(state, dict) and state.get('action') == 'create_request':
             step = state.get('step')
             
@@ -667,7 +670,6 @@ def process_message(event, vk, vk_session):
                 )
                 return
         
-        # Отправка отчета - оптимизированная
         if isinstance(state, dict) and 'id' in state:
             task = state
             saved_files = []
@@ -675,7 +677,6 @@ def process_message(event, vk, vk_session):
             
             if attachments:
                 try:
-                    # Используем оптимизированную обработку вложений
                     saved_files, attachment_text = process_vk_attachments(attachments, vk_session)
                     if attachment_text:
                         text = f"{text}\n\n📎 Прикрепленные файлы:\n{attachment_text}" if text else f"📎 Прикрепленные файлы:\n{attachment_text}"
@@ -700,7 +701,6 @@ def process_message(event, vk, vk_session):
             if has_attachments:
                 response_msg += f"\n📎 Прикреплено файлов: {len(saved_files)}"
             
-            # Инвалидируем кэш статусов
             _cache.pop(f'status_{db_user["id"]}_{task["id"]}', None)
             
             if active_group:
@@ -711,8 +711,6 @@ def process_message(event, vk, vk_session):
             
             vk.messages.send(user_id=vk_id, message=response_msg, random_id=0, keyboard=keyboard)
             return
-        
-        # --- Основные команды ---
         
         if text in ["📋 Задания", "/start", "Начать", "Старт"]:
             if not active_group:
@@ -737,7 +735,6 @@ def process_message(event, vk, vk_session):
         
         elif text == "👤 Мой профиль":
             tickets = get_user_tickets(db_user['id'])
-            # Обновляем данные пользователя
             fresh_user = get_user_by_vk_id(vk_id) or db_user
             
             msg = f"👤 Ваш профиль\n\n"
@@ -813,9 +810,6 @@ def process_message(event, vk, vk_session):
             )
             return
         
-        # --- Обработка нажатий ---
-        
-        # Заявка
         if 'Заявка #' in text or '#' in text:
             match = re.search(r'#(\d+)', text)
             if match:
@@ -832,7 +826,6 @@ def process_message(event, vk, vk_session):
                     )
                     return
         
-        # Задание - быстрый поиск по индексу
         if active_group:
             matched_task = get_task_by_title_cached(active_group['id'], text)
             
@@ -847,7 +840,6 @@ def process_message(event, vk, vk_session):
                 )
                 return
         
-        # Если ничего не подошло
         vk.messages.send(
             user_id=vk_id,
             message="🤖 Воспользуйтесь кнопками меню:",
@@ -880,20 +872,8 @@ def handle_registration_state(vk_id, text, vk, active_group, site_url, db_user=N
             agreement_sent.discard(vk_id)
             user_states.pop(vk_id, None)
             
-            if user.get('generated_password'):
-                login_msg = (
-                    "✅ Аккаунт успешно зарегистрирован!\n\n"
-                    f"👤 Фамилия: {user['last_name']}\n"
-                    f"Имя: {user['first_name']}\n"
-                    f"🔑 Логин: {user['login']}\n"
-                    f"🔐 Пароль: {user['generated_password']}\n\n"
-                    "⚠️ Сохраните эти данные для входа на сайт.\n"
-                    f"🌐 Сайт: {site_url}"
-                )
-            else:
-                login_msg = "✅ Аккаунт успешно зарегистрирован!\nТеперь вам доступны все функции бота."
-            
-            vk.messages.send(user_id=vk_id, message=login_msg, random_id=0, keyboard=create_main_keyboard(active_group, site_url))
+            # Отправляем логин и пароль
+            send_credentials_message(vk, vk_id, user, site_url)
             return
         
         elif text == "❌ Нет":
@@ -948,20 +928,8 @@ def handle_registration_state(vk_id, text, vk, active_group, site_url, db_user=N
             agreement_sent.discard(vk_id)
             user_states.pop(vk_id, None)
             
-            if user.get('generated_password'):
-                login_msg = (
-                    "✅ Аккаунт успешно зарегистрирован!\n\n"
-                    f"👤 Фамилия: {user['last_name']}\n"
-                    f"Имя: {user['first_name']}\n"
-                    f"🔑 Логин: {user['login']}\n"
-                    f"🔐 Пароль: {user['generated_password']}\n\n"
-                    "⚠️ Сохраните эти данные для входа на сайт.\n"
-                    f"🌐 Сайт: {site_url}"
-                )
-            else:
-                login_msg = "✅ Аккаунт успешно зарегистрирован!\nТеперь вам доступны все функции бота."
-            
-            vk.messages.send(user_id=vk_id, message=login_msg, random_id=0, keyboard=create_main_keyboard(active_group, site_url))
+            # Отправляем логин и пароль
+            send_credentials_message(vk, vk_id, user, site_url)
             return
         
         elif text == "❌ Нет":
@@ -981,9 +949,8 @@ def main():
 
     if not token:
         logger.error("❌ ОШИБКА: Укажите VK Token в админ-панели!")
-        # Ожидаем токен с таймаутом
         timeout = 0
-        while not token and timeout < 300:  # Ждем максимум 5 минут
+        while not token and timeout < 300:
             time.sleep(10)
             settings = get_bot_settings()
             token = settings.get('vk_token', '')
@@ -994,14 +961,12 @@ def main():
             logger.error("❌ Токен не получен. Бот останавливается.")
             return
 
-    # Создаем пул потоков с оптимальным количеством
     executor = ThreadPoolExecutor(max_workers=2)
 
     vk_session = vk_api.VkApi(token=token)
     vk = vk_session.get_api()
     longpoll = VkLongPoll(vk_session)
 
-    # Запускаем фоновые потоки
     threading.Thread(target=send_notification_worker, args=(vk,), daemon=True).start()
     threading.Thread(target=check_request_messages_worker, args=(vk,), daemon=True).start()
     threading.Thread(target=cache_cleaner, daemon=True).start()
@@ -1009,13 +974,10 @@ def main():
 
     logger.info("✅ Бот успешно подключен к ВКонтакте и ожидает сообщений!")
 
-    # Основной цикл обработки событий
     for event in longpoll.listen():
         if event.type == VkEventType.MESSAGE_NEW and event.to_me:
             try:
-                # Отправляем обработку в отдельный поток
                 future = executor.submit(process_message, event, vk, vk_session)
-                # Добавляем callback для обработки ошибок
                 future.add_done_callback(
                     lambda f: logger.error(f"Ошибка в потоке: {f.exception()}") 
                     if f.exception() else None
