@@ -1,3 +1,4 @@
+cat > /root/alabuga/vk_bot/bot.py << 'EOF'
 import sys
 import time
 import threading
@@ -624,13 +625,31 @@ def handle_incoming_message(vk_id, text, attachments_list, vk, vk_session):
             saved_files = []
             attachment_text = ""
 
+            # Обработка вложений
             if attachments_list:
                 try:
+                    logger.info(f"Обработка вложений: {type(attachments_list)}")
+                    # Приводим attachments_list к правильному формату
+                    # Если это словарь, преобразуем в список
+                    if isinstance(attachments_list, dict):
+                        attach_list = []
+                        for key, value in attachments_list.items():
+                            if key.startswith('attach') and not key.endswith('_type'):
+                                if isinstance(value, dict):
+                                    attach_list.append(value)
+                                else:
+                                    attach_type = attachments_list.get(f"{key}_type", 'photo')
+                                    attach_list.append({'type': attach_type, 'id': value})
+                        attachments_list = attach_list
+                    elif not isinstance(attachments_list, list):
+                        attachments_list = [attachments_list]
+                    
                     saved_files, attachment_text = process_vk_attachments(attachments_list, vk_session)
                     if attachment_text:
                         text = f"{text}\n\n📎 Прикрепленные файлы:\n{attachment_text}" if text else f"📎 Прикрепленные файлы:\n{attachment_text}"
+                    logger.info(f"Обработано вложений: {len(saved_files)}")
                 except Exception as e:
-                    logger.error(f"Ошибка обработки вложений: {e}")
+                    logger.error(f"Ошибка обработки вложений: {e}", exc_info=True)
 
             has_attachments = len(saved_files) > 0
             report_id = create_report(db_user['id'], task['id'], text, has_attachments)
@@ -819,3 +838,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+EOF
