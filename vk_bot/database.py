@@ -257,25 +257,47 @@ def get_report_media(report_id):
 
 
 def process_vk_attachments(attachments, vk_session):
+    """
+    Обрабатывает вложения из сообщения VK.
+    Возвращает список ссылок на файлы и текстовое описание.
+    """
     if not attachments:
         return [], ""
 
     saved_files = []
     text_parts = []
+
+    # attachments может быть словарем { 'attach1': {'type': 'photo', 'id': '...'}, 'attach1_type': 'photo' }
     attach_list = []
 
     if isinstance(attachments, dict):
+        # Извлекаем все attach1, attach2, ... из словаря
         for key, value in attachments.items():
             if key.startswith('attach') and not key.endswith('_type'):
+                # Значение может быть словарем с type и id
                 if isinstance(value, dict):
                     attach_list.append(value)
                 else:
-                    attach_type = attachments.get(f"{key}_type", 'photo')
-                    attach_list.append({'type': attach_type, 'id': value})
+                    # Если value - строка, ищем тип в attach1_type
+                    attach_type_key = f"{key}_type"
+                    attach_type = attachments.get(attach_type_key, 'photo')
+                    attach_list.append({
+                        'type': attach_type,
+                        'id': value
+                    })
     elif isinstance(attachments, list):
         attach_list = attachments
     else:
         attach_list = [attachments]
+
+    logger.info(f"Обработка {len(attach_list)} вложений")
+
+    # Получаем API для запросов
+    try:
+        api = vk_session.get_api()
+    except Exception as e:
+        logger.error(f"Ошибка получения API: {e}")
+        return [], ""
 
     for attach in attach_list:
         file_url = None
@@ -284,78 +306,190 @@ def process_vk_attachments(attachments, vk_session):
         attach_type = 'unknown'
         attach_id = None
         owner_id = None
+        access_key = None
 
-        if isinstance(attach, dict):
-            attach_type = attach.get('type', 'photo')
-
-            # Извлекаем вложенные данные по типу вложения (VkBotLongPoll / VkLongPoll)
-            nested = attach.get(attach_type, {})
-            if not nested:
-                nested = attach
-
-            attach_id = nested.get('id') or attach.get('id') or ''
-            owner_id = nested.get('owner_id') or attach.get('owner_id') or ''
-
-            # Если id пришёл в формате "ownerId_mediaId" (бывает в VkLongPoll), разбираем
-            if isinstance(attach_id, str) and '_' in attach_id:
-                parts = attach_id.split('_', 1)
-                owner_id = parts[0]
-                attach_id = parts[1]
-
-            if attach_type == 'photo':
-                sizes = nested.get('sizes', [])
-                if sizes:
-                    best = max(sizes, key=lambda s: s.get('width', 0) * s.get('height', s.get('width', 0)))
-                    file_url = best['url']
-                    file_name = f"photo_{attach_id}.jpg"
-                elif attach_id and vk_session:
-                    # Прямое получение ссылки через VK API, если sizes недоступны
-                    try:
-                        vk = vk_session.get_api()
-                        resp = vk.photos.getById(photos=f"{owner_id}_{attach_id}")
-                        if resp:
-                            sizes = resp[0].get('sizes', [])
-                            if sizes:
-                                best = max(sizes, key=lambda s: s.get('width', 0) * s.get('height', s.get('width', 0)))
-                                file_url = best['url']
-                                file_name = f"photo_{attach_id}.jpg"
-                    except Exception as e:
-                        logger.error(f"Ошибка получения фото через VK API (photos.getById): {e}")
-
-                # Если ссылку получить не удалось — fallback на страницу ВК
-                if not file_url:
-                    file_url = f"https://vk.com/photo{owner_id}_{attach_id}"
-                    file_name = f"photo_{attach_id}.jpg"
-
-            elif attach_type == 'doc':
-                file_url = nested.get('url', '')
-                file_name = nested.get('title', 'document')
-                file_size = nested.get('size', 0)
-
-            elif attach_type == 'video':
-                file_url = nested.get('player', '')
-                file_name = f"video_{attach_id}"
-
-            elif attach_type == 'link':
-                url = nested.get('url') or nested.get('link', {}).get('url', '')
-                text_parts.append(f"🔗 {url}")
+        # Если attach - строка с ID (приходит как "473566088_457255481")
+        if isinstance(attach, str):
+            attach_id = attach
+            attach_type = 'photo'  # По умолчанию считаем фото
+            try:
+                parts = attach.split('_')
+                if len(parts) == 2:
+                    owner_id = parts[0]
+                    media_id = parts[1]
+                    file_url = f"https://vk.com/{attach_type}{owner_id}_{media_id}"
+                    file_name = f"{attach_type}_{media_id}"
+                    text_parts.append(f"🔗 {attach_type}: {file_url}")
+            except Exception as e:
+                logger.error(f"Ошибка парсинга ID: {e}")
+                text_parts.append(f"📎 {attach}")
                 continue
 
+        # Если attach - словарь
+        elif isinstance(attach, dict):
+            attach_type = attach.get('type', 'unknown')
+
+            # В VkBotLongPoll данные лежат во вложенном ключе по типу (photo, doc, ...)
+            attach_data = attach.get(attach_type) or attach.get('data') or attach
+
+            attach_id = attach_data.get('id', '')
+            owner_id = attach_data.get('owner_id', '')
+            access_key = attach_data.get('access_key', '')
+
+            # Если owner_id нет, но есть в attach_id с подчеркиванием
+            if not owner_id and attach_id and '_' in str(attach_id):
+                parts = str(attach_id).split('_')
+                if len(parts) == 2:
+                    owner_id = parts[0]
+                    attach_id = parts[1]
+
+            logger.info(f"Обработка вложения: тип={attach_type}, id={attach_id}, owner={owner_id}")
+
+            # --- ОБРАБОТКА ФОТО ---
+            if attach_type == 'photo':
+                # Сначала пробуем получить прямой URL из sizes в данных
+                sizes = attach_data.get('sizes', [])
+                if sizes:
+                    sizes.sort(key=lambda x: x.get('width', 0) * x.get('height', 0), reverse=True)
+                    file_url = sizes[0].get('url')
+                    file_name = f"photo_{attach_id}.jpg" if attach_id else 'photo.jpg'
+                    logger.info(f"Получен URL фото из sizes: {file_url}")
+                else:
+                    # Пробуем получить прямую ссылку через API
+                    try:
+                        if owner_id and attach_id:
+                            # Формируем строку фото с access_key если есть
+                            photo_str = f"{owner_id}_{attach_id}"
+                            if access_key:
+                                photo_str = f"{owner_id}_{attach_id}_{access_key}"
+
+                            logger.info(f"Получение фото через API: {photo_str}")
+                            photo_response = api.photos.getById(
+                                photos=photo_str,
+                                photo_sizes=1
+                            )
+                            if photo_response and len(photo_response) > 0:
+                                sizes = photo_response[0].get('sizes', [])
+                                if sizes:
+                                    sizes.sort(key=lambda x: x.get('width', 0) * x.get('height', 0), reverse=True)
+                                    file_url = sizes[0].get('url')
+                                    file_name = f"photo_{attach_id}.jpg"
+                                    logger.info(f"Получена прямая ссылка на фото через API: {file_url}")
+                    except Exception as e:
+                        logger.error(f"Ошибка получения фото через API: {e}")
+
+                # Если все еще нет URL, создаем ссылку на страницу VK
+                if not file_url:
+                    if owner_id and attach_id:
+                        file_url = f"https://vk.com/photo{owner_id}_{attach_id}"
+                        file_name = f"photo_{attach_id}.jpg"
+                    else:
+                        # Пробуем другие поля
+                        for key in ['photo_2560', 'photo_1280', 'photo_807', 'photo_604', 'photo_130', 'photo_75']:
+                            if attach_data.get(key):
+                                file_url = attach_data[key]
+                                file_name = f"photo_{attach_id}.jpg" if attach_id else 'photo.jpg'
+                                logger.info(f"Получен URL фото из {key}: {file_url}")
+                                break
+
+            # --- ОБРАБОТКА ДОКУМЕНТОВ ---
+            elif attach_type == 'doc':
+                # Пробуем получить прямую ссылку через API
+                try:
+                    if owner_id and attach_id:
+                        doc_str = f"{owner_id}_{attach_id}"
+                        if access_key:
+                            doc_str = f"{owner_id}_{attach_id}_{access_key}"
+
+                        logger.info(f"Получение документа через API: {doc_str}")
+                        doc_response = api.docs.getById(docs=doc_str)
+                        if doc_response and len(doc_response) > 0:
+                            file_url = doc_response[0].get('url')
+                            file_name = doc_response[0].get('title', f"doc_{attach_id}")
+                            file_size = doc_response[0].get('size', 0)
+                            logger.info(f"Получена прямая ссылка на документ: {file_url}")
+                except Exception as e:
+                    logger.error(f"Ошибка получения документа через API: {e}")
+
+                if not file_url:
+                    if owner_id and attach_id:
+                        file_url = f"https://vk.com/doc{owner_id}_{attach_id}"
+                        file_name = attach_data.get('title', f"doc_{attach_id}")
+                    else:
+                        file_url = attach_data.get('url')
+                        file_name = attach_data.get('title', 'document')
+                    file_size = attach_data.get('size', 0)
+
+            # --- ОБРАБОТКА ВИДЕО ---
+            elif attach_type == 'video':
+                try:
+                    if owner_id and attach_id:
+                        video_str = f"{owner_id}_{attach_id}"
+                        if access_key:
+                            video_str = f"{owner_id}_{attach_id}_{access_key}"
+
+                        logger.info(f"Получение видео через API: {video_str}")
+                        video_response = api.video.get(videos=video_str)
+                        if video_response and 'items' in video_response and len(video_response['items']) > 0:
+                            file_url = video_response['items'][0].get('player')
+                            file_name = f"video_{attach_id}"
+                            logger.info(f"Получена ссылка на видео: {file_url}")
+                except Exception as e:
+                    logger.error(f"Ошибка получения видео через API: {e}")
+
+                if not file_url:
+                    if owner_id and attach_id:
+                        file_url = f"https://vk.com/video{owner_id}_{attach_id}"
+                        file_name = f"video_{attach_id}"
+                    else:
+                        file_url = attach_data.get('player')
+                        file_name = f"video_{attach_id}" if attach_id else 'video'
+
+            # --- ОБРАБОТКА АУДИО ---
+            elif attach_type == 'audio':
+                try:
+                    if owner_id and attach_id:
+                        audio_str = f"{owner_id}_{attach_id}"
+                        if access_key:
+                            audio_str = f"{owner_id}_{attach_id}_{access_key}"
+
+                        logger.info(f"Получение аудио через API: {audio_str}")
+                        audio_response = api.audio.getById(audios=audio_str)
+                        if audio_response and len(audio_response) > 0:
+                            file_url = audio_response[0].get('url')
+                            file_name = f"audio_{attach_id}.mp3"
+                            logger.info(f"Получена ссылка на аудио: {file_url}")
+                except Exception as e:
+                    logger.error(f"Ошибка получения аудио через API: {e}")
+
+                if not file_url:
+                    if owner_id and attach_id:
+                        file_url = f"https://vk.com/audio{owner_id}_{attach_id}"
+                        file_name = f"audio_{attach_id}.mp3" if attach_id else 'audio.mp3'
+                    else:
+                        file_url = attach_data.get('url')
+                        file_name = f"audio_{attach_id}.mp3" if attach_id else 'audio.mp3'
+
+            # --- ОБРАБОТКА ССЫЛОК ---
+            elif attach_type == 'link':
+                url = attach_data.get('url', '')
+                if not url:
+                    url = attach_data.get('link', {}).get('url', '')
+                text_parts.append(f"🔗 Ссылка: {url}")
+                continue
+
+            # --- ОБРАБОТКА ЗАПИСЕЙ НА СТЕНЕ ---
             elif attach_type == 'wall':
-                text_parts.append(f"🔗 https://vk.com/wall{owner_id}_{attach_id}")
+                owner_id = attach_data.get('owner_id', '')
+                wall_id = attach_data.get('id', '')
+                text_parts.append(f"🔗 Запись на стене: https://vk.com/wall{owner_id}_{wall_id}")
                 continue
 
             else:
-                text_parts.append(f"📎 Вложение ({attach_type})")
+                logger.warning(f"Неизвестный тип вложения: {attach_type}")
                 continue
 
-        elif isinstance(attach, str) and '_' in attach:
-            parts = attach.split('_')
-            owner_id, media_id = parts[0], parts[1]
-            file_url = f"https://vk.com/photo{owner_id}_{media_id}"
-            file_name = f"photo_{media_id}.jpg"
-            attach_type = 'photo'
-
+        # Если файл найден, сохраняем ссылку
         if file_url:
             saved_files.append({
                 'file_type': attach_type,
@@ -363,7 +497,22 @@ def process_vk_attachments(attachments, vk_session):
                 'original_name': file_name or 'file',
                 'file_size': file_size
             })
-            text_parts.append(f"📎 {file_name or 'файл'}")
+
+            file_type_emoji = {
+                'photo': '🖼️',
+                'video': '🎬',
+                'audio': '🎵',
+                'doc': '📄',
+                'file': '📎'
+            }
+            emoji = file_type_emoji.get(attach_type, '📎')
+            text_parts.append(f"{emoji} {file_name}")
+        else:
+            if attach_id:
+                text_parts.append(f"📎 Вложение: {attach_id}")
+                logger.warning(f"Не удалось получить URL для вложения: {attach}")
+
+    logger.info(f"Обработано файлов: {len(saved_files)}")
 
     return saved_files, "\n".join(text_parts)
 
