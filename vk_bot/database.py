@@ -394,6 +394,24 @@ def process_vk_attachments(attachments, vk_session):
                     except Exception as e:
                         logger.error(f"Ошибка получения фото через API: {e}")
                     
+                    # Если не получили URL через API, пробуем получить через photos.getById с другим форматом
+                    if not file_url:
+                        try:
+                            # Пробуем другой формат запроса
+                            photo_response = api.photos.getById(
+                                photos=f"-{owner_id}_{media_id}" if not owner_id.startswith('-') else f"{owner_id}_{media_id}",
+                                photo_sizes=1
+                            )
+                            if photo_response and len(photo_response) > 0:
+                                sizes = photo_response[0].get('sizes', [])
+                                if sizes:
+                                    sizes.sort(key=lambda x: x.get('width', 0) * x.get('height', 0), reverse=True)
+                                    file_url = sizes[0].get('url')
+                                    file_name = f"photo_{media_id}.jpg"
+                                    logger.info(f"Получена прямая ссылка на фото через API (альтернативный формат): {file_url}")
+                        except Exception as e:
+                            logger.error(f"Ошибка получения фото через API (альтернативный формат): {e}")
+                    
                     # Если не получили URL через API, создаем ссылку на страницу VK
                     if not file_url:
                         file_url = f"https://vk.com/photo{owner_id}_{media_id}"
@@ -407,9 +425,9 @@ def process_vk_attachments(attachments, vk_session):
         # Если attach - словарь
         elif isinstance(attach, dict):
             attach_type = attach.get('type', 'unknown')
-            attach_data = attach.get('data', {})
-            if not attach_data:
-                attach_data = attach
+            
+            # В VkBotLongPoll данные лежат во вложенном ключе по типу (photo, doc, ...)
+            attach_data = attach.get(attach_type) or attach.get('data') or attach
             
             attach_id = attach_data.get('id', '')
             owner_id = attach_data.get('owner_id', '')
