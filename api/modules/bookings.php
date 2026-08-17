@@ -1,181 +1,312 @@
 <?php
-/**
- * Маршруты бронирования и публичные данные
- */
+// =============================================================================
+// Модуль: Бронирование (публичные маршруты)
+// Маршруты: public/buildings, public/layout, book, auto-book
+//           my-booking, cancel-booking, my-bookings
+// =============================================================================
 
-// Получение списка общежитий / зданий (публичный маршрут)
-if ($route === 'public/buildings' && $method === 'GET') {
-    $stmt = $pdo->query("SELECT id, name, address, description, image_url, status FROM buildings WHERE status = 'active' ORDER BY name ASC");
-    $buildings = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    jsonResponse(['success' => true, 'data' => $buildings]);
+// ─── Список корпусов ───────────────────────────────────────────────────────
+
+if ($uri === 'public/buildings') {
+    $stmt = $pdo->query("SELECT * FROM buildings ORDER BY id ASC");
+    $buildings = $stmt->fetchAll();
+    $result = [];
+    foreach ($buildings as $b) {
+        $capStmt = $pdo->prepare("SELECT COALESCE(SUM(capacity),0) FROM rooms WHERE building_id = ? AND is_technical = 0 AND room_type = 'room'");
+        $capStmt->execute([$b['id']]);
+        $total_capacity = (int)$capStmt->fetchColumn();
+
+        $occStmt = $pdo->prepare("
+            SELECT COUNT(*) FROM bookings b
+            JOIN rooms r ON b.room_id = r.id
+            WHERE r.building_id = ? AND b.status IN ('approved','approved_bot','pending')
+        ");
+        $occStmt->execute([$b['id']]);
+        $occupied = (int)$occStmt->fetchColumn();
+
+        $result[] = [
+            'id' => $b['id'],
+            'name' => $b['name'],
+            'gender' => $b['gender'],
+            'total_capacity' => $total_capacity,
+            'occupied_places' => $occupied,
+        ];
+    }
+    jsonResponse($result);
 }
 
-// Получение схемы здания (публичный маршрут)
-if ($route === 'public/layout' && $method === 'GET') {
-    $buildingId = isset($_GET['building_id']) ? (int)$_GET['building_id'] : 0;
-    if (!$buildingId) {
-        jsonResponse(['error' => 'Не указан ID здания'], 400);
-    }
+// ─── Планировка корпуса (публичная) ─────────────────────────────────────────
 
-    $stmt = $pdo->prepare("SELECT id, name, address, description, floors_count FROM buildings WHERE id = ?");
+if ($uri === 'public/layout') {
+    $buildingId = (int)($_GET['building_id'] ?? 0);
+    $stmt = $pdo->prepare("SELECT * FROM buildings WHERE id = ?");
     $stmt->execute([$buildingId]);
-    $building = $stmt->fetch(PDO::FETCH_ASSOC);
+    $building = $stmt->fetch();
+    if (!$building) jsonError('Корпус не найден', 404);
 
-    if (!$building) {
-        jsonResponse(['error' => 'Здание не найдено'], 404);
-    }
+    $floors = $pdo->prepare("SELECT * FROM floors WHERE building_id = ? ORDER BY floor_number ASC");
+    $floors->execute([$buildingId]);
+    $floorsData = [];
 
-    // Этажи
-    $stmtFloors = $pdo->prepare("SELECT id, floor_number, description FROM floors WHERE building_id = ? ORDER BY floor_number ASC");
-    $stmtFloors->execute([$buildingId]);
-    $floors = $stmtFloors->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($floors->fetchAll() as $floor) {
+        $rooms = $pdo->prepare("
+            SELECT r.*,
+                   (SELECT COUNT(*) FROM bookings b
+                    WHERE b.room_id = r.id AND b.status IN ('approved','approved_bot','pending')) as occupied
+            FROM rooms r
+            WHERE r.floor_id = ?
+            ORDER BY r.y_pos ASC, r.x_pos ASC
+        ");
+        $rooms->execute([$floor['id']]);
+        $roomsData = $rooms->fetchAll();
 
-    // Комнаты
-    $stmtRooms = $pdo->prepare("
-        SELECT r.id, r.floor_id, r.room_number, r.capacity, r.gender_type, r.status, r.price,
-               (SELECT COUNT(*) FROM bookings b WHERE b.room_id = r.id AND b.status = 'approved') as occupied_beds
-        FROM rooms r
-        JOIN floors f ON r.floor_id = f.id
-        WHERE f.building_id = ?
-        ORDER BY r.room_number ASC
-    ");
-    $stmtRooms->execute([$buildingId]);
-    $rooms = $stmtRooms->fetchAll(PDO::FETCH_ASSOC);
+        // Заселившиеся жильцы по комнатам этажа (совпадает с подсчётом occupied)
+        $occupantsStmt = $pdo->prepare("
+            SELECT b.room_id, u.first_name, u.last_name, u.patronymic, u.login
+            FROM bookings b
+            JOIN users u ON u.id = b.user_id
+            JOIN rooms rr ON rr.id = b.room_id
+            WHERE rr.floor_id = ? AND rr.room_type = 'room' AND b.status IN ('approved','approved_bot','pending')
+            ORDER BY u.last_name ASC, u.first_name ASC
+        ");
+        $occupantsStmt->execute([$floor['id']]);
+        $occupantsByRoom = [];
+        foreach ($occupantsStmt->fetchAll() as $occ) {
+            $occupantsByRoom[$occ['room_id']][] = [
+                'first_name' => $occ['first_name'],
+                'last_name'  => $occ['last_name'],
+                'patronymic' => $occ['patronymic'],
+                'login'      => $occ['login'],
+            ];
+        }
 
-    // Группируем комнаты по этажам
-    $roomsByFloor = [];
-    foreach ($rooms as $room) {
-        $roomsByFloor[$room['floor_id']][] = $room;
-    }
-
-    foreach ($floors as &$floor) {
-        $floor['rooms'] = $roomsByFloor[$floor['id']] ?? [];
+        $floorsData[] = [
+            'id' => (int)$floor['id'],
+            'floor_number' => (int)$floor['floor_number'],
+            'width' => (int)$floor['width'],
+            'start_room_number' => $floor['start_room_number'],
+            'room_order_type' => $floor['room_order_type'],
+            'gender' => $floor['gender'],
+            'rooms' => array_map(function($r) use ($occupantsByRoom) {
+                $r['occupied'] = (int)$r['occupied'];
+                $r['occupants'] = $occupantsByRoom[$r['id']] ?? [];
+                return $r;
+            }, $roomsData),
+        ];
     }
 
     jsonResponse([
-        'success' => true,
-        'data' => [
-            'building' => $building,
-            'floors' => $floors
-        ]
+        'building' => [
+            'id' => (int)$building['id'],
+            'name' => $building['name'],
+            'gender' => $building['gender'],
+        ],
+        'floors' => $floorsData,
     ]);
 }
 
-// Создание бронирования
-if ($route === 'book' && $method === 'POST') {
-    $currentUser = requireAuth();
-    $data = json_decode(file_get_contents('php://input'), true);
+// ─── Бронирование (выбор комнаты) ──────────────────────────────────────────
 
+if ($uri === 'book') {
+    if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
+
+    $mode = $data['mode'] ?? 'login';
     $roomId = (int)($data['room_id'] ?? 0);
-    $startDate = $data['start_date'] ?? date('Y-m-d');
-    $endDate = $data['end_date'] ?? null;
-    $comment = trim($data['comment'] ?? '');
-    $passportUrl = trim($data['passport_url'] ?? '');
-    $receiptUrl = trim($data['receipt_url'] ?? '');
 
-    if (!$roomId) {
-        jsonResponse(['error' => 'Укажите комнату для бронирования'], 400);
-    }
+    if (!$roomId) jsonError('Комната не выбрана', 400);
 
-    // Проверяем наличие комнаты и ее доступность
-    $stmt = $pdo->prepare("
-        SELECT r.*, 
-               (SELECT COUNT(*) FROM bookings b WHERE b.room_id = r.id AND b.status = 'approved') as occupied_beds
-        FROM rooms r 
-        WHERE r.id = ?
-    ");
+    $stmt = $pdo->prepare("SELECT r.*, bu.name as building_name, f.floor_number FROM rooms r JOIN buildings bu ON r.building_id = bu.id JOIN floors f ON r.floor_id = f.id WHERE r.id = ?");
     $stmt->execute([$roomId]);
-    $room = $stmt->fetch(PDO::FETCH_ASSOC);
+    $room = $stmt->fetch();
+    if (!$room) jsonError('Комната не найдена', 404);
 
-    if (!$room) {
-        jsonResponse(['error' => 'Комната не найдена'], 404);
+    $stmtOccupied = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE room_id = ? AND status IN ('approved','approved_bot','pending')");
+    $stmtOccupied->execute([$roomId]);
+    $currentOccupied = (int)$stmtOccupied->fetchColumn();
+    if ($currentOccupied >= (int)$room['capacity']) {
+        jsonError('Эта комната уже полностью заполнена', 400);
     }
 
-    if ($room['status'] === 'maintenance') {
-        jsonResponse(['error' => 'Комната находится на обслуживании'], 400);
+    $user = null;
+    $isNewUser = false;
+
+    if ($mode === 'existing') {
+        $user = requireAuth($pdo);
+        $isNewUser = false;
+    } elseif ($mode === 'register') {
+        $firstName = trim($data['first_name'] ?? '');
+        $lastName  = trim($data['last_name'] ?? '');
+        $patronymic = trim($data['patronymic'] ?? '');
+        $phone     = trim($data['phone'] ?? '');
+        $password  = trim($data['password'] ?? '');
+        $customLogin = trim($data['login'] ?? '');
+
+        $errors = [];
+        if (!$firstName) $errors[] = 'Имя обязательно';
+        if (!$lastName) $errors[] = 'Фамилия обязательна';
+        if (!$phone) $errors[] = 'Номер телефона обязателен';
+        if ($password !== '' && strlen($password) < 6) $errors[] = 'Пароль должен быть минимум 6 символов';
+        $phoneDigits = preg_replace('/\D/', '', $phone);
+        if (strlen($phoneDigits) < 10) $errors[] = 'Укажите корректный номер телефона';
+        if ($errors) jsonError(implode('. ', $errors), 400);
+
+        if ($password === '') {
+            $password = generatePassword();
+        }
+
+        $finalLogin = $customLogin ?: ('u' . substr($phoneDigits, -8));
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE login = ?");
+        $stmt->execute([$finalLogin]);
+        if ($stmt->fetchColumn() > 0) {
+            if ($customLogin) jsonError('Логин уже занят', 400);
+            $finalLogin = 'u' . $phoneDigits . rand(10, 99);
+        }
+
+        $fullName = $lastName . ' ' . $firstName . ($patronymic ? ' ' . $patronymic : '');
+        $hash = password_hash($password, PASSWORD_DEFAULT);
+        $stmt = $pdo->prepare("INSERT INTO users (first_name, last_name, patronymic, name, login, phone, password, role, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'user', 'active')");
+        $stmt->execute([$firstName, $lastName, $patronymic, $fullName, $finalLogin, $phone, $hash]);
+        $userId = (int)$pdo->lastInsertId();
+
+        $user = [
+            'id' => $userId,
+            'first_name' => $firstName,
+            'last_name' => $lastName,
+            'patronymic' => $patronymic,
+            'name' => $fullName,
+            'login' => $finalLogin,
+            'phone' => $phone,
+            'role' => 'user',
+            'status' => 'active',
+            'password' => $password,
+        ];
+        $isNewUser = true;
+    } else {
+        $loginInput = trim($data['login'] ?? $data['phone'] ?? '');
+        $password   = trim($data['password'] ?? '');
+        if (!$loginInput || !$password) jsonError('Введите логин/телефон и пароль', 400);
+
+        $phoneDigits = preg_replace('/\D/', '', $loginInput);
+        $stmt = $pdo->prepare("
+            SELECT * FROM users
+            WHERE (login = :input OR phone = :input OR (CHAR_LENGTH(:digits) >= 10 AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, '+', ''), ' ', ''), '(', ''), ')', ''), '-', '') LIKE CONCAT('%', :digits2)))
+              AND status = 'active'
+            LIMIT 1
+        ");
+        $stmt->execute([
+            'input'   => $loginInput,
+            'digits'  => $phoneDigits,
+            'digits2' => $phoneDigits,
+        ]);
+        $user = $stmt->fetch();
+        if (!$user || !password_verify($password, $user['password'])) {
+            jsonError('Неверный логин/телефон или пароль', 401);
+        }
+        unset($user['password']);
     }
 
-    if ($room['occupied_beds'] >= $room['capacity']) {
-        jsonResponse(['error' => 'В комнате нет свободных мест'], 400);
+    $token = bin2hex(random_bytes(32));
+    $expiresAt = date('Y-m-d H:i:s', strtotime('+30 days'));
+    $stmt = $pdo->prepare("INSERT INTO tokens (user_id, token, expires_at) VALUES (?, ?, ?)");
+    $stmt->execute([$user['id'], $token, $expiresAt]);
+
+    if ($room['gender'] == 'DEFAULT' || $room['gender'] == 'MIXED') {
+        $detectedGender = detectGenderByLastName($user['last_name'] ?? $user['name'] ?? '');
+        if ($detectedGender) {
+            $stmt = $pdo->prepare("UPDATE rooms SET gender = ? WHERE id = ?");
+            $stmt->execute([$detectedGender, $room['id']]);
+            $room['gender'] = $detectedGender;
+        }
     }
-
-    // Проверяем гендерное соответствие
-    $userGender = $currentUser['gender'] ?? 'any';
-    if ($room['gender_type'] !== 'any' && $userGender !== 'any' && $room['gender_type'] !== $userGender) {
-        jsonResponse(['error' => 'Комната предназначена для проживания другого пола'], 400);
-    }
-
-    // Проверяем, нет ли уже активного бронирования
-    $stmt = $pdo->prepare("SELECT id FROM bookings WHERE user_id = ? AND status IN ('pending', 'approved')");
-    $stmt->execute([$currentUser['id']]);
-    if ($stmt->fetch()) {
-        jsonResponse(['error' => 'У вас уже есть активная заявка или бронирование'], 400);
-    }
-
-    $insert = $pdo->prepare("
-        INSERT INTO bookings (user_id, room_id, start_date, end_date, comment, passport_url, receipt_url, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NOW())
-    ");
-    $insert->execute([$currentUser['id'], $roomId, $startDate, $endDate, $comment, $passportUrl, $receiptUrl]);
-
-    jsonResponse(['success' => true, 'message' => 'Заявка на бронирование успешно подана!']);
-}
-
-// Текущее бронирование пользователя
-if ($route === 'my-booking' && $method === 'GET') {
-    $currentUser = requireAuth();
 
     $stmt = $pdo->prepare("
-        SELECT b.*, r.room_number, r.price, r.gender_type, f.floor_number, bu.name as building_name, bu.address as building_address
-        FROM bookings b
-        JOIN rooms r ON b.room_id = r.id
-        JOIN floors f ON r.floor_id = f.id
-        JOIN buildings bu ON f.building_id = bu.id
+        SELECT b.id FROM bookings b
         WHERE b.user_id = ?
-        ORDER BY b.id DESC
+        AND b.status IN ('pending', 'approved', 'approved_bot')
         LIMIT 1
     ");
-    $stmt->execute([$currentUser['id']]);
-    $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+    $stmt->execute([$user['id']]);
+    if ($stmt->fetch()) {
+        jsonError("У вас уже есть активная заявка на заселение.", 400);
+    }
 
-    jsonResponse(['success' => true, 'data' => $booking ?: null]);
+    // Проверка на дубликат заявки с теми же ФИО (нельзя создавать повторные заявки)
+    $dupStmt = $pdo->prepare("
+        SELECT b.id FROM bookings b
+        JOIN users bu ON b.user_id = bu.id
+        WHERE bu.last_name = ? AND bu.first_name = ?
+          AND b.status IN ('pending', 'approved', 'approved_bot')
+          AND bu.id != ?
+        LIMIT 1
+    ");
+    $dupStmt->execute([$user['last_name'], $user['first_name'], $user['id']]);
+    if ($dupStmt->fetch()) {
+        jsonError("Уже существует заявка на заселение с такими же именем и фамилией.", 400);
+    }
+
+    $stmt = $pdo->prepare("INSERT INTO bookings (user_id, room_id, status) VALUES (?, ?, 'pending')");
+    $stmt->execute([$user['id'], $roomId]);
+    $bookingId = (int)$pdo->lastInsertId();
+
+    $booking = [
+        'id' => $bookingId,
+        'room_number' => $room['room_number'],
+        'building_name' => $room['building_name'],
+        'floor_number' => $room['floor_number'],
+        'status' => 'pending',
+    ];
+
+    jsonResponse([
+        'token' => $token,
+        'user' => $user,
+        'booking' => $booking,
+        'new_user' => $isNewUser,
+    ]);
 }
 
-// Список всех бронирований текущего пользователя
-if ($route === 'my-bookings' && $method === 'GET') {
-    $currentUser = requireAuth();
+// ─── Моё бронирование (текущее) ─────────────────────────────────────────────
 
+if ($uri === 'my-booking') {
+    $user = requireAuth($pdo);
     $stmt = $pdo->prepare("
-        SELECT b.*, r.room_number, r.price, f.floor_number, bu.name as building_name
+        SELECT b.id, b.status, b.comment, r.room_number, bu.name as building_name, f.floor_number
         FROM bookings b
         JOIN rooms r ON b.room_id = r.id
+        JOIN buildings bu ON r.building_id = bu.id
         JOIN floors f ON r.floor_id = f.id
-        JOIN buildings bu ON f.building_id = bu.id
-        WHERE b.user_id = ?
-        ORDER BY b.id DESC
+        WHERE b.user_id = ? AND b.status NOT IN ('archived')
+        ORDER BY b.id DESC LIMIT 1
     ");
-    $stmt->execute([$currentUser['id']]);
-    $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    jsonResponse(['success' => true, 'data' => $bookings]);
+    $stmt->execute([$user['id']]);
+    $booking = $stmt->fetch();
+    jsonResponse(['booking' => $booking]);
 }
 
-// Отмена бронирования
-if ($route === 'cancel-booking' && $method === 'POST') {
-    $currentUser = requireAuth();
-    $data = json_decode(file_get_contents('php://input'), true);
-    $bookingId = (int)($data['booking_id'] ?? 0);
-
-    if (!$bookingId) {
-        jsonResponse(['error' => 'Не указан ID бронирования'], 400);
+if ($uri === 'cancel-booking' || $uri === 'my-booking/cancel') {
+    if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
+    $user = requireAuth($pdo);
+    $stmt = $pdo->prepare("UPDATE bookings SET status = 'recalled', comment = 'Отозвано пользователем' WHERE user_id = ? AND status IN ('pending', 'approved', 'approved_bot')");
+    $stmt->execute([$user['id']]);
+    if ($stmt->rowCount() === 0) {
+        jsonError('Активных заявок для отзыва не найдено', 400);
     }
+    jsonResponse(['success' => true, 'message' => 'Заявка успешно отозвана']);
+}
 
-    $stmt = $pdo->prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ? AND user_id = ? AND status = 'pending'");
-    $stmt->execute([$bookingId, $currentUser['id']]);
+// ─── История бронирований ──────────────────────────────────────────────────
 
-    if ($stmt->rowCount() > 0) {
-        jsonResponse(['success' => true, 'message' => 'Бронирование успешно отменено']);
-    } else {
-        jsonResponse(['error' => 'Не удалось отменить бронирование (возможно, оно уже обработано или не найдено)'], 400);
-    }
+if ($uri === 'my-bookings') {
+    $user = requireAuth($pdo);
+    $stmt = $pdo->prepare("
+        SELECT b.id, b.status, b.created_at, b.updated_at,
+               r.room_number, bu.name as building_name, f.floor_number
+        FROM bookings b
+        JOIN rooms r ON b.room_id = r.id
+        JOIN buildings bu ON r.building_id = bu.id
+        JOIN floors f ON r.floor_id = f.id
+        WHERE b.user_id = ?
+        ORDER BY b.created_at DESC
+    ");
+    $stmt->execute([$user['id']]);
+    jsonResponse($stmt->fetchAll());
 }
