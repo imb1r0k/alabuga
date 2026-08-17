@@ -435,7 +435,7 @@ def send_agreement_rules(vk, user_id):
     )
 
 
-def send_credentials_message(vk, user_id, user_data, site_url=''):
+def send_credentials_message(vk, user_id, user_data, active_group, site_url=''):
     """
     Отправляет пользователю логин и пароль от аккаунта
     """
@@ -464,7 +464,7 @@ def send_credentials_message(vk, user_id, user_data, site_url=''):
             user_id=user_id,
             message=login_msg,
             random_id=0,
-            keyboard=create_main_keyboard(active_group_cached(), site_url)
+            keyboard=create_main_keyboard(active_group, site_url)
         )
         logger.info(f"✅ Данные для входа отправлены пользователю {user_id}")
     except Exception as e:
@@ -872,8 +872,7 @@ def handle_registration_state(vk_id, text, vk, active_group, site_url, db_user=N
             agreement_sent.discard(vk_id)
             user_states.pop(vk_id, None)
             
-            # Отправляем логин и пароль
-            send_credentials_message(vk, vk_id, user, site_url)
+            send_credentials_message(vk, vk_id, user, active_group, site_url)
             return
         
         elif text == "❌ Нет":
@@ -928,8 +927,7 @@ def handle_registration_state(vk_id, text, vk, active_group, site_url, db_user=N
             agreement_sent.discard(vk_id)
             user_states.pop(vk_id, None)
             
-            # Отправляем логин и пароль
-            send_credentials_message(vk, vk_id, user, site_url)
+            send_credentials_message(vk, vk_id, user, active_group, site_url)
             return
         
         elif text == "❌ Нет":
