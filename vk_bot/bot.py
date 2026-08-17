@@ -57,6 +57,7 @@ _cache_lock = threading.Lock()
 _cached_settings = {}
 _cached_active_group = None
 _cache_updated = 0
+_group_cache_updated = 0
 CACHE_TTL = 20
 
 _user_cache = {}
@@ -74,12 +75,12 @@ def get_settings_cached():
         return _cached_settings
 
 def get_active_group_cached():
-    global _cached_active_group, _cache_updated
+    global _cached_active_group, _group_cache_updated
     now = time.time()
     with _cache_lock:
-        if now - _cache_updated > CACHE_TTL:
+        if now - _group_cache_updated > CACHE_TTL:
             _cached_active_group = get_active_task_group()
-            _cache_updated = now
+            _group_cache_updated = now
         return _cached_active_group
 
 def get_cached_user(vk_id):
