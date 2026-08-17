@@ -100,6 +100,55 @@ foreach ($defaultSettings as $k => $v) {
     $stmt->execute([$k, $v]);
 }
 
+/**
+ * Скачивает файл по URL и сохраняет его локально.
+ *
+ * @param string $url URL файла.
+ * @param string $destinationDir Директория для сохранения.
+ * @param string $filename Имя файла для сохранения (если не указано, будет сгенерировано).
+ * @return string|false Локальный путь к файлу или false в случае ошибки.
+ */
+function downloadFileFromUrl(string $url, string $destinationDir, string $filename = ''): string|false {
+    // Проверяем, существует ли директория, если нет - создаем
+    if (!is_dir($destinationDir)) {
+        if (!mkdir($destinationDir, 0777, true)) {
+            error_log("Не удалось создать директорию для загрузки: " . $destinationDir);
+            return false;
+        }
+    }
+
+    $extension = pathinfo(parse_url($url, PHP_URL_PATH), PATHINFO_EXTENSION);
+    if (empty($filename)) {
+        $filename = uniqid() . (empty($extension) ? '' : '.' . $extension);
+    } else {
+        $filename .= (empty($extension) ? '' : '.' . $extension);
+    }
+    
+    $filePath = rtrim($destinationDir, '/') . '/' . $filename;
+
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10); // Таймаут 10 секунд
+    $data = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $error = curl_error($ch);
+    curl_close($ch);
+
+    if ($data === false || $httpCode !== 200) {
+        error_log("Ошибка скачивания файла с URL: $url. HTTP код: $httpCode, Ошибка: $error");
+        return false;
+    }
+
+    if (file_put_contents($filePath, $data) === false) {
+        error_log("Не удалось сохранить скачанный файл: " . $filePath);
+        return false;
+    }
+
+    return $filePath;
+}
+
 // Маршрутизация запросов к боту
 if ($uri === 'admin/vk-bot/settings') {
     requireAdmin($pdo);
@@ -373,8 +422,10 @@ if ($uri === 'admin/vk-bot/reports/media/upload') {
     $uploadedFiles = [];
     $errors = [];
     
-    if (!isset($_FILES['files']) || empty($_FILES['files']['name'][0])) {
-        jsonError('Файлы не загружены', 400);
+    $vkPhotoUrl = $_POST['vk_photo_url'] ?? '';
+
+    if (empty($vkPhotoUrl) && (!isset($_FILES['files']) || empty($_FILES['files']['name'][0]))) {
+        jsonError('Файлы не загружены или ссылка на фото ВК не указана', 400);
     }
     
     $uploadDir = __DIR__ . '/uploads/vk_bot/';
