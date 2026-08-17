@@ -1,740 +1,593 @@
-<?php
-// Создание таблиц при отсутствии
-try {
-    $pdo->exec("CREATE TABLE IF NOT EXISTS vk_bot_settings (
-        `key` VARCHAR(64) PRIMARY KEY,
-        `value` TEXT NOT NULL
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+import pymysql
+from pymysql.cursors import DictCursor
+import config
+import logging
+import re
+import random
+import string
+import os
+import json
+import time
+from urllib.parse import urlparse
+from datetime import datetime
+import requests
 
-    $pdo->exec("CREATE TABLE IF NOT EXISTS vk_bot_task_groups (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        title VARCHAR(255) NOT NULL,
-        start_date DATE NOT NULL,
-        end_date DATE NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+# Безопасный импорт bcrypt с фоллбеком
+try:
+    import bcrypt
+except ImportError:
+    bcrypt = None
 
-    $pdo->exec("CREATE TABLE IF NOT EXISTS vk_bot_tasks (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        group_id INT NOT NULL,
-        title VARCHAR(255) NOT NULL,
-        description TEXT NOT NULL,
-        difficulty ENUM('easy', 'medium', 'hard') NOT NULL DEFAULT 'easy',
-        points INT NOT NULL DEFAULT 10,
-        task_type ENUM('repost', 'post', 'other') NOT NULL DEFAULT 'other',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (group_id) REFERENCES vk_bot_task_groups(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-    // Устаревшая колонка uuid больше не используется (задания привязываются по id).
-    // Если она осталась в таблице от прежней схемы, удаляем её, чтобы обычные
-    // INSERT без uuid не падали с ошибкой 500.
-    try {
-        $pdo->exec("ALTER TABLE vk_bot_tasks DROP COLUMN uuid");
-    } catch (PDOException $ex) {
-        // колонки нет — игнорируем
-    }
+UPLOAD_DIR = 'uploads/vk_bot/'
+MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
-    $pdo->exec("CREATE TABLE IF NOT EXISTS vk_bot_reports (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        task_id INT NOT NULL,
-        submission_text TEXT NOT NULL,
-        has_attachments TINYINT(1) NOT NULL DEFAULT 0,
-        status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
-        reject_reason VARCHAR(255) DEFAULT '',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (task_id) REFERENCES vk_bot_tasks(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+_cached_connection = None
+_last_conn_time = 0
 
-    $pdo->exec("CREATE TABLE IF NOT EXISTS vk_bot_tickets (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        group_id INT NOT NULL,
-        ticket_number VARCHAR(64) UNIQUE NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (group_id) REFERENCES vk_bot_task_groups(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-
-    $pdo->exec("CREATE TABLE IF NOT EXISTS vk_bot_notifications (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        report_id INT NULL,
-        message TEXT NOT NULL,
-        is_sent TINYINT(1) NOT NULL DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        sent_at TIMESTAMP NULL,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-
-    $pdo->exec("CREATE TABLE IF NOT EXISTS vk_bot_report_media (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        report_id INT NOT NULL,
-        file_url VARCHAR(512) NOT NULL,
-        file_type ENUM('image', 'file') NOT NULL DEFAULT 'image',
-        original_name VARCHAR(255) NOT NULL,
-        file_size INT DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (report_id) REFERENCES vk_bot_reports(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-
-} catch (PDOException $e) {
-    jsonError('Ошибка инициализации таблиц бота ВК: ' . $e->getMessage(), 500);
-}
-
-// Заполнение дефолтных настроек сообщения бота если они отсутствуют
-$defaultSettings = [
-    'vk_token' => '',
-    'vk_group_id' => '',
-    'site_url' => 'https://ваш-сайт.ru',
-    'welcome_text' => "Привет! Здесь ты гарантированно получаешь билет на участие в лотерее ценных призов!\n\nВыполни задания и получи билет на розыгрыш!",
-    'success_text' => "Поздравляю с успешным выполнением всех заданий данной волны!",
-    'draw_time' => '18:00'
-];
-
-foreach ($defaultSettings as $k => $v) {
-    $stmt = $pdo->prepare("INSERT IGNORE INTO vk_bot_settings (`key`, `value`) VALUES (?, ?)");
-    $stmt->execute([$k, $v]);
-}
-
-// Вспомогательная функция для скачивания фото с VK
-function downloadVkPhoto($url, $savePath) {
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_HEADER, false);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-    curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+def get_db_connection():
+    """Возвращает живое переиспользуемое соединение с удаленной БД"""
+    global _cached_connection, _last_conn_time
+    now = time.time()
     
-    $data = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
-    curl_close($ch);
-    
-    if ($httpCode == 200 && $data && strpos($contentType, 'image') !== false) {
-        $dir = dirname($savePath);
-        if (!is_dir($dir)) {
-            mkdir($dir, 0777, true);
-        }
-        file_put_contents($savePath, $data);
-        return true;
-    }
-    return false;
-}
+    # Переиспользуем существующее соединение, если оно живо (до 30 сек)
+    if _cached_connection is not None and (now - _last_conn_time < 30):
+        try:
+            _cached_connection.ping(reconnect=True)
+            _last_conn_time = now
+            return _cached_connection
+        except Exception:
+            _cached_connection = None
 
-function processVkPhotoUrl($url, $reportId, $pdo) {
-    // Если это ссылка на VK, пытаемся скачать
-    if (strpos($url, 'vk.com/photo') !== false || strpos($url, 'vk.com/wall') !== false) {
-        $uploadDir = __DIR__ . '/uploads/vk_bot/';
-        if (!is_dir($uploadDir)) {
-            mkdir($uploadDir, 0777, true);
+    try:
+        conn = pymysql.connect(
+            host=config.DB_HOST,
+            port=config.DB_PORT,
+            user=config.DB_USER,
+            password=config.DB_PASSWORD,
+            database=config.DB_NAME,
+            charset='utf8mb4',
+            cursorclass=DictCursor,
+            autocommit=True,
+            connect_timeout=6,
+            read_timeout=10,
+            write_timeout=10
+        )
+        _cached_connection = conn
+        _last_conn_time = now
+        return conn
+    except Exception as e:
+        logger.error(f"Ошибка подключения к базе {config.DB_HOST}: {e}")
+        # Запасная попытка подключения
+        conn = pymysql.connect(
+            host='127.0.0.1',
+            port=config.DB_PORT,
+            user=config.DB_USER,
+            password=config.DB_PASSWORD,
+            database=config.DB_NAME,
+            charset='utf8mb4',
+            cursorclass=DictCursor,
+            autocommit=True,
+            connect_timeout=3
+        )
+        _cached_connection = conn
+        _last_conn_time = now
+        return conn
+
+
+def get_bot_settings():
+    """Получает настройки бота из таблицы vk_bot_settings"""
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT `key`, `value` FROM vk_bot_settings")
+            rows = cursor.fetchall()
+            return {r['key']: r['value'] for r in rows}
+    except Exception as e:
+        logger.error(f"Ошибка получения настроек бота: {e}")
+        return {}
+
+
+def hash_password(password):
+    """Хеширование пароля совместимое с PHP password_hash (bcrypt)"""
+    if bcrypt:
+        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=8)).decode('utf-8')
+    import hashlib
+    salt = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+    return '$2y$08$' + hashlib.sha256((password + salt).encode('utf-8')).hexdigest()[:53]
+
+
+def generate_password(length=10):
+    chars = string.ascii_letters + string.digits
+    return ''.join(random.choices(chars, k=length))
+
+
+def generate_login(first_name, last_name):
+    base_login = re.sub(r'[^a-zA-Zа-яА-Я0-9]', '', f"{last_name.lower()}{first_name.lower()}")
+    if len(base_login) < 3:
+        base_login = f"user{random.randint(100, 999)}"
+    
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT COUNT(*) as cnt FROM users WHERE login LIKE %s", (f"{base_login}%",))
+        count = cursor.fetchone()['cnt']
+        return f"{base_login}{count + 1}" if count > 0 else base_login
+
+
+def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        if vk_id:
+            cursor.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
+            user = cursor.fetchone()
+            if user:
+                return user
+
+        if vk_url:
+            cursor.execute("SELECT * FROM users WHERE vk_url = %s", (vk_url,))
+            user = cursor.fetchone()
+            if user:
+                if user.get('vk_id') != vk_id:
+                    cursor.execute("UPDATE users SET vk_id = %s WHERE id = %s", (vk_id, user['id']))
+                return user
+
+        login = generate_login(first_name, last_name)
+        password = generate_password()
+        hashed_password = hash_password(password)
+        full_name = f"{last_name} {first_name}".strip()
+
+        cursor.execute("""
+            INSERT INTO users
+            (vk_id, vk_url, first_name, last_name, name, login, phone, password, role, status, rating, completed_tasks, social_vk, bot_registered)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            vk_id, vk_url, first_name, last_name, full_name,
+            login, '', hashed_password, 'user', 'active', 0, 0, vk_url, 1
+        ))
+
+        user_id = cursor.lastrowid
+        cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+        user = cursor.fetchone()
+        user['generated_password'] = password
+        logger.info(f"Создан новый пользователь: {first_name} {last_name}, логин: {login}")
+        return user
+
+
+def get_user_by_vk_id(vk_id):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
+        return cursor.fetchone()
+
+
+def find_existing_user(vk_id, vk_url=''):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        if vk_id:
+            cursor.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
+            user = cursor.fetchone()
+            if user:
+                return user
+        if vk_url:
+            cursor.execute("SELECT * FROM users WHERE vk_url = %s", (vk_url,))
+            user = cursor.fetchone()
+            if user:
+                return user
+        return None
+
+
+def get_active_task_group():
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT * FROM vk_bot_task_groups 
+            WHERE start_date <= CURDATE() AND end_date >= CURDATE()
+            ORDER BY start_date ASC LIMIT 1
+        """)
+        return cursor.fetchone()
+
+
+def get_tasks_for_group(group_id):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT * FROM vk_bot_tasks 
+            WHERE group_id = %s 
+            ORDER BY FIELD(difficulty, 'easy', 'medium', 'hard'), id ASC
+        """, (group_id,))
+        return cursor.fetchall()
+
+
+def get_user_task_report(user_id, task_id):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT * FROM vk_bot_reports
+            WHERE user_id = %s AND task_id = %s
+            ORDER BY id DESC LIMIT 1
+        """, (user_id, task_id))
+        return cursor.fetchone()
+
+
+def get_user_task_status(user_id, task_id):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT id FROM vk_bot_reports
+            WHERE user_id = %s AND task_id = %s AND status = 'approved'
+            LIMIT 1
+        """, (user_id, task_id))
+        if cursor.fetchone():
+            return 'approved'
+        cursor.execute("""
+            SELECT status FROM vk_bot_reports
+            WHERE user_id = %s AND task_id = %s
+            ORDER BY id DESC LIMIT 1
+        """, (user_id, task_id))
+        row = cursor.fetchone()
+        return row['status'] if row else None
+
+
+def create_report(user_id, task_id, submission_text, has_attachments=False):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            INSERT INTO vk_bot_reports (user_id, task_id, submission_text, has_attachments, status) 
+            VALUES (%s, %s, %s, %s, 'pending')
+        """, (user_id, task_id, submission_text, 1 if has_attachments else 0))
+        return cursor.lastrowid
+
+
+def save_report_media(report_id, file_url, file_type, original_name, file_size):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            INSERT INTO vk_bot_report_media (report_id, file_url, file_type, original_name, file_size) 
+            VALUES (%s, %s, %s, %s, %s)
+        """, (report_id, file_url, file_type, original_name, file_size))
+        return cursor.lastrowid
+
+
+def get_report_media(report_id):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT * FROM vk_bot_report_media WHERE report_id = %s ORDER BY id ASC", (report_id,))
+        return cursor.fetchall()
+
+
+def download_vk_photo(url, save_path):
+    """Скачивает фото по прямой ссылке VK"""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
-        
-        // Извлекаем ID фото из URL
-        $matches = [];
-        if (preg_match('/photo[_-]?(\d+)[_-](\d+)/', $url, $matches)) {
-            $ownerId = $matches[1];
-            $photoId = $matches[2];
-            $fileName = 'vk_photo_' . $ownerId . '_' . $photoId . '_' . time() . '.jpg';
-            $localPath = $uploadDir . $fileName;
+        response = requests.get(url, stream=True, timeout=15, headers=headers)
+        if response.status_code == 200:
+            content_type = response.headers.get('content-type', '')
+            if 'image' in content_type:
+                os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                with open(save_path, 'wb') as f:
+                    for chunk in response.iter_content(1024):
+                        f.write(chunk)
+                return True
+        return False
+    except Exception as e:
+        logger.error(f"Ошибка скачивания фото: {e}")
+        return False
+
+
+def process_vk_attachments(attachments, vk_session):
+    """Обработка вложений от VK с корректным получением ссылок на файлы и скачиванием"""
+    if not attachments:
+        return [], ""
+
+    saved_files = []
+    text_parts = []
+    attach_list = []
+
+    # Нормализация вложений в список
+    if isinstance(attachments, dict):
+        for key, value in attachments.items():
+            if key.startswith('attach') and not key.endswith('_type'):
+                if isinstance(value, dict):
+                    attach_list.append(value)
+                else:
+                    attach_type = attachments.get(f"{key}_type", 'photo')
+                    attach_list.append({'type': attach_type, 'id': value})
+    elif isinstance(attachments, list):
+        attach_list = attachments
+    else:
+        attach_list = [attachments]
+
+    # Создаем директорию для загрузок
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+    for attach in attach_list:
+        file_url = None
+        file_name = None
+        file_size = 0
+        attach_type = 'unknown'
+        attach_id = None
+        owner_id = None
+
+        if isinstance(attach, dict):
+            attach_type = attach.get('type', 'photo')
             
-            // Пробуем скачать
-            if (downloadVkPhoto($url, $localPath)) {
-                return '/uploads/vk_bot/' . $fileName;
-            }
-        }
-    }
-    return $url;
-}
+            # Извлекаем вложенные данные
+            nested = attach.get(attach_type, {})
+            if not nested:
+                nested = attach
 
-// Маршрутизация запросов к боту
-if ($uri === 'admin/vk-bot/settings') {
-    requireAdmin($pdo);
-    if ($method === 'GET') {
-        $stmt = $pdo->query("SELECT `key`, `value` FROM vk_bot_settings");
-        $rows = $stmt->fetchAll();
-        $settings = [];
-        foreach ($rows as $r) {
-            $settings[$r['key']] = $r['value'];
-        }
-        jsonResponse($settings);
-    }
-    if ($method === 'POST') {
-        requireStrictAdmin($pdo);
-        foreach ($data as $k => $v) {
-            $stmt = $pdo->prepare("INSERT INTO vk_bot_settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = ?");
-            $stmt->execute([$k, (string)$v, (string)$v]);
-        }
-        jsonResponse(['success' => true]);
-    }
-}
+            attach_id = nested.get('id') or attach.get('id') or ''
+            owner_id = nested.get('owner_id') or attach.get('owner_id') or ''
 
-if ($uri === 'admin/vk-bot/groups') {
-    requireAdmin($pdo);
-    if ($method === 'GET') {
-        $stmt = $pdo->query("
-            SELECT g.*, 
-                   (SELECT COUNT(*) FROM vk_bot_tasks WHERE group_id = g.id) as tasks_count,
-                   (SELECT COUNT(*) FROM vk_bot_tickets WHERE group_id = g.id) as tickets_issued
-            FROM vk_bot_task_groups g
-            ORDER BY g.start_date DESC, g.id DESC
-        ");
-        $groups = $stmt->fetchAll();
-        $today = date('Y-m-d');
-        foreach ($groups as &$g) {
-            if ($g['start_date'] <= $today && $g['end_date'] >= $today) {
-                $g['status'] = 'active';
-            } else if ($g['start_date'] > $today) {
-                $g['status'] = 'future';
-            } else {
-                $g['status'] = 'expired';
-            }
-        }
-        jsonResponse($groups);
-    }
+            # Если id пришёл в формате "ownerId_mediaId"
+            if isinstance(attach_id, str) and '_' in attach_id:
+                parts = attach_id.split('_', 1)
+                owner_id = parts[0]
+                attach_id = parts[1]
 
-    if ($method === 'POST') {
-        $action = $data['action'] ?? 'save';
-        if ($action === 'delete') {
-            $id = (int)($data['id'] ?? 0);
-            $stmt = $pdo->prepare("DELETE FROM vk_bot_task_groups WHERE id = ?");
-            $stmt->execute([$id]);
-            jsonResponse(['success' => true]);
-        } else {
-            $id = (int)($data['id'] ?? 0);
-            $title = trim($data['title'] ?? '');
-            $startDate = trim($data['start_date'] ?? '');
-            $endDate = trim($data['end_date'] ?? '');
+            if attach_type == 'photo':
+                # Пытаемся получить ссылку через sizes
+                sizes = nested.get('sizes', [])
+                if sizes:
+                    # Берем изображение с максимальным разрешением
+                    best = max(sizes, key=lambda s: s.get('width', 0) * s.get('height', s.get('width', 0)))
+                    file_url = best.get('url', '')
+                
+                # Если sizes нет или URL не получен, используем VK API
+                if not file_url and attach_id and vk_session:
+                    try:
+                        vk = vk_session.get_api()
+                        photo_id = f"{owner_id}_{attach_id}" if owner_id else attach_id
+                        
+                        try:
+                            resp = vk.photos.getById(photos=photo_id, extended=0)
+                            if resp:
+                                photo_data = resp[0]
+                                sizes = photo_data.get('sizes', [])
+                                if sizes:
+                                    best = max(sizes, key=lambda s: s.get('width', 0) * s.get('height', s.get('width', 0)))
+                                    file_url = best.get('url', '')
+                                else:
+                                    for size_key in ['photo_2560', 'photo_1280', 'photo_807', 'photo_604', 'photo_130', 'photo_75']:
+                                        if photo_data.get(size_key):
+                                            file_url = photo_data[size_key]
+                                            break
+                        except Exception as e:
+                            logger.debug(f"photos.getById не сработал: {e}")
+                    except Exception as e:
+                        logger.error(f"Ошибка получения фото через VK API: {e}")
 
-            if (!$title || !$startDate || !$endDate) {
-                jsonError('Заполните название и даты действия группы заданий', 400);
-            }
-
-            if ($id > 0) {
-                $stmt = $pdo->prepare("UPDATE vk_bot_task_groups SET title=?, start_date=?, end_date=? WHERE id=?");
-                $stmt->execute([$title, $startDate, $endDate, $id]);
-            } else {
-                $stmt = $pdo->prepare("INSERT INTO vk_bot_task_groups (title, start_date, end_date) VALUES (?, ?, ?)");
-                $stmt->execute([$title, $startDate, $endDate]);
-            }
-            jsonResponse(['success' => true]);
-        }
-    }
-}
-
-if ($uri === 'admin/vk-bot/tasks') {
-    requireAdmin($pdo);
-    if ($method === 'GET') {
-        $groupId = (int)($_GET['group_id'] ?? 0);
-        if ($groupId > 0) {
-            $stmt = $pdo->prepare("SELECT * FROM vk_bot_tasks WHERE group_id = ? ORDER BY FIELD(difficulty, 'easy', 'medium', 'hard'), id ASC");
-            $stmt->execute([$groupId]);
-        } else {
-            $stmt = $pdo->query("SELECT * FROM vk_bot_tasks ORDER BY group_id DESC, FIELD(difficulty, 'easy', 'medium', 'hard'), id ASC");
-        }
-        jsonResponse($stmt->fetchAll());
-    }
-
-    if ($method === 'POST') {
-        $action = $data['action'] ?? 'save';
-        if ($action === 'delete') {
-            $id = (int)($data['id'] ?? 0);
-            $stmt = $pdo->prepare("DELETE FROM vk_bot_tasks WHERE id = ?");
-            $stmt->execute([$id]);
-            jsonResponse(['success' => true]);
-        } else {
-            $id = (int)($data['id'] ?? 0);
-            $groupId = (int)($data['group_id'] ?? 0);
-            $title = trim($data['title'] ?? '');
-            $description = trim($data['description'] ?? '');
-            $difficulty = $data['difficulty'] ?? 'easy';
-            $taskType = $data['task_type'] ?? 'other';
-
-            if (!$groupId || !$title || !$description) {
-                jsonError('Укажите группу, название и описание задания', 400);
-            }
-
-            $points = 10;
-            if ($difficulty === 'medium') $points = 20;
-            if ($difficulty === 'hard') $points = 30;
-
-            if ($id > 0) {
-                $stmt = $pdo->prepare("UPDATE vk_bot_tasks SET group_id=?, title=?, description=?, difficulty=?, points=?, task_type=? WHERE id=?");
-                $stmt->execute([$groupId, $title, $description, $difficulty, $points, $taskType, $id]);
-            } else {
-                $stmt = $pdo->prepare("INSERT INTO vk_bot_tasks (group_id, title, description, difficulty, points, task_type) VALUES (?, ?, ?, ?, ?, ?)");
-                $stmt->execute([$groupId, $title, $description, $difficulty, $points, $taskType]);
-            }
-            jsonResponse(['success' => true]);
-        }
-    }
-}
-
-// === РАЗДЕЛ ОТЧЕТОВ ===
-if ($uri === 'admin/vk-bot/reports') {
-    requireAdmin($pdo);
-    
-    if ($method === 'GET') {
-        $status = $_GET['status'] ?? 'all';
-        $sql = "
-            SELECT r.*, 
-                   u.vk_id, u.vk_url, u.first_name as user_first_name, u.last_name as user_last_name,
-                   t.title as task_title, t.description as task_description, t.difficulty, t.points, g.title as group_title
-            FROM vk_bot_reports r
-            JOIN users u ON r.user_id = u.id
-            JOIN vk_bot_tasks t ON r.task_id = t.id
-            JOIN vk_bot_task_groups g ON t.group_id = g.id
-        ";
-        if ($status !== 'all') {
-            $sql .= " WHERE r.status = " . $pdo->quote($status);
-        }
-        $sql .= " ORDER BY r.created_at DESC";
-        $stmt = $pdo->query($sql);
-        jsonResponse($stmt->fetchAll());
-    }
-
-    if ($method === 'POST') {
-        $id = (int)($data['id'] ?? 0);
-        $status = $data['status'] ?? 'approved';
-        $reason = trim($data['reject_reason'] ?? '');
-
-        if (!$id) jsonError('ID отчета не указан', 400);
-
-        // Получаем отчет с данными пользователя и задания
-        $stmt = $pdo->prepare("
-            SELECT r.*, 
-                   t.points, t.title, t.group_id,
-                   u.id as user_id, u.vk_id, u.vk_url
-            FROM vk_bot_reports r
-            JOIN vk_bot_tasks t ON r.task_id = t.id
-            JOIN users u ON r.user_id = u.id
-            WHERE r.id = ?
-        ");
-        $stmt->execute([$id]);
-        $report = $stmt->fetch();
-        if (!$report) jsonError('Отчет не найден', 404);
-
-        $pdo->beginTransaction();
-        try {
-            // Обновляем статус отчета
-            $stmt = $pdo->prepare("UPDATE vk_bot_reports SET status = ?, reject_reason = ? WHERE id = ?");
-            $stmt->execute([$status, $reason, $id]);
-
-            $message = '';
-            if ($status === 'approved') {
-                // Начисляем баллы пользователю
-                $points = (int)$report['points'];
-                $stmt = $pdo->prepare("UPDATE users SET rating = rating + ?, completed_tasks = completed_tasks + 1 WHERE id = ?");
-                $stmt->execute([$points, $report['user_id']]);
-
-                // Базовое сообщение об одобрении
-                $message = "✅ Ваше задание \"" . $report['title'] . "\" одобрено! Получено +{$points} баллов.";
-
-                // Проверяем, все ли задания выполнены
-                $totalStmt = $pdo->prepare("
-                    SELECT COUNT(*) as total FROM vk_bot_tasks
-                    WHERE group_id = ?
-                ");
-                $totalStmt->execute([$report['group_id']]);
-                $totalTasks = (int)$totalStmt->fetchColumn();
-
-                $doneStmt = $pdo->prepare("
-                    SELECT COUNT(DISTINCT r.task_id) as done
-                    FROM vk_bot_reports r
-                    WHERE r.user_id = ?
-                    AND r.task_id IN (SELECT id FROM vk_bot_tasks WHERE group_id = ?)
-                    AND r.status = 'approved'
-                ");
-                $doneStmt->execute([$report['user_id'], $report['group_id']]);
-                $doneTasks = (int)$doneStmt->fetchColumn();
-
-                // Выдаем билет если все задания выполнены
-                if ($totalTasks > 0 && $doneTasks >= $totalTasks) {
-                    // Проверяем, не выдан ли уже билет
-                    $checkTicket = $pdo->prepare("
-                        SELECT id FROM vk_bot_tickets
-                        WHERE user_id = ? AND group_id = ?
-                    ");
-                    $checkTicket->execute([$report['user_id'], $report['group_id']]);
+                # Если всё ещё нет URL, пробуем скачать через прямую ссылку VK
+                if not file_url and attach_id:
+                    direct_url = f"https://vk.com/photo{owner_id}_{attach_id}" if owner_id else f"https://vk.com/photo{attach_id}"
+                    file_name = f"photo_{attach_id}.jpg"
                     
-                    if (!$checkTicket->fetch()) {
-                        $ticketNum = 'TKT-' . strtoupper(substr(md5(uniqid(rand(), true)), 0, 6)) . '-' . rand(100, 999);
-                        $insTicket = $pdo->prepare("
-                            INSERT INTO vk_bot_tickets (user_id, group_id, ticket_number)
-                            VALUES (?, ?, ?)
-                        ");
-                        $insTicket->execute([$report['user_id'], $report['group_id'], $ticketNum]);
-                        $message .= "\n\n🎉 Поздравляем! Вы выполнили все задания волны — вам выдан лотерейный билет!\n🎫 Номер билета: {$ticketNum}";
-                    }
-                }
+                    local_path = os.path.join(UPLOAD_DIR, f"photo_{attach_id}_{int(time.time())}.jpg")
+                    if download_vk_photo(direct_url, local_path):
+                        file_url = f"/{UPLOAD_DIR}{os.path.basename(local_path)}"
+                        logger.info(f"Фото скачано: {file_url}")
+                    else:
+                        file_url = direct_url
+                        logger.warning(f"Не удалось скачать фото, сохраняем ссылку: {file_url}")
+                
+                file_name = f"photo_{attach_id}.jpg" if not file_name else file_name
 
-            } elseif ($status === 'rejected') {
-                $message = "❌ Ваше задание \"" . $report['title'] . "\" отклонено. Причина: " . ($reason ?: 'Не выполнено учение') . ". Отправьте отчет заново.";
-            }
+            elif attach_type == 'doc':
+                file_url = nested.get('url', '')
+                file_name = nested.get('title', 'document')
+                file_size = nested.get('size', 0)
+                
+                if not file_url and attach_id and vk_session:
+                    try:
+                        vk = vk_session.get_api()
+                        doc_id = f"{owner_id}_{attach_id}" if owner_id else attach_id
+                        resp = vk.docs.getById(docs=doc_id)
+                        if resp:
+                            doc_data = resp[0] if isinstance(resp, list) else resp
+                            file_url = doc_data.get('url', '')
+                            file_name = doc_data.get('title', file_name)
+                            file_size = doc_data.get('size', file_size)
+                            
+                            if file_url:
+                                local_path = os.path.join(UPLOAD_DIR, f"doc_{attach_id}_{int(time.time())}.pdf")
+                                try:
+                                    response = requests.get(file_url, stream=True, timeout=15)
+                                    if response.status_code == 200:
+                                        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                                        with open(local_path, 'wb') as f:
+                                            for chunk in response.iter_content(1024):
+                                                f.write(chunk)
+                                        file_url = f"/{UPLOAD_DIR}{os.path.basename(local_path)}"
+                                        logger.info(f"Документ скачан: {file_url}")
+                                except Exception as e:
+                                    logger.error(f"Ошибка скачивания документа: {e}")
+                    except Exception as e:
+                        logger.error(f"Ошибка получения документа: {e}")
 
-            // Добавляем уведомление в таблицу
-            if ($message) {
-                $notifStmt = $pdo->prepare("
-                    INSERT INTO vk_bot_notifications (user_id, report_id, message) 
-                    VALUES (?, ?, ?)
-                ");
-                $notifStmt->execute([$report['user_id'], $id, $message]);
-            }
+            elif attach_type == 'video':
+                file_url = nested.get('player', '')
+                file_name = f"video_{attach_id}"
+                if not file_url:
+                    file_url = f"https://vk.com/video{owner_id}_{attach_id}" if owner_id else f"https://vk.com/video{attach_id}"
 
-            $pdo->commit();
-            jsonResponse(['success' => true, 'message' => $message]);
+            elif attach_type == 'link':
+                url = nested.get('url') or nested.get('link', {}).get('url', '')
+                if url:
+                    text_parts.append(f"🔗 {url}")
+                continue
 
-        } catch (Exception $e) {
-            $pdo->rollBack();
-            jsonError('Ошибка обработки отчета: ' . $e->getMessage(), 500);
-        }
-    }
-}
+            elif attach_type == 'wall':
+                text_parts.append(f"🔗 https://vk.com/wall{owner_id}_{attach_id}")
+                continue
 
-// === МЕДИАФАЙЛЫ ОТЧЕТОВ ===
-if ($uri === 'admin/vk-bot/reports/media') {
-    requireAdmin($pdo);
-    if ($method === 'GET') {
-        $reportId = (int)($_GET['report_id'] ?? 0);
-        if (!$reportId) jsonError('ID отчета не указан', 400);
-        
-        $stmt = $pdo->prepare("SELECT * FROM vk_bot_report_media WHERE report_id = ? ORDER BY id ASC");
-        $stmt->execute([$reportId]);
-        jsonResponse($stmt->fetchAll());
-    }
-}
+            else:
+                text_parts.append(f"📎 Вложение ({attach_type})")
+                continue
 
-// === ЗАГРУЗКА МЕДИА ДЛЯ ОТЧЕТА ===
-if ($uri === 'admin/vk-bot/reports/media/upload') {
-    requireStrictAdmin($pdo);
-    if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
-    
-    $reportId = (int)($_POST['report_id'] ?? 0);
-    if (!$reportId) jsonError('ID отчета не указан', 400);
-    
-    // Проверяем существование отчета
-    $stmt = $pdo->prepare("SELECT id FROM vk_bot_reports WHERE id = ?");
-    $stmt->execute([$reportId]);
-    if (!$stmt->fetch()) jsonError('Отчет не найден', 404);
-    
-    $uploadedFiles = [];
-    $errors = [];
-    
-    if (!isset($_FILES['files']) || empty($_FILES['files']['name'][0])) {
-        jsonError('Файлы не загружены', 400);
-    }
-    
-    $uploadDir = __DIR__ . '/uploads/vk_bot/';
-    if (!is_dir($uploadDir)) {
-        mkdir($uploadDir, 0777, true);
-    }
-    
-    $allowedImageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    $maxFileSize = 10 * 1024 * 1024; // 10MB
-    
-    foreach ($_FILES['files']['name'] as $key => $name) {
-        if ($_FILES['files']['error'][$key] !== UPLOAD_ERR_OK) {
-            $errors[] = "Ошибка загрузки файла: $name";
-            continue;
-        }
-        
-        $fileType = $_FILES['files']['type'][$key];
-        $fileSize = $_FILES['files']['size'][$key];
-        $tmpPath = $_FILES['files']['tmp_name'][$key];
-        
-        if ($fileSize > $maxFileSize) {
-            $errors[] = "Файл $name слишком большой (макс. 10MB)";
-            continue;
-        }
-        
-        $extension = pathinfo($name, PATHINFO_EXTENSION);
-        $fileName = uniqid() . '.' . $extension;
-        $filePath = $uploadDir . $fileName;
-        
-        if (move_uploaded_file($tmpPath, $filePath)) {
-            $fileUrl = '/uploads/vk_bot/' . $fileName;
-            $fileTypeDb = in_array($fileType, $allowedImageTypes) ? 'image' : 'file';
-            
-            $stmt = $pdo->prepare("
-                INSERT INTO vk_bot_report_media (report_id, file_url, file_type, original_name, file_size) 
-                VALUES (?, ?, ?, ?, ?)
-            ");
-            $stmt->execute([$reportId, $fileUrl, $fileTypeDb, $name, $fileSize]);
-            
-            $uploadedFiles[] = [
-                'id' => (int)$pdo->lastInsertId(),
-                'file_url' => $fileUrl,
-                'file_type' => $fileTypeDb,
-                'original_name' => $name,
-                'file_size' => $fileSize,
-            ];
-        } else {
-            $errors[] = "Не удалось сохранить файл: $name";
-        }
-    }
-    
-    jsonResponse([
-        'success' => !empty($uploadedFiles),
-        'files' => $uploadedFiles,
-        'errors' => $errors,
-    ]);
-}
+        elif isinstance(attach, str) and '_' in attach:
+            parts = attach.split('_')
+            if len(parts) >= 2:
+                owner_id, media_id = parts[0], parts[1]
+                direct_url = f"https://vk.com/photo{owner_id}_{media_id}"
+                local_path = os.path.join(UPLOAD_DIR, f"photo_{media_id}_{int(time.time())}.jpg")
+                if download_vk_photo(direct_url, local_path):
+                    file_url = f"/{UPLOAD_DIR}{os.path.basename(local_path)}"
+                else:
+                    file_url = direct_url
+                file_name = f"photo_{media_id}.jpg"
+                attach_type = 'photo'
+            else:
+                continue
 
-// === ЗАГРУЗКА ФОТО С VK ===
-if ($uri === 'admin/vk-bot/reports/media/vk-upload') {
-    requireStrictAdmin($pdo);
-    if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
-    
-    $reportId = (int)($data['report_id'] ?? 0);
-    $vkPhotoUrl = trim($data['vk_photo_url'] ?? '');
-    
-    if (!$reportId) jsonError('ID отчета не указан', 400);
-    if (!$vkPhotoUrl) jsonError('URL фото не указан', 400);
-    
-    // Проверяем существование отчета
-    $stmt = $pdo->prepare("SELECT id FROM vk_bot_reports WHERE id = ?");
-    $stmt->execute([$reportId]);
-    if (!$stmt->fetch()) jsonError('Отчет не найден', 404);
-    
-    // Обрабатываем URL
-    $localUrl = processVkPhotoUrl($vkPhotoUrl, $reportId, $pdo);
-    
-    if ($localUrl !== $vkPhotoUrl) {
-        // Фото было скачано локально
-        $stmt = $pdo->prepare("
-            INSERT INTO vk_bot_report_media (report_id, file_url, file_type, original_name, file_size) 
-            VALUES (?, ?, 'image', ?, 0)
-        ");
-        $stmt->execute([$reportId, $localUrl, basename($localUrl)]);
-        
-        jsonResponse([
-            'success' => true,
-            'file' => [
-                'id' => (int)$pdo->lastInsertId(),
-                'file_url' => $localUrl,
-                'file_type' => 'image',
-                'original_name' => basename($localUrl),
-            ]
-        ]);
-    } else {
-        // Не удалось скачать - сохраняем ссылку как есть
-        $stmt = $pdo->prepare("
-            INSERT INTO vk_bot_report_media (report_id, file_url, file_type, original_name, file_size) 
-            VALUES (?, ?, 'image', ?, 0)
-        ");
-        $stmt->execute([$reportId, $vkPhotoUrl, 'vk_photo_' . time()]);
-        
-        jsonResponse([
-            'success' => true,
-            'file' => [
-                'id' => (int)$pdo->lastInsertId(),
-                'file_url' => $vkPhotoUrl,
-                'file_type' => 'image',
-                'original_name' => basename($vkPhotoUrl),
-            ],
-            'warning' => 'Не удалось скачать фото, сохранена ссылка'
-        ]);
-    }
-}
+        if file_url:
+            saved_files.append({
+                'file_type': attach_type,
+                'file_url': file_url,
+                'original_name': file_name or f"{attach_type}_{attach_id or 'file'}",
+                'file_size': file_size
+            })
+            text_parts.append(f"📎 {file_name or 'файл'}")
 
-// === УДАЛЕНИЕ МЕДИАФАЙЛА ===
-if ($uri === 'admin/vk-bot/reports/media/delete') {
-    requireStrictAdmin($pdo);
-    if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
-    
-    $mediaId = (int)($data['id'] ?? 0);
-    if (!$mediaId) jsonError('ID медиафайла не указан', 400);
-    
-    $stmt = $pdo->prepare("SELECT file_url FROM vk_bot_report_media WHERE id = ?");
-    $stmt->execute([$mediaId]);
-    $media = $stmt->fetch();
-    
-    if (!$media) jsonError('Медиафайл не найден', 404);
-    
-    // Удаляем файл с диска (только если это локальный файл)
-    if (strpos($media['file_url'], '/uploads/vk_bot/') === 0) {
-        $filePath = __DIR__ . $media['file_url'];
-        if (file_exists($filePath)) {
-            unlink($filePath);
-        }
-    }
-    
-    $stmt = $pdo->prepare("DELETE FROM vk_bot_report_media WHERE id = ?");
-    $stmt->execute([$mediaId]);
-    
-    jsonResponse(['success' => true]);
-}
+    return saved_files, "\n".join(text_parts)
 
-// === БИЛЕТЫ ===
-if ($uri === 'admin/vk-bot/tickets') {
-    requireAdmin($pdo);
-    $groupId = (int)($_GET['group_id'] ?? 0);
-    $sql = "
-        SELECT tk.*, u.vk_id, u.vk_url, u.first_name, u.last_name, u.rating as total_points, g.title as group_title
-        FROM vk_bot_tickets tk
-        JOIN users u ON tk.user_id = u.id
-        JOIN vk_bot_task_groups g ON tk.group_id = g.id
-    ";
-    if ($groupId > 0) {
-        $sql .= " WHERE tk.group_id = " . (int)$groupId;
-    }
-    $sql .= " ORDER BY tk.created_at DESC";
-    $stmt = $pdo->query($sql);
-    jsonResponse($stmt->fetchAll());
-}
 
-// === УВЕДОМЛЕНИЯ ===
-if ($uri === 'admin/vk-bot/notifications') {
-    requireAdmin($pdo);
-    if ($method === 'GET') {
-        $status = $_GET['status'] ?? 'all';
-        $sql = "
-            SELECT n.*, u.first_name, u.last_name, u.vk_id, u.vk_url
+def get_user_tickets(user_id):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT tk.*, g.title as group_title
+            FROM vk_bot_tickets tk
+            JOIN vk_bot_task_groups g ON tk.group_id = g.id
+            WHERE tk.user_id = %s
+            AND tk.created_at >= NOW() - INTERVAL 30 DAY
+            ORDER BY tk.created_at DESC
+        """, (user_id,))
+        return cursor.fetchall()
+
+
+def get_pending_notifications(limit=10):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT n.*, u.vk_id, u.vk_url, u.first_name, u.last_name
             FROM vk_bot_notifications n
             JOIN users u ON n.user_id = u.id
-        ";
-        if ($status === 'pending') {
-            $sql .= " WHERE n.is_sent = 0";
-        } elseif ($status === 'sent') {
-            $sql .= " WHERE n.is_sent = 1";
-        }
-        $sql .= " ORDER BY n.created_at DESC";
-        $stmt = $pdo->query($sql);
-        jsonResponse($stmt->fetchAll());
-    }
-}
+            WHERE n.is_sent = 0
+            ORDER BY n.created_at ASC
+            LIMIT %s
+        """, (limit,))
+        return cursor.fetchall()
 
-// === ОТПРАВКА УВЕДОМЛЕНИЯ ВРУЧНУЮ ===
-if ($uri === 'admin/vk-bot/send-notification') {
-    requireStrictAdmin($pdo);
-    if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
-    
-    $userId = (int)($data['user_id'] ?? 0);
-    $message = trim($data['message'] ?? '');
-    
-    if (!$userId || !$message) {
-        jsonError('Укажите пользователя и текст сообщения', 400);
-    }
-    
-    // Проверяем, есть ли у пользователя VK ID
-    $stmt = $pdo->prepare("SELECT vk_id FROM users WHERE id = ?");
-    $stmt->execute([$userId]);
-    $user = $stmt->fetch();
-    
-    if (!$user || !$user['vk_id']) {
-        jsonError('У пользователя нет привязанного VK ID', 400);
-    }
-    
-    $notifStmt = $pdo->prepare("
-        INSERT INTO vk_bot_notifications (user_id, message, is_sent) 
-        VALUES (?, ?, 0)
-    ");
-    $notifStmt->execute([$userId, $message]);
-    
-    jsonResponse(['success' => true, 'message' => 'Уведомление добавлено в очередь']);
-}
 
-// === РАССЫЛКА ===
-if ($uri === 'admin/vk-bot/broadcast') {
-    requireStrictAdmin($pdo);
-    if ($method !== 'POST') jsonError('Метод не поддерживается', 405);
-    
-    $message = trim($data['message'] ?? '');
-    $recipients = $data['recipients'] ?? 'all';
-    
-    if (!$message) jsonError('Текст сообщения обязателен', 400);
-    
-    // Получаем пользователей с VK ID
-    $sql = "SELECT id, vk_id FROM users WHERE vk_id IS NOT NULL AND status = 'active'";
-    
-    if ($recipients === 'ticket_holders') {
-        $sql .= " AND id IN (SELECT DISTINCT user_id FROM vk_bot_tickets)";
-    } elseif ($recipients === 'active') {
-        $sql .= " AND id IN (SELECT DISTINCT user_id FROM vk_bot_reports WHERE created_at > DATE_SUB(NOW(), INTERVAL 30 DAY))";
-    }
-    
-    $stmt = $pdo->query($sql);
-    $users = $stmt->fetchAll();
-    
-    $count = 0;
-    foreach ($users as $user) {
-        $notifStmt = $pdo->prepare("
-            INSERT INTO vk_bot_notifications (user_id, message, is_sent) 
-            VALUES (?, ?, 0)
-        ");
-        $notifStmt->execute([$user['id'], $message]);
-        $count++;
-    }
-    
-    jsonResponse([
-        'success' => true, 
-        'sent' => $count, 
-        'total' => count($users),
-        'recipients' => $recipients,
-        'message' => "Рассылка добавлена в очередь для $count пользователей"
-    ]);
-}
+def mark_notification_sent(notification_id):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("UPDATE vk_bot_notifications SET is_sent = 1, sent_at = NOW() WHERE id = %s", (notification_id,))
 
-// === СТАТИСТИКА БОТА ===
-if ($uri === 'admin/vk-bot/stats') {
-    requireAdmin($pdo);
-    
-    $totalUsers = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE vk_id IS NOT NULL")->fetchColumn();
-    $totalReports = (int)$pdo->query("SELECT COUNT(*) FROM vk_bot_reports")->fetchColumn();
-    $pendingReports = (int)$pdo->query("SELECT COUNT(*) FROM vk_bot_reports WHERE status = 'pending'")->fetchColumn();
-    $approvedReports = (int)$pdo->query("SELECT COUNT(*) FROM vk_bot_reports WHERE status = 'approved'")->fetchColumn();
-    $totalTickets = (int)$pdo->query("SELECT COUNT(*) FROM vk_bot_tickets")->fetchColumn();
-    $totalTasks = (int)$pdo->query("SELECT COUNT(*) FROM vk_bot_tasks")->fetchColumn();
-    $activeGroups = (int)$pdo->query("
-        SELECT COUNT(*) FROM vk_bot_task_groups 
-        WHERE start_date <= CURDATE() AND end_date >= CURDATE()
-    ")->fetchColumn();
-    
-    jsonResponse([
-        'total_users' => $totalUsers,
-        'total_reports' => $totalReports,
-        'pending_reports' => $pendingReports,
-        'approved_reports' => $approvedReports,
-        'total_tickets' => $totalTickets,
-        'total_tasks' => $totalTasks,
-        'active_groups' => $activeGroups,
-    ]);
-}
 
-// === ЭКСПОРТ ДАННЫХ ===
-if ($uri === 'admin/vk-bot/export') {
-    requireStrictAdmin($pdo);
-    
-    $type = $_GET['type'] ?? 'reports';
-    
-    if ($type === 'reports') {
-        $stmt = $pdo->query("
-            SELECT r.*, u.first_name, u.last_name, u.vk_id, t.title as task_title, g.title as group_title
-            FROM vk_bot_reports r
-            JOIN users u ON r.user_id = u.id
-            JOIN vk_bot_tasks t ON r.task_id = t.id
-            JOIN vk_bot_task_groups g ON t.group_id = g.id
-            ORDER BY r.created_at DESC
-        ");
-        jsonResponse($stmt->fetchAll());
-    } elseif ($type === 'tickets') {
-        $stmt = $pdo->query("
-            SELECT tk.*, u.first_name, u.last_name, u.vk_id, u.rating, g.title as group_title
-            FROM vk_bot_tickets tk
-            JOIN users u ON tk.user_id = u.id
-            JOIN vk_bot_task_groups g ON tk.group_id = g.id
-            ORDER BY tk.created_at DESC
-        ");
-        jsonResponse($stmt->fetchAll());
-    } else {
-        jsonError('Неверный тип экспорта', 400);
-    }
-}
+def add_notification(user_id, message, report_id=None):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            INSERT INTO vk_bot_notifications (user_id, report_id, message)
+            VALUES (%s, %s, %s)
+        """, (user_id, report_id, message))
 
-echo json_encode(['error' => 'Маршрут не найден: ' . $uri]);
-exit();
+
+def create_request(user_id, category, subject, description):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            INSERT INTO vk_bot_requests (user_id, category, subject, description, status)
+            VALUES (%s, %s, %s, %s, 'open')
+        """, (user_id, category, subject, description))
+        return cursor.lastrowid
+
+
+def get_user_requests(user_id):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT * FROM vk_bot_requests WHERE user_id = %s ORDER BY created_at DESC", (user_id,))
+        return cursor.fetchall()
+
+
+def get_user_request_by_id(request_id, user_id):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT * FROM vk_bot_requests WHERE id = %s AND user_id = %s", (request_id, user_id))
+        return cursor.fetchone()
+
+
+def get_request_by_id(request_id):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT * FROM vk_bot_requests WHERE id = %s", (request_id,))
+        return cursor.fetchone()
+
+
+def get_request_messages(request_id):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT m.*, u.first_name, u.last_name, u.vk_id
+            FROM vk_bot_request_messages m
+            JOIN users u ON m.user_id = u.id
+            WHERE m.request_id = %s
+            ORDER BY m.created_at ASC
+        """, (request_id,))
+        return cursor.fetchall()
+
+
+def add_request_message(request_id, user_id, message):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            INSERT INTO vk_bot_request_messages (request_id, user_id, message)
+            VALUES (%s, %s, %s)
+        """, (request_id, user_id, message))
+        return cursor.lastrowid
+
+
+def get_all_requests_for_admin(status=None):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        sql = "SELECT r.*, u.first_name, u.last_name, u.vk_id FROM vk_bot_requests r JOIN users u ON r.user_id = u.id"
+        if status and status != 'all':
+            sql += " WHERE r.status = %s"
+            cursor.execute(sql, (status,))
+        else:
+            cursor.execute(sql)
+        return cursor.fetchall()
+
+
+def get_last_request_message(request_id):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT m.*, u.first_name, u.last_name, u.vk_id
+            FROM vk_bot_request_messages m
+            JOIN users u ON m.user_id = u.id
+            WHERE m.request_id = %s
+            ORDER BY m.created_at DESC
+            LIMIT 1
+        """, (request_id,))
+        return cursor.fetchone()
+
+
+def check_user_agreement(user_id):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT agreement_accepted_at FROM users WHERE id = %s", (user_id,))
+        result = cursor.fetchone()
+        return bool(result and result.get('agreement_accepted_at'))
+
+
+def set_user_agreement(user_id):
+    conn = get_db_connection()
+    with conn.cursor() as cursor:
+        cursor.execute("UPDATE users SET agreement_accepted_at = NOW() WHERE id = %s", (user_id,))
+        return cursor.rowcount > 0
