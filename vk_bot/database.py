@@ -259,11 +259,11 @@ def get_report_media(report_id):
 def process_vk_attachments(attachments, vk_session):
     if not attachments:
         return [], ""
-    
+
     saved_files = []
     text_parts = []
     attach_list = []
-    
+
     if isinstance(attachments, dict):
         for key, value in attachments.items():
             if key.startswith('attach') and not key.endswith('_type'):
@@ -276,7 +276,7 @@ def process_vk_attachments(attachments, vk_session):
         attach_list = attachments
     else:
         attach_list = [attachments]
-    
+
     for attach in attach_list:
         file_url = None
         file_name = None
@@ -284,35 +284,66 @@ def process_vk_attachments(attachments, vk_session):
         attach_type = 'unknown'
         attach_id = None
         owner_id = None
-        
+
         if isinstance(attach, dict):
             attach_type = attach.get('type', 'photo')
-            attach_data = attach.get('data') or attach
-            attach_id = attach_data.get('id', '')
-            owner_id = attach_data.get('owner_id', '')
+
+            # Извлекаем вложенные данные по типу вложения (VkBotLongPoll / VkLongPoll)
+            nested = attach.get(attach_type, {})
+            if not nested:
+                # Если нет вложенных данных — используем сам attach как данные
+                nested = attach
+
+            attach_id = nested.get('id') or attach.get('id') or ''
+            owner_id = nested.get('owner_id') or attach.get('owner_id') or ''
 
             if attach_type == 'photo':
-                sizes = attach_data.get('sizes', [])
+                sizes = nested.get('sizes', [])
                 if sizes:
-                    sizes.sort(key=lambda x: x.get('width', 0) * x.get('height', 0), reverse=True)
-                    file_url = sizes[0].get('url')
+                    best = max(sizes, key=lambda s: s.get('width', 0) * s.get('height', s.get('width', 0)))
+                    file_url = best['url']
                     file_name = f"photo_{attach_id}.jpg"
-                else:
+                elif attach_id and vk_session:
+                    # Прямое получение ссылки через VK API, если sizes недоступны
+                    try:
+                        vk = vk_session.get_api()
+                        resp = vk.photos.getById(photos=f"{owner_id}_{attach_id}")
+                        if resp:
+                            sizes = resp[0].get('sizes', [])
+                            if sizes:
+                                best = max(sizes, key=lambda s: s.get('width', 0) * s.get('height', s.get('width', 0)))
+                                file_url = best['url']
+                                file_name = f"photo_{attach_id}.jpg"
+                    except Exception as e:
+                        logger.error(f"Ошибка получения фото через VK API: {e}")
+
+                # Если ссылку получить не удалось — fallback на страницу ВК
+                if not file_url:
                     file_url = f"https://vk.com/photo{owner_id}_{attach_id}"
                     file_name = f"photo_{attach_id}.jpg"
+
             elif attach_type == 'doc':
-                file_url = attach_data.get('url') or f"https://vk.com/doc{owner_id}_{attach_id}"
-                file_name = attach_data.get('title', 'document')
+                file_url = nested.get('url', '')
+                file_name = nested.get('title', 'document')
+                file_size = nested.get('size', 0)
+
             elif attach_type == 'video':
-                file_url = attach_data.get('player') or f"https://vk.com/video{owner_id}_{attach_id}"
+                file_url = nested.get('player', '')
                 file_name = f"video_{attach_id}"
+
             elif attach_type == 'link':
-                url = attach_data.get('url') or attach_data.get('link', {}).get('url', '')
+                url = nested.get('url') or nested.get('link', {}).get('url', '')
                 text_parts.append(f"🔗 {url}")
                 continue
+
             elif attach_type == 'wall':
                 text_parts.append(f"🔗 https://vk.com/wall{owner_id}_{attach_id}")
                 continue
+
+            else:
+                text_parts.append(f"📎 Вложение ({attach_type})")
+                continue
+
         elif isinstance(attach, str) and '_' in attach:
             parts = attach.split('_')
             owner_id, media_id = parts[0], parts[1]
