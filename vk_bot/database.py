@@ -291,11 +291,16 @@ def process_vk_attachments(attachments, vk_session):
             # Извлекаем вложенные данные по типу вложения (VkBotLongPoll / VkLongPoll)
             nested = attach.get(attach_type, {})
             if not nested:
-                # Если нет вложенных данных — используем сам attach как данные
                 nested = attach
 
             attach_id = nested.get('id') or attach.get('id') or ''
             owner_id = nested.get('owner_id') or attach.get('owner_id') or ''
+
+            # Если id пришёл в формате "ownerId_mediaId" (бывает в VkLongPoll), разбираем
+            if isinstance(attach_id, str) and '_' in attach_id:
+                parts = attach_id.split('_', 1)
+                owner_id = parts[0]
+                attach_id = parts[1]
 
             if attach_type == 'photo':
                 sizes = nested.get('sizes', [])
@@ -315,7 +320,7 @@ def process_vk_attachments(attachments, vk_session):
                                 file_url = best['url']
                                 file_name = f"photo_{attach_id}.jpg"
                     except Exception as e:
-                        logger.error(f"Ошибка получения фото через VK API: {e}")
+                        logger.error(f"Ошибка получения фото через VK API (photos.getById): {e}")
 
                 # Если ссылку получить не удалось — fallback на страницу ВК
                 if not file_url:
