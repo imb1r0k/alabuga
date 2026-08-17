@@ -10,7 +10,6 @@ import json
 import time
 from urllib.parse import urlparse
 from datetime import datetime
-import requests
 
 # Безопасный импорт bcrypt с фоллбеком
 try:
@@ -59,7 +58,7 @@ def get_db_connection():
         _last_conn_time = now
         return conn
     except Exception as e:
-        logger.error(f"Ошибка подключения к базе {config.DB_HOST}: {e}")
+        logger.error(f"❌ Ошибка подключения к базе {config.DB_HOST}: {e}")
         # Запасная попытка подключения
         conn = pymysql.connect(
             host='127.0.0.1',
@@ -257,29 +256,8 @@ def get_report_media(report_id):
         return cursor.fetchall()
 
 
-def download_vk_photo(url, save_path):
-    """Скачивает фото по прямой ссылке VK"""
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        response = requests.get(url, stream=True, timeout=15, headers=headers)
-        if response.status_code == 200:
-            content_type = response.headers.get('content-type', '')
-            if 'image' in content_type:
-                os.makedirs(os.path.dirname(save_path), exist_ok=True)
-                with open(save_path, 'wb') as f:
-                    for chunk in response.iter_content(1024):
-                        f.write(chunk)
-                return True
-        return False
-    except Exception as e:
-        logger.error(f"Ошибка скачивания фото: {e}")
-        return False
-
-
 def process_vk_attachments(attachments, vk_session):
-    """Обработка вложений от VK с корректным получением ссылок на файлы и скачиванием"""
+    """Обработка вложений от VK - получаем прямые ссылки на файлы"""
     if not attachments:
         return [], ""
 
@@ -300,9 +278,6 @@ def process_vk_attachments(attachments, vk_session):
         attach_list = attachments
     else:
         attach_list = [attachments]
-
-    # Создаем директорию для загрузок
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
 
     for attach in attach_list:
         file_url = None
@@ -330,57 +305,67 @@ def process_vk_attachments(attachments, vk_session):
                 attach_id = parts[1]
 
             if attach_type == 'photo':
-                # Пытаемся получить ссылку через sizes
+                # 1. Пытаемся получить прямую ссылку через sizes
                 sizes = nested.get('sizes', [])
                 if sizes:
                     # Берем изображение с максимальным разрешением
                     best = max(sizes, key=lambda s: s.get('width', 0) * s.get('height', s.get('width', 0)))
                     file_url = best.get('url', '')
+                    if file_url:
+                        logger.info(f"Получена прямая ссылка на фото из sizes: {file_url[:100]}...")
                 
-                # Если sizes нет или URL не получен, используем VK API
+                # 2. Если нет sizes, пробуем через прямые ключи
+                if not file_url:
+                    for size_key in ['photo_2560', 'photo_1280', 'photo_807', 'photo_604', 'photo_130', 'photo_75']:
+                        if nested.get(size_key):
+                            file_url = nested[size_key]
+                            logger.info(f"Получена прямая ссылка на фото из {size_key}: {file_url[:100]}...")
+                            break
+                
+                # 3. Если всё ещё нет URL, используем VK API
                 if not file_url and attach_id and vk_session:
                     try:
                         vk = vk_session.get_api()
                         photo_id = f"{owner_id}_{attach_id}" if owner_id else attach_id
                         
+                        # Метод photos.getById
                         try:
                             resp = vk.photos.getById(photos=photo_id, extended=0)
                             if resp:
                                 photo_data = resp[0]
+                                # Сначала ищем sizes
                                 sizes = photo_data.get('sizes', [])
                                 if sizes:
                                     best = max(sizes, key=lambda s: s.get('width', 0) * s.get('height', s.get('width', 0)))
                                     file_url = best.get('url', '')
+                                    logger.info(f"Получена прямая ссылка на фото через API (sizes): {file_url[:100]}...")
                                 else:
+                                    # Ищем по прямым ключам
                                     for size_key in ['photo_2560', 'photo_1280', 'photo_807', 'photo_604', 'photo_130', 'photo_75']:
                                         if photo_data.get(size_key):
                                             file_url = photo_data[size_key]
+                                            logger.info(f"Получена прямая ссылка на фото через API ({size_key}): {file_url[:100]}...")
                                             break
                         except Exception as e:
                             logger.debug(f"photos.getById не сработал: {e}")
                     except Exception as e:
                         logger.error(f"Ошибка получения фото через VK API: {e}")
 
-                # Если всё ещё нет URL, пробуем скачать через прямую ссылку VK
-                if not file_url and attach_id:
-                    direct_url = f"https://vk.com/photo{owner_id}_{attach_id}" if owner_id else f"https://vk.com/photo{attach_id}"
-                    file_name = f"photo_{attach_id}.jpg"
-                    
-                    local_path = os.path.join(UPLOAD_DIR, f"photo_{attach_id}_{int(time.time())}.jpg")
-                    if download_vk_photo(direct_url, local_path):
-                        file_url = f"/{UPLOAD_DIR}{os.path.basename(local_path)}"
-                        logger.info(f"Фото скачано: {file_url}")
-                    else:
-                        file_url = direct_url
-                        logger.warning(f"Не удалось скачать фото, сохраняем ссылку: {file_url}")
+                # 4. Если вообще не удалось получить прямую ссылку
+                if not file_url:
+                    # Формируем ссылку на страницу как fallback
+                    file_url = f"https://vk.com/photo{owner_id}_{attach_id}" if owner_id else f"https://vk.com/photo{attach_id}"
+                    logger.warning(f"Не удалось получить прямую ссылку на фото, используем страницу: {file_url}")
                 
-                file_name = f"photo_{attach_id}.jpg" if not file_name else file_name
+                file_name = f"photo_{attach_id}.jpg"
 
             elif attach_type == 'doc':
+                # Для документов сразу берем URL
                 file_url = nested.get('url', '')
                 file_name = nested.get('title', 'document')
                 file_size = nested.get('size', 0)
                 
+                # Если нет прямой ссылки, пробуем через API
                 if not file_url and attach_id and vk_session:
                     try:
                         vk = vk_session.get_api()
@@ -391,20 +376,8 @@ def process_vk_attachments(attachments, vk_session):
                             file_url = doc_data.get('url', '')
                             file_name = doc_data.get('title', file_name)
                             file_size = doc_data.get('size', file_size)
-                            
                             if file_url:
-                                local_path = os.path.join(UPLOAD_DIR, f"doc_{attach_id}_{int(time.time())}.pdf")
-                                try:
-                                    response = requests.get(file_url, stream=True, timeout=15)
-                                    if response.status_code == 200:
-                                        os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                                        with open(local_path, 'wb') as f:
-                                            for chunk in response.iter_content(1024):
-                                                f.write(chunk)
-                                        file_url = f"/{UPLOAD_DIR}{os.path.basename(local_path)}"
-                                        logger.info(f"Документ скачан: {file_url}")
-                                except Exception as e:
-                                    logger.error(f"Ошибка скачивания документа: {e}")
+                                logger.info(f"Получена прямая ссылка на документ: {file_url[:100]}...")
                     except Exception as e:
                         logger.error(f"Ошибка получения документа: {e}")
 
@@ -432,12 +405,23 @@ def process_vk_attachments(attachments, vk_session):
             parts = attach.split('_')
             if len(parts) >= 2:
                 owner_id, media_id = parts[0], parts[1]
-                direct_url = f"https://vk.com/photo{owner_id}_{media_id}"
-                local_path = os.path.join(UPLOAD_DIR, f"photo_{media_id}_{int(time.time())}.jpg")
-                if download_vk_photo(direct_url, local_path):
-                    file_url = f"/{UPLOAD_DIR}{os.path.basename(local_path)}"
-                else:
-                    file_url = direct_url
+                # Пробуем получить прямую ссылку через API
+                direct_url = None
+                if vk_session:
+                    try:
+                        vk = vk_session.get_api()
+                        photo_id = f"{owner_id}_{media_id}"
+                        resp = vk.photos.getById(photos=photo_id, extended=0)
+                        if resp:
+                            photo_data = resp[0]
+                            for size_key in ['photo_2560', 'photo_1280', 'photo_807', 'photo_604']:
+                                if photo_data.get(size_key):
+                                    direct_url = photo_data[size_key]
+                                    break
+                    except Exception as e:
+                        logger.debug(f"Не удалось получить фото через API: {e}")
+                
+                file_url = direct_url if direct_url else f"https://vk.com/photo{owner_id}_{media_id}"
                 file_name = f"photo_{media_id}.jpg"
                 attach_type = 'photo'
             else:
