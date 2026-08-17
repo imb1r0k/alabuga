@@ -317,9 +317,30 @@ def process_vk_attachments(attachments, vk_session):
                 if len(parts) == 2:
                     owner_id = parts[0]
                     media_id = parts[1]
-                    file_url = f"https://vk.com/{attach_type}{owner_id}_{media_id}"
-                    file_name = f"{attach_type}_{media_id}"
-                    text_parts.append(f"🔗 {attach_type}: {file_url}")
+                    
+                    # Пробуем получить прямую ссылку через API
+                    try:
+                        photo_str = f"{owner_id}_{media_id}"
+                        logger.info(f"Получение фото через API: {photo_str}")
+                        photo_response = api.photos.getById(
+                            photos=photo_str,
+                            photo_sizes=1
+                        )
+                        if photo_response and len(photo_response) > 0:
+                            sizes = photo_response[0].get('sizes', [])
+                            if sizes:
+                                sizes.sort(key=lambda x: x.get('width', 0) * x.get('height', 0), reverse=True)
+                                file_url = sizes[0].get('url')
+                                file_name = f"photo_{media_id}.jpg"
+                                logger.info(f"Получена прямая ссылка на фото через API: {file_url}")
+                    except Exception as e:
+                        logger.error(f"Ошибка получения фото через API: {e}")
+                    
+                    # Если не получили URL через API, создаем ссылку на страницу VK
+                    if not file_url:
+                        file_url = f"https://vk.com/photo{owner_id}_{media_id}"
+                        file_name = f"photo_{media_id}.jpg"
+                        text_parts.append(f"🖼️ фото_{media_id}")
             except Exception as e:
                 logger.error(f"Ошибка парсинга ID: {e}")
                 text_parts.append(f"📎 {attach}")
@@ -506,7 +527,9 @@ def process_vk_attachments(attachments, vk_session):
                 'file': '📎'
             }
             emoji = file_type_emoji.get(attach_type, '📎')
-            text_parts.append(f"{emoji} {file_name}")
+            # Проверяем, не добавлен ли уже этот файл в текст
+            if file_name and not any(file_name in tp for tp in text_parts if isinstance(tp, str)):
+                text_parts.append(f"{emoji} {file_name}")
         else:
             if attach_id:
                 text_parts.append(f"📎 Вложение: {attach_id}")
@@ -653,3 +676,113 @@ def set_user_agreement(user_id):
     with conn.cursor() as cursor:
         cursor.execute("UPDATE users SET agreement_accepted_at = NOW() WHERE id = %s", (user_id,))
         return cursor.rowcount > 0
+
+
+def update_report_status(report_id, status, reject_reason=''):
+    """Обновляет статус отчета, начисляет баллы, выдает билеты"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT r.*, 
+                       t.points, t.title, t.group_id,
+                       u.id as user_id, u.vk_id, u.vk_url
+                FROM vk_bot_reports r
+                JOIN vk_bot_tasks t ON r.task_id = t.id
+                JOIN users u ON r.user_id = u.id
+                WHERE r.id = %s
+            """, (report_id,))
+            report = cursor.fetchone()
+
+            if not report:
+                return None
+
+            cursor.execute("""
+                UPDATE vk_bot_reports 
+                SET status = %s, reject_reason = %s 
+                WHERE id = %s
+            """, (status, reject_reason, report_id))
+
+            user_id = report['user_id']
+            message = ''
+
+            if status == 'approved':
+                points = report.get('points', 10)
+                cursor.execute("""
+                    UPDATE users 
+                    SET rating = rating + %s, completed_tasks = completed_tasks + 1 
+                    WHERE id = %s
+                """, (points, user_id))
+
+                cursor.execute("""
+                    SELECT COUNT(*) as total 
+                    FROM vk_bot_tasks 
+                    WHERE group_id = %s
+                """, (report['group_id'],))
+                total_tasks = cursor.fetchone()['total']
+
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT r.task_id) as done 
+                    FROM vk_bot_reports r
+                    WHERE r.user_id = %s 
+                    AND r.task_id IN (SELECT id FROM vk_bot_tasks WHERE group_id = %s)
+                    AND r.status = 'approved'
+                """, (user_id, report['group_id']))
+                done_tasks = cursor.fetchone()['done']
+
+                if total_tasks > 0 and done_tasks >= total_tasks:
+                    import hashlib
+                    ticket_num = 'TKT-' + hashlib.md5(
+                        f"{report['group_id']}{report_id}".encode()
+                    ).hexdigest()[:6].upper()
+                    cursor.execute("""
+                        INSERT INTO vk_bot_tickets (group_id, user_id, ticket_number)
+                        VALUES (%s, %s, %s)
+                    """, (report['group_id'], user_id, ticket_num))
+                    if cursor.rowcount > 0:
+                        message += f"\n\n🎉 Поздравляем! Вы выполнили все задания волны — вам выдан лотерейный билет!\n🎫 Номер билета: {ticket_num}"
+
+                message = f"✅ Ваше задание \"{report['title']}\" одобрено! Получено +{points} баллов."
+
+            elif status == 'rejected':
+                message = f"❌ Ваше задание \"{report['title']}\" отклонено. Причина: {reject_reason or 'Не выполнено учение'}. Отправьте отчет заново."
+
+            if message:
+                add_notification(user_id, message, report_id)
+
+            return {
+                'user_id': user_id,
+                'vk_id': report['vk_id'],
+                'message': message
+            }
+
+    except Exception as e:
+        logger.error(f"Ошибка в update_report_status: {e}")
+        raise
+    finally:
+        conn.close()
+
+
+def verify_password(plain_password, hashed_password):
+    """Проверка пароля (совместимо с PHP password_hash - bcrypt)"""
+    try:
+        if bcrypt:
+            return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+        return False
+    except Exception:
+        return False
+
+
+def get_user_agreement_status(user_id):
+    """Получает статус согласия пользователя с правилами"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT agreement_accepted_at 
+                FROM users 
+                WHERE id = %s
+            """, (user_id,))
+            return cursor.fetchone()
+    finally:
+        conn.close()
