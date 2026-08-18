@@ -10,6 +10,8 @@ import os
 import json
 from urllib.parse import urlparse
 from datetime import datetime
+import time
+from functools import lru_cache
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,9 +30,35 @@ ALLOWED_EXTENSIONS = {
 ALLOWED_EXTENSIONS_FLAT = []
 for ext_list in ALLOWED_EXTENSIONS.values():
     ALLOWED_EXTENSIONS_FLAT.extend(ext_list)
-# Запрещенные расширения
 FORBIDDEN_EXTENSIONS = ['htaccess', 'php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'phps', 'cgi', 'pl', 'py', 'sh', 'exe', 'bat', 'cmd', 'com', 'scr', 'vbs', 'js', 'jar']
 
+# Кэш для данных
+_cache = {}
+_cache_time = {}
+CACHE_TTL_LONG = 300
+CACHE_TTL_MEDIUM = 60
+CACHE_TTL_SHORT = 10
+
+def get_cached(key, fetch_func, ttl=CACHE_TTL_MEDIUM):
+    """Универсальная функция получения данных с кэшированием"""
+    now = time.time()
+    if key in _cache and key in _cache_time and (now - _cache_time[key]) < ttl:
+        return _cache[key]
+    
+    try:
+        result = fetch_func()
+        _cache[key] = result
+        _cache_time[key] = now
+        return result
+    except Exception as e:
+        logger.error(f"Ошибка получения кэша для {key}: {e}")
+        return _cache.get(key)
+
+def invalidate_cache():
+    """Очищает кэш"""
+    global _cache, _cache_time
+    _cache = {}
+    _cache_time = {}
 
 def get_db_connection():
     """Создает подключение к базе данных"""
@@ -42,35 +70,35 @@ def get_db_connection():
         database=config.DB_NAME,
         charset='utf8mb4',
         cursorclass=DictCursor,
-        autocommit=True
+        autocommit=True,
+        connect_timeout=5,
+        read_timeout=10
     )
-
 
 def get_bot_settings():
     """Получает настройки бота из таблицы vk_bot_settings"""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT `key`, `value` FROM vk_bot_settings")
-            rows = cursor.fetchall()
-            return {r['key']: r['value'] for r in rows}
-    except Exception as e:
-        logger.error(f"Ошибка получения настроек бота: {e}")
-        return {}
-    finally:
-        conn.close()
-
+    def fetch():
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT `key`, `value` FROM vk_bot_settings")
+                rows = cursor.fetchall()
+                return {r['key']: r['value'] for r in rows}
+        except Exception as e:
+            logger.error(f"Ошибка получения настроек бота: {e}")
+            return {}
+        finally:
+            conn.close()
+    return get_cached('bot_settings', fetch, CACHE_TTL_LONG)
 
 def hash_password(password):
     """Хеширование пароля совместимое с PHP password_hash (bcrypt)"""
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
-
 def generate_password(length=10):
     """Генерирует случайный пароль"""
     chars = string.ascii_letters + string.digits
     return ''.join(random.choices(chars, k=length))
-
 
 def generate_login(first_name, last_name):
     """Генерирует логин на основе имени и фамилии"""
@@ -87,13 +115,11 @@ def generate_login(first_name, last_name):
     finally:
         conn.close()
 
-
 def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
     """Находит или создает пользователя в таблице users"""
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            # 1. Проверяем по VK URL
             if vk_url:
                 cursor.execute("SELECT * FROM users WHERE vk_url = %s", (vk_url,))
                 user = cursor.fetchone()
@@ -107,7 +133,6 @@ def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
                         logger.info(f"Обновлен vk_id для пользователя {user['id']}")
                     return user
 
-            # 2. Проверяем по VK ID
             if vk_id:
                 cursor.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
                 user = cursor.fetchone()
@@ -121,7 +146,6 @@ def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
                         logger.info(f"Обновлен vk_url для пользователя {user['id']}")
                     return user
 
-            # 3. Проверяем по имени и фамилии
             if first_name and last_name:
                 cursor.execute("""
                     SELECT * FROM users 
@@ -138,7 +162,6 @@ def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
                     logger.info(f"Связан пользователь {first_name} {last_name} с VK ID {vk_id}")
                     return user
 
-            # 4. Создаем нового пользователя
             login = generate_login(first_name, last_name)
             password = generate_password()
             hashed_password = hash_password(password)
@@ -166,13 +189,8 @@ def find_or_create_user(vk_id, first_name, last_name, vk_url=''):
     finally:
         conn.close()
 
-
 def find_existing_user(vk_id, vk_url=''):
-    """
-    Находит уже существующего пользователя по VK ID или VK URL.
-    НЕ создаёт новый аккаунт.
-    Возвращает dict пользователя или None, если пользователь не найден.
-    """
+    """Находит уже существующего пользователя по VK ID или VK URL."""
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
@@ -188,47 +206,54 @@ def find_existing_user(vk_id, vk_url=''):
     finally:
         conn.close()
 
-
 def get_user_by_vk_id(vk_id):
-    """Получает пользователя по VK ID"""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
-            return cursor.fetchone()
-    finally:
-        conn.close()
-
+    """Получает пользователя по VK ID с кэшированием"""
+    def fetch():
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT * FROM users WHERE vk_id = %s", (vk_id,))
+                return cursor.fetchone()
+        finally:
+            conn.close()
+    return get_cached(f'user_vk_{vk_id}', fetch, CACHE_TTL_LONG)
 
 def get_active_task_group():
-    """Получает активную группу заданий"""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT * FROM vk_bot_task_groups 
-                WHERE start_date <= CURDATE() AND end_date >= CURDATE()
-                ORDER BY start_date ASC LIMIT 1
-            """)
-            return cursor.fetchone()
-    finally:
-        conn.close()
-
+    """Получает активную группу заданий с кэшированием"""
+    def fetch():
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT * FROM vk_bot_task_groups 
+                    WHERE start_date <= CURDATE() AND end_date >= CURDATE()
+                    ORDER BY start_date ASC LIMIT 1
+                """)
+                return cursor.fetchone()
+        finally:
+            conn.close()
+    return get_cached('active_task_group', fetch, CACHE_TTL_MEDIUM)
 
 def get_tasks_for_group(group_id):
-    """Получает задания для группы"""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT * FROM vk_bot_tasks 
-                WHERE group_id = %s 
-                ORDER BY FIELD(difficulty, 'easy', 'medium', 'hard'), id ASC
-            """, (group_id,))
-            return cursor.fetchall()
-    finally:
-        conn.close()
-
+    """Получает задания для группы с кэшированием"""
+    if not group_id:
+        return []
+    
+    def fetch():
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT * FROM vk_bot_tasks 
+                    WHERE group_id = %s 
+                    ORDER BY FIELD(difficulty, 'easy', 'medium', 'hard'), id ASC
+                """, (group_id,))
+                return cursor.fetchall()
+        finally:
+            conn.close()
+    
+    key = f'tasks_group_{group_id}'
+    return get_cached(key, fetch, CACHE_TTL_MEDIUM)
 
 def get_user_task_report(user_id, task_id):
     """Получает последний отчет пользователя по заданию"""
@@ -244,38 +269,49 @@ def get_user_task_report(user_id, task_id):
     finally:
         conn.close()
 
-
 def get_user_task_status(user_id, task_id):
-    """Возвращает статус задания для пользователя.
-    Если есть хотя бы один одобренный отчёт — задание считается выполненным (approved),
-    иначе возвращается статус последнего отчёта (или None, если отчётов нет)."""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT id FROM vk_bot_reports
-                WHERE user_id = %s AND task_id = %s AND status = 'approved'
-                LIMIT 1
-            """, (user_id, task_id))
-            if cursor.fetchone():
-                return 'approved'
-            cursor.execute("""
-                SELECT status FROM vk_bot_reports
-                WHERE user_id = %s AND task_id = %s
-                ORDER BY id DESC LIMIT 1
-            """, (user_id, task_id))
-            row = cursor.fetchone()
-            return row['status'] if row else None
-    finally:
-        conn.close()
+    """Возвращает статус задания для пользователя с кэшированием"""
+    def fetch():
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT id FROM vk_bot_reports
+                    WHERE user_id = %s AND task_id = %s AND status = 'approved'
+                    LIMIT 1
+                """, (user_id, task_id))
+                if cursor.fetchone():
+                    return 'approved'
+                cursor.execute("""
+                    SELECT status FROM vk_bot_reports
+                    WHERE user_id = %s AND task_id = %s
+                    ORDER BY id DESC LIMIT 1
+                """, (user_id, task_id))
+                row = cursor.fetchone()
+                return row['status'] if row else None
+        finally:
+            conn.close()
+    
+    key = f'user_task_status_{user_id}_{task_id}'
+    return get_cached(key, fetch, CACHE_TTL_SHORT)
 
+def invalidate_user_task_cache(user_id, task_id):
+    """Инвалидирует кэш статуса задания"""
+    key = f'user_task_status_{user_id}_{task_id}'
+    _cache.pop(key, None)
+    _cache_time.pop(key, None)
 
 def create_report(user_id, task_id, submission_text, has_attachments=False):
     """Создает новый отчет по заданию"""
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            # ПРОВЕРКА: есть ли уже одобренный отчет для этого задания
+            # Проверка: существует ли задание?
+            cursor.execute("SELECT id FROM vk_bot_tasks WHERE id = %s", (task_id,))
+            if not cursor.fetchone():
+                raise ValueError("TASK_NOT_FOUND")
+            
+            # Проверка: есть ли уже одобренный отчет
             cursor.execute("""
                 SELECT id FROM vk_bot_reports
                 WHERE user_id = %s AND task_id = %s AND status = 'approved'
@@ -283,10 +319,9 @@ def create_report(user_id, task_id, submission_text, has_attachments=False):
             """, (user_id, task_id))
             
             if cursor.fetchone():
-                # Задание уже выполнено
                 raise ValueError("TASK_ALREADY_COMPLETED")
             
-            # ПРОВЕРКА: есть ли уже ожидающий отчет
+            # Проверка: есть ли уже ожидающий отчет
             cursor.execute("""
                 SELECT id FROM vk_bot_reports
                 WHERE user_id = %s AND task_id = %s AND status = 'pending'
@@ -294,7 +329,6 @@ def create_report(user_id, task_id, submission_text, has_attachments=False):
             """, (user_id, task_id))
             
             if cursor.fetchone():
-                # Уже есть отчет на рассмотрении
                 raise ValueError("REPORT_ALREADY_PENDING")
             
             cursor.execute("""
@@ -306,7 +340,6 @@ def create_report(user_id, task_id, submission_text, has_attachments=False):
         raise e
     finally:
         conn.close()
-
 
 def save_report_media(report_id, file_url, file_type, original_name, file_size):
     """Сохраняет информацию о медиафайле в базу данных"""
@@ -320,7 +353,6 @@ def save_report_media(report_id, file_url, file_type, original_name, file_size):
             return cursor.lastrowid
     finally:
         conn.close()
-
 
 def get_report_media(report_id):
     """Получает медиафайлы для отчета"""
@@ -336,30 +368,22 @@ def get_report_media(report_id):
     finally:
         conn.close()
 
-
 def process_vk_attachments(attachments, vk_session):
-    """
-    Обрабатывает вложения из сообщения VK.
-    Возвращает список ссылок на файлы и текстовое описание.
-    """
+    """Обрабатывает вложения из сообщения VK."""
     if not attachments:
         return [], ""
     
     saved_files = []
     text_parts = []
     
-    # attachments может быть словарем { 'attach1': {'type': 'photo', 'id': '...'}, 'attach1_type': 'photo' }
     attach_list = []
     
     if isinstance(attachments, dict):
-        # Извлекаем все attach1, attach2, ... из словаря
         for key, value in attachments.items():
             if key.startswith('attach') and not key.endswith('_type'):
-                # Значение может быть словарем с type и id
                 if isinstance(value, dict):
                     attach_list.append(value)
                 else:
-                    # Если value - строка, ищем тип в attach1_type
                     attach_type_key = f"{key}_type"
                     attach_type = attachments.get(attach_type_key, 'photo')
                     attach_list.append({
@@ -373,7 +397,6 @@ def process_vk_attachments(attachments, vk_session):
     
     logger.info(f"Обработка {len(attach_list)} вложений")
     
-    # Получаем API для запросов
     try:
         api = vk_session.get_api()
     except Exception as e:
@@ -389,20 +412,17 @@ def process_vk_attachments(attachments, vk_session):
         owner_id = None
         access_key = None
         
-        # Если attach - строка с ID (приходит как "473566088_457255481")
         if isinstance(attach, str):
             attach_id = attach
-            attach_type = 'photo'  # По умолчанию считаем фото
+            attach_type = 'photo'
             try:
                 parts = attach.split('_')
                 if len(parts) == 2:
                     owner_id = parts[0]
                     media_id = parts[1]
                     
-                    # Пробуем получить прямую ссылку через API
                     try:
                         photo_str = f"{owner_id}_{media_id}"
-                        logger.info(f"Получение фото через API: {photo_str}")
                         photo_response = api.photos.getById(
                             photos=photo_str,
                             photo_sizes=1
@@ -410,33 +430,12 @@ def process_vk_attachments(attachments, vk_session):
                         if photo_response and len(photo_response) > 0:
                             sizes = photo_response[0].get('sizes', [])
                             if sizes:
-                                # Сортируем по размеру, чтобы взять самое большое
                                 sizes.sort(key=lambda x: x.get('width', 0) * x.get('height', 0), reverse=True)
                                 file_url = sizes[0].get('url')
                                 file_name = f"photo_{media_id}.jpg"
-                                logger.info(f"Получена прямая ссылка на фото через API: {file_url}")
                     except Exception as e:
                         logger.error(f"Ошибка получения фото через API: {e}")
                     
-                    # Если не получили URL через API, пробуем получить через photos.getById с другим форматом
-                    if not file_url:
-                        try:
-                            # Пробуем другой формат запроса
-                            photo_response = api.photos.getById(
-                                photos=f"-{owner_id}_{media_id}" if not owner_id.startswith('-') else f"{owner_id}_{media_id}",
-                                photo_sizes=1
-                            )
-                            if photo_response and len(photo_response) > 0:
-                                sizes = photo_response[0].get('sizes', [])
-                                if sizes:
-                                    sizes.sort(key=lambda x: x.get('width', 0) * x.get('height', 0), reverse=True)
-                                    file_url = sizes[0].get('url')
-                                    file_name = f"photo_{media_id}.jpg"
-                                    logger.info(f"Получена прямая ссылка на фото через API (альтернативный формат): {file_url}")
-                        except Exception as e:
-                            logger.error(f"Ошибка получения фото через API (альтернативный формат): {e}")
-                    
-                    # Если не получили URL через API, создаем ссылку на страницу VK
                     if not file_url:
                         file_url = f"https://vk.com/photo{owner_id}_{media_id}"
                         file_name = f"photo_{media_id}.jpg"
@@ -446,45 +445,33 @@ def process_vk_attachments(attachments, vk_session):
                 text_parts.append(f"📎 {attach}")
                 continue
         
-        # Если attach - словарь
         elif isinstance(attach, dict):
             attach_type = attach.get('type', 'unknown')
-            
-            # В VkBotLongPoll данные лежат во вложенном ключе по типу (photo, doc, ...)
             attach_data = attach.get(attach_type) or attach.get('data') or attach
             
             attach_id = attach_data.get('id', '')
             owner_id = attach_data.get('owner_id', '')
             access_key = attach_data.get('access_key', '')
             
-            # Если owner_id нет, но есть в attach_id с подчеркиванием
             if not owner_id and attach_id and '_' in str(attach_id):
                 parts = str(attach_id).split('_')
                 if len(parts) == 2:
                     owner_id = parts[0]
                     attach_id = parts[1]
             
-            logger.info(f"Обработка вложения: тип={attach_type}, id={attach_id}, owner={owner_id}, access_key={access_key}")
-            
-            # --- ОБРАБОТКА ФОТО ---
             if attach_type == 'photo':
-                # Сначала пробуем получить прямой URL из sizes в данных
                 sizes = attach_data.get('sizes', [])
                 if sizes:
                     sizes.sort(key=lambda x: x.get('width', 0) * x.get('height', 0), reverse=True)
                     file_url = sizes[0].get('url')
                     file_name = f"photo_{attach_id}.jpg" if attach_id else 'photo.jpg'
-                    logger.info(f"Получен URL фото из sizes: {file_url}")
                 else:
-                    # Пробуем получить прямую ссылку через API
                     try:
                         if owner_id and attach_id:
-                            # Формируем строку фото с access_key если есть
                             photo_str = f"{owner_id}_{attach_id}"
                             if access_key:
                                 photo_str = f"{owner_id}_{attach_id}_{access_key}"
                             
-                            logger.info(f"Получение фото через API: {photo_str}")
                             photo_response = api.photos.getById(
                                 photos=photo_str,
                                 photo_sizes=1
@@ -495,47 +482,36 @@ def process_vk_attachments(attachments, vk_session):
                                     sizes.sort(key=lambda x: x.get('width', 0) * x.get('height', 0), reverse=True)
                                     file_url = sizes[0].get('url')
                                     file_name = f"photo_{attach_id}.jpg"
-                                    logger.info(f"Получена прямая ссылка на фото через API: {file_url}")
                     except Exception as e:
                         logger.error(f"Ошибка получения фото через API: {e}")
                 
-                # Если все еще нет URL, создаем ссылку на страницу VK
                 if not file_url:
                     if owner_id and attach_id:
                         file_url = f"https://vk.com/photo{owner_id}_{attach_id}"
                         file_name = f"photo_{attach_id}.jpg"
                     else:
-                        # Пробуем другие поля
                         for key in ['photo_2560', 'photo_1280', 'photo_807', 'photo_604', 'photo_130', 'photo_75']:
                             if attach_data.get(key):
                                 file_url = attach_data[key]
                                 file_name = f"photo_{attach_id}.jpg" if attach_id else 'photo.jpg'
-                                logger.info(f"Получен URL фото из {key}: {file_url}")
                                 break
             
-            # --- ОБРАБОТКА ДОКУМЕНТОВ ---
             elif attach_type == 'doc':
-                # Пробуем получить прямую ссылку через API
                 try:
                     if owner_id and attach_id:
                         doc_str = f"{owner_id}_{attach_id}"
                         if access_key:
                             doc_str = f"{owner_id}_{attach_id}_{access_key}"
                         
-                        logger.info(f"Получение документа через API: {doc_str}")
-                        doc_response = api.docs.getById(
-                            docs=doc_str
-                        )
+                        doc_response = api.docs.getById(docs=doc_str)
                         if doc_response and len(doc_response) > 0:
                             file_url = doc_response[0].get('url')
                             file_name = doc_response[0].get('title', f"doc_{attach_id}")
                             file_size = doc_response[0].get('size', 0)
                             attach_type = 'doc'
-                            logger.info(f"Получена прямая ссылка на документ: {file_url}")
                 except Exception as e:
                     logger.error(f"Ошибка получения документа через API: {e}")
                 
-                # Если не получили URL, создаем ссылку на страницу
                 if not file_url:
                     if owner_id and attach_id:
                         file_url = f"https://vk.com/doc{owner_id}_{attach_id}"
@@ -545,27 +521,20 @@ def process_vk_attachments(attachments, vk_session):
                         file_name = attach_data.get('title', 'document')
                     file_size = attach_data.get('size', 0)
             
-            # --- ОБРАБОТКА ВИДЕО ---
             elif attach_type == 'video':
-                # Пробуем получить ссылку через API
                 try:
                     if owner_id and attach_id:
                         video_str = f"{owner_id}_{attach_id}"
                         if access_key:
                             video_str = f"{owner_id}_{attach_id}_{access_key}"
                         
-                        logger.info(f"Получение видео через API: {video_str}")
-                        video_response = api.video.get(
-                            videos=video_str
-                        )
+                        video_response = api.video.get(videos=video_str)
                         if video_response and 'items' in video_response and len(video_response['items']) > 0:
                             file_url = video_response['items'][0].get('player')
                             file_name = f"video_{attach_id}"
-                            logger.info(f"Получена ссылка на видео: {file_url}")
                 except Exception as e:
                     logger.error(f"Ошибка получения видео через API: {e}")
                 
-                # Если не получили URL, создаем ссылку на страницу
                 if not file_url:
                     if owner_id and attach_id:
                         file_url = f"https://vk.com/video{owner_id}_{attach_id}"
@@ -574,7 +543,6 @@ def process_vk_attachments(attachments, vk_session):
                         file_url = attach_data.get('player')
                         file_name = f"video_{attach_id}" if attach_id else 'video'
             
-            # --- ОБРАБОТКА АУДИО ---
             elif attach_type == 'audio':
                 try:
                     if owner_id and attach_id:
@@ -582,14 +550,10 @@ def process_vk_attachments(attachments, vk_session):
                         if access_key:
                             audio_str = f"{owner_id}_{attach_id}_{access_key}"
                         
-                        logger.info(f"Получение аудио через API: {audio_str}")
-                        audio_response = api.audio.getById(
-                            audios=audio_str
-                        )
+                        audio_response = api.audio.getById(audios=audio_str)
                         if audio_response and len(audio_response) > 0:
                             file_url = audio_response[0].get('url')
                             file_name = f"audio_{attach_id}.mp3"
-                            logger.info(f"Получена ссылка на аудио: {file_url}")
                 except Exception as e:
                     logger.error(f"Ошибка получения аудио через API: {e}")
                 
@@ -601,7 +565,6 @@ def process_vk_attachments(attachments, vk_session):
                         file_url = attach_data.get('url')
                         file_name = f"audio_{attach_id}.mp3" if attach_id else 'audio.mp3'
             
-            # --- ОБРАБОТКА ССЫЛОК ---
             elif attach_type == 'link':
                 url = attach_data.get('url', '')
                 if not url:
@@ -609,7 +572,6 @@ def process_vk_attachments(attachments, vk_session):
                 text_parts.append(f"🔗 Ссылка: {url}")
                 continue
             
-            # --- ОБРАБОТКА ЗАПИСЕЙ НА СТЕНЕ ---
             elif attach_type == 'wall':
                 owner_id = attach_data.get('owner_id', '')
                 wall_id = attach_data.get('id', '')
@@ -620,7 +582,6 @@ def process_vk_attachments(attachments, vk_session):
                 logger.warning(f"Неизвестный тип вложения: {attach_type}")
                 continue
         
-        # Если файл найден, сохраняем ссылку
         if file_url:
             saved_files.append({
                 'file_type': attach_type,
@@ -629,7 +590,6 @@ def process_vk_attachments(attachments, vk_session):
                 'file_size': file_size
             })
             
-            # Добавляем информацию о файле в текст (если еще не добавлена)
             if not text_parts or not any(file_name in tp for tp in text_parts if file_name):
                 file_type_emoji = {
                     'photo': '🖼️',
@@ -641,15 +601,11 @@ def process_vk_attachments(attachments, vk_session):
                 emoji = file_type_emoji.get(attach_type, '📎')
                 text_parts.append(f"{emoji} {file_name}")
         else:
-            # Если не удалось получить URL, добавляем ID как ссылку
             if attach_id:
                 text_parts.append(f"📎 Вложение: {attach_id}")
                 logger.warning(f"Не удалось получить URL для вложения: {attach}")
     
-    logger.info(f"Обработано файлов: {len(saved_files)}")
-    
     return saved_files, "\n".join(text_parts)
-
 
 def get_user_tickets(user_id):
     """Получает билеты пользователя за последние 30 дней"""
@@ -668,7 +624,6 @@ def get_user_tickets(user_id):
     finally:
         conn.close()
 
-
 def get_user_tickets_for_group(user_id, group_id):
     """Проверяет, есть ли у пользователя билет за конкретную волну"""
     conn = get_db_connection()
@@ -682,7 +637,6 @@ def get_user_tickets_for_group(user_id, group_id):
             return cursor.fetchone()
     finally:
         conn.close()
-
 
 def get_pending_notifications(limit=10):
     """Получает ожидающие отправки уведомления"""
@@ -701,7 +655,6 @@ def get_pending_notifications(limit=10):
     finally:
         conn.close()
 
-
 def mark_notification_sent(notification_id):
     """Отмечает уведомление как отправленное"""
     conn = get_db_connection()
@@ -715,7 +668,6 @@ def mark_notification_sent(notification_id):
     finally:
         conn.close()
 
-
 def add_notification(user_id, message, report_id=None):
     """Добавляет уведомление в очередь"""
     conn = get_db_connection()
@@ -727,7 +679,6 @@ def add_notification(user_id, message, report_id=None):
             """, (user_id, report_id, message))
     finally:
         conn.close()
-
 
 def create_request(user_id, category, subject, description):
     """Создаёт новую заявку от пользователя"""
@@ -741,7 +692,6 @@ def create_request(user_id, category, subject, description):
             return cursor.lastrowid
     finally:
         conn.close()
-
 
 def get_user_requests(user_id):
     """Получает список заявок пользователя"""
@@ -757,7 +707,6 @@ def get_user_requests(user_id):
     finally:
         conn.close()
 
-
 def get_user_request_by_id(request_id, user_id):
     """Получает одну заявку по ID"""
     conn = get_db_connection()
@@ -770,7 +719,6 @@ def get_user_request_by_id(request_id, user_id):
             return cursor.fetchone()
     finally:
         conn.close()
-
 
 def get_request_messages(request_id):
     """Получает все сообщения по заявке"""
@@ -788,7 +736,6 @@ def get_request_messages(request_id):
     finally:
         conn.close()
 
-
 def add_request_message(request_id, user_id, message):
     """Добавляет сообщение в заявку"""
     conn = get_db_connection()
@@ -801,7 +748,6 @@ def add_request_message(request_id, user_id, message):
             return cursor.lastrowid
     finally:
         conn.close()
-
 
 def update_request_status(request_id, status, resolved_by=None, resolution_text=None):
     """Обновляет статус заявки"""
@@ -823,7 +769,6 @@ def update_request_status(request_id, status, resolved_by=None, resolution_text=
     finally:
         conn.close()
 
-
 def get_all_requests_for_admin(status=None):
     """Получает все заявки для админа (с фильтром по статусу)"""
     conn = get_db_connection()
@@ -844,7 +789,6 @@ def get_all_requests_for_admin(status=None):
     finally:
         conn.close()
 
-
 def get_request_by_id(request_id):
     """Получает заявку по ID (без проверки пользователя)"""
     conn = get_db_connection()
@@ -859,7 +803,6 @@ def get_request_by_id(request_id):
             return cursor.fetchone()
     finally:
         conn.close()
-
 
 def get_last_request_message(request_id):
     """Получает последнее сообщение по заявке"""
@@ -877,7 +820,6 @@ def get_last_request_message(request_id):
             return cursor.fetchone()
     finally:
         conn.close()
-
 
 def update_report_status(report_id, status, reject_reason=''):
     """Обновляет статус отчета, начисляет баллы, выдает билеты"""
@@ -898,7 +840,6 @@ def update_report_status(report_id, status, reject_reason=''):
             if not report:
                 return None
 
-            # ПРОВЕРКА: не был ли уже одобрен этот отчет
             cursor.execute("""
                 SELECT status FROM vk_bot_reports WHERE id = %s
             """, (report_id,))
@@ -940,16 +881,11 @@ def update_report_status(report_id, status, reject_reason=''):
                 """, (user_id, report['group_id']))
                 done_tasks = cursor.fetchone()['done']
 
-                # ПРОВЕРКА: не выдан ли уже билет за эту волну
                 cursor.execute("""
-                    SELECT id FROM vk_bot_tickets
-                    WHERE group_id = %s AND user_id = %s
+                    SELECT id FROM vk_bot_tickets                    WHERE group_id = %s AND user_id = %s
                 """, (report['group_id'], user_id))
                 existing_ticket = cursor.fetchone()
 
-                # Выдаем билет ТОЛЬКО если:
-                # 1. Все задания волны выполнены (done_tasks >= total_tasks)
-                # 2. Билет еще не выдан за эту волну (existing_ticket is None)
                 if total_tasks > 0 and done_tasks >= total_tasks and not existing_ticket:
                     import hashlib
                     ticket_num = 'TKT-' + hashlib.md5(
@@ -982,14 +918,12 @@ def update_report_status(report_id, status, reject_reason=''):
     finally:
         conn.close()
 
-
 def verify_password(plain_password, hashed_password):
     """Проверка пароля (совместимо с PHP password_hash - bcrypt)"""
     try:
         return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
     except Exception:
         return False
-
 
 def check_user_agreement(user_id):
     """Проверяет, согласился ли пользователь с правилами (по наличию даты)"""
@@ -1007,7 +941,6 @@ def check_user_agreement(user_id):
     finally:
         conn.close()
 
-
 def set_user_agreement(user_id):
     """Устанавливает отметку о согласии пользователя с правилами (ставит текущую дату)"""
     conn = get_db_connection()
@@ -1015,7 +948,6 @@ def set_user_agreement(user_id):
         with conn.cursor() as cursor:
             logger.info(f"set_user_agreement: Начинаем обновление для user_id={user_id}")
             
-            # Сначала проверяем, существует ли пользователь
             cursor.execute("SELECT id, agreement_accepted_at FROM users WHERE id = %s", (user_id,))
             user = cursor.fetchone()
             if not user:
@@ -1024,19 +956,16 @@ def set_user_agreement(user_id):
             
             logger.info(f"set_user_agreement: Текущее значение agreement_accepted_at = {user.get('agreement_accepted_at')}")
             
-            # Обновляем согласие - ставим текущую дату
             cursor.execute("""
                 UPDATE users 
                 SET agreement_accepted_at = NOW() 
                 WHERE id = %s
             """, (user_id,))
             
-            # Проверяем, что обновление произошло
             affected_rows = cursor.rowcount
             logger.info(f"set_user_agreement: affected_rows = {affected_rows}")
             
             if affected_rows > 0:
-                # Проверяем, что действительно обновилось
                 cursor.execute("SELECT agreement_accepted_at FROM users WHERE id = %s", (user_id,))
                 result = cursor.fetchone()
                 logger.info(f"set_user_agreement: После обновления - agreement_accepted_at = {result.get('agreement_accepted_at') if result else None}")
@@ -1058,7 +987,6 @@ def set_user_agreement(user_id):
         return False
     finally:
         conn.close()
-
 
 def get_user_agreement_status(user_id):
     """Получает статус согласия пользователя с правилами"""
