@@ -37,6 +37,15 @@ from database import (
     find_existing_user,
 )
 
+# Добавляем функцию инвалидации кэша, если она не импортируется
+try:
+    from database import invalidate_user_task_cache
+except ImportError:
+    def invalidate_user_task_cache(user_id, task_id):
+        """Инвалидирует кэш статуса задания"""
+        _cache.pop(f'status_{user_id}_{task_id}', None)
+        _cache_time.pop(f'status_{user_id}_{task_id}', None)
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -44,7 +53,7 @@ logger = logging.getLogger(__name__)
 user_states = {}
 sent_notifications = {}
 agreement_sent = set()
-executor = ThreadPoolExecutor(max_workers=2)
+executor = ThreadPoolExecutor(max_workers=10)
 
 # Кэш для данных
 _cache = {
@@ -58,7 +67,7 @@ _cache = {
 _cache_time = {}
 CACHE_TTL_LONG = 300
 CACHE_TTL_MEDIUM = 60
-CACHE_TTL_SHORT = 5
+CACHE_TTL_SHORT = 10
 
 
 def get_cached(key, fetch_func, ttl=CACHE_TTL_MEDIUM):
@@ -580,6 +589,7 @@ def process_message(event, vk, vk_session):
         
         state = user_states.get(vk_id)
         
+        # ПРЕДВАРИТЕЛЬНАЯ ОБРАБОТКА ВЛОЖЕНИЙ
         attachments = []
         if event.attachments:
             attachments = event.attachments
@@ -675,21 +685,18 @@ def process_message(event, vk, vk_session):
         if isinstance(state, dict) and 'id' in state:
             task = state
             
-            # ПРОВЕРКА 0: существует ли задание в базе?
+            # Проверка: существует ли задание в базе?
             if active_group:
-                # Проверяем, что задание действительно существует в текущей волне
                 tasks = get_tasks_cached(active_group['id'])
                 task_exists = False
                 for t in tasks:
                     if t['id'] == task['id']:
                         task_exists = True
-                        # Обновляем данные задания (вдруг они изменились)
                         task = t
                         user_states[vk_id] = task
                         break
                 
                 if not task_exists:
-                    # Задание не найдено - очищаем состояние и показываем меню
                     user_states.pop(vk_id, None)
                     vk.messages.send(
                         user_id=vk_id,
@@ -699,7 +706,7 @@ def process_message(event, vk, vk_session):
                     )
                     return
             
-            # ПРОВЕРКА 1: задание уже выполнено?
+            # Проверка: задание уже выполнено?
             task_status = get_task_status_cached(db_user['id'], task['id'])
             if task_status == 'approved':
                 user_states.pop(vk_id, None)
@@ -713,7 +720,7 @@ def process_message(event, vk, vk_session):
                 )
                 return
             
-            # ПРОВЕРКА 2: это текст кнопки меню, а не отчет?
+            # Проверка: это текст кнопки меню, а не отчет?
             if text in ["📋 Задания", "👤 Мой профиль", "📋 Заявки", "🔙 Назад в меню", "🔙 Назад"]:
                 user_states.pop(vk_id, None)
                 vk.messages.send(
@@ -724,7 +731,7 @@ def process_message(event, vk, vk_session):
                 )
                 return
             
-            # ПРОВЕРКА 3: пользователь пытается выбрать другое задание вместо отправки отчета?
+            # Проверка: пользователь пытается выбрать другое задание вместо отправки отчета?
             if active_group:
                 matched_task = get_task_by_title_cached(active_group['id'], text)
                 if matched_task and matched_task['id'] != task['id']:
@@ -793,6 +800,7 @@ def process_message(event, vk, vk_session):
                 else:
                     raise
             
+            # Сохраняем медиа
             for file_info in saved_files:
                 save_report_media(
                     report_id,
@@ -802,22 +810,39 @@ def process_message(event, vk, vk_session):
                     file_info.get('file_size', 0)
                 )
             
+            # Очищаем состояние пользователя
             user_states.pop(vk_id, None)
             
+            # Формируем сообщение
             response_msg = "✅ Ваш отчет принят на рассмотрение!\nСтатус задания обновится после проверки администратором."
             if has_attachments:
                 response_msg += f"\n📎 Прикреплено файлов: {len(saved_files)}"
             
-            _cache.pop(f'status_{db_user["id"]}_{task["id"]}', None)
+            # Инвалидируем кэш статуса
+            invalidate_user_task_cache(db_user['id'], task['id'])
             
+            # Получаем обновленную клавиатуру
             if active_group:
                 tasks = get_tasks_cached(active_group['id'])
                 keyboard = build_tasks_keyboard(tasks, db_user['id'])
             else:
                 keyboard = create_main_keyboard(active_group, site_url)
             
-            vk.messages.send(user_id=vk_id, message=response_msg, random_id=0, keyboard=keyboard)
+            # Отправляем подтверждение пользователю
+            try:
+                vk.messages.send(
+                    user_id=vk_id,
+                    message=response_msg,
+                    random_id=0,
+                    keyboard=keyboard
+                )
+                logger.info(f"✅ Подтверждение отправлено пользователю {vk_id}")
+            except Exception as e:
+                logger.error(f"❌ Ошибка отправки подтверждения пользователю {vk_id}: {e}")
+            
             return
+        
+        # ============ ОБРАБОТКА ГЛАВНЫХ КОМАНД ============
         
         if text in ["📋 Задания", "/start", "Начать", "Старт"]:
             if not active_group:
@@ -956,7 +981,6 @@ def process_message(event, vk, vk_session):
         
     except pymysql.err.IntegrityError as e:
         logger.error(f"Ошибка целостности БД от {vk_id}: {e}")
-        # Если это ошибка внешнего ключа - очищаем состояние пользователя
         if "foreign key constraint fails" in str(e):
             user_states.pop(vk_id, None)
             try:
@@ -1082,7 +1106,7 @@ def main():
             logger.error("❌ Токен не получен. Бот останавливается.")
             return
 
-    executor = ThreadPoolExecutor(max_workers=2)
+    executor = ThreadPoolExecutor(max_workers=10)
 
     vk_session = vk_api.VkApi(token=token)
     vk = vk_session.get_api()
