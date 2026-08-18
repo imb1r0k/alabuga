@@ -2,6 +2,7 @@ import time
 import threading
 import logging
 import re
+import pymysql
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
@@ -674,6 +675,30 @@ def process_message(event, vk, vk_session):
         if isinstance(state, dict) and 'id' in state:
             task = state
             
+            # ПРОВЕРКА 0: существует ли задание в базе?
+            if active_group:
+                # Проверяем, что задание действительно существует в текущей волне
+                tasks = get_tasks_cached(active_group['id'])
+                task_exists = False
+                for t in tasks:
+                    if t['id'] == task['id']:
+                        task_exists = True
+                        # Обновляем данные задания (вдруг они изменились)
+                        task = t
+                        user_states[vk_id] = task
+                        break
+                
+                if not task_exists:
+                    # Задание не найдено - очищаем состояние и показываем меню
+                    user_states.pop(vk_id, None)
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="⚠️ Задание больше не доступно. Пожалуйста, выберите задание заново.",
+                        random_id=0,
+                        keyboard=build_tasks_keyboard(tasks, db_user['id']) if tasks else create_main_keyboard(active_group, site_url)
+                    )
+                    return
+            
             # ПРОВЕРКА 1: задание уже выполнено?
             task_status = get_task_status_cached(db_user['id'], task['id'])
             if task_status == 'approved':
@@ -929,6 +954,22 @@ def process_message(event, vk, vk_session):
             keyboard=create_main_keyboard(active_group, site_url)
         )
         
+    except pymysql.err.IntegrityError as e:
+        logger.error(f"Ошибка целостности БД от {vk_id}: {e}")
+        # Если это ошибка внешнего ключа - очищаем состояние пользователя
+        if "foreign key constraint fails" in str(e):
+            user_states.pop(vk_id, None)
+            try:
+                tasks = get_tasks_cached(active_group['id']) if active_group else []
+                keyboard = build_tasks_keyboard(tasks, db_user['id']) if tasks else create_main_keyboard(active_group, site_url)
+                vk.messages.send(
+                    user_id=vk_id,
+                    message="⚠️ Произошла ошибка при отправке отчета. Пожалуйста, выберите задание заново.",
+                    random_id=0,
+                    keyboard=keyboard
+                )
+            except:
+                pass
     except Exception as e:
         logger.error(f"Ошибка обработки сообщения от {vk_id}: {e}", exc_info=True)
     
