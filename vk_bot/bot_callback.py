@@ -46,7 +46,16 @@ from database import (
     invalidate_user_task_cache,
 )
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Настройка логирования в отдельный файл
+log_filename = 'bot_callback.log'
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_filename, encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -59,6 +68,7 @@ executor = ThreadPoolExecutor(max_workers=10)
 
 # VK Session
 vk = None
+vk_session = None  # Добавляем для process_vk_attachments
 
 # Кэш для данных
 _cache = {
@@ -402,6 +412,7 @@ def send_credentials_message(vk, user_id, user_data, active_group, site_url=''):
 def process_message_callback(vk_id, text, attachments=None):
     """Обработка сообщения для Callback API (без event)"""
     t_start = time.time()
+    logger.info(f"📩 Получено сообщение от {vk_id}: {text[:50] if text else '(пусто)'}")
     
     try:
         settings = get_settings_cached()
@@ -650,7 +661,8 @@ def process_message_callback(vk_id, text, attachments=None):
             
             if attachments:
                 try:
-                    saved_files, attachment_text = process_vk_attachments(attachments, vk)
+                    # Используем глобальный vk_session для process_vk_attachments
+                    saved_files, attachment_text = process_vk_attachments(attachments, vk_session)
                     if attachment_text:
                         text = f"{text}\n\n📎 Прикрепленные файлы:\n{attachment_text}" if text else f"📎 Прикрепленные файлы:\n{attachment_text}"
                 except Exception as e:
@@ -1131,7 +1143,7 @@ def setup_info():
 
 def init_vk_session():
     """Инициализация VK сессии"""
-    global vk
+    global vk, vk_session
     
     settings = get_bot_settings()
     token = settings.get('vk_token', '')
@@ -1169,6 +1181,7 @@ def main():
     logger.info(f"📍 Callback URL: {config.CALLBACK_API_URL}")
     logger.info(f"🔑 Confirmation code: {config.CALLBACK_CONFIRMATION_CODE}")
     logger.info(f"🔐 Secret key: {config.CALLBACK_API_SECRET}")
+    logger.info(f"📝 Логи пишутся в файл: {log_filename}")
     
     app.run(
         host=config.CALLBACK_API_HOST,
