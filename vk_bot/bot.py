@@ -964,18 +964,19 @@ def vk_callback():
     data = request.get_json()
     
     if not data:
-        return jsonify({'error': 'Invalid JSON'}), 400
+        return 'Invalid JSON', 400
     
     # Проверка на подтверждение сервера
     if data.get('type') == 'confirmation':
-        logger.info("Получен запрос на подтверждение сервера")
-        return config.CALLBACK_CONFIRMATION_CODE
+        logger.info(f"Получен запрос на подтверждение сервера для группы {data.get('group_id')}")
+        # Возвращаем ТОЛЬКО код подтверждения
+        return config.CALLBACK_CONFIRMATION_CODE, 200, {'Content-Type': 'text/plain'}
     
     # Проверка секретного ключа
     secret = data.get('secret')
     if secret and secret != config.CALLBACK_API_SECRET:
         logger.warning(f"Неверный секретный ключ: {secret}")
-        return jsonify({'error': 'Invalid secret'}), 403
+        return 'Invalid secret', 403
     
     # Обработка нового сообщения
     if data.get('type') == 'message_new':
@@ -985,7 +986,7 @@ def vk_callback():
             
             # Проверка, что сообщение от пользователя (не от бота)
             if message.get('out') == 1:
-                return jsonify({'ok': True})
+                return 'ok', 200
             
             vk_id = message.get('from_id')
             text = message.get('text', '').strip()
@@ -1014,13 +1015,13 @@ def vk_callback():
             # Асинхронная обработка
             executor.submit(process_message, vk_id, text, attachments)
             
-            return jsonify({'ok': True})
+            return 'ok', 200
             
         except Exception as e:
             logger.error(f"Ошибка обработки message_new: {e}", exc_info=True)
-            return jsonify({'error': str(e)}), 500
+            return 'error', 500
     
-    return jsonify({'ok': True})
+    return 'ok', 200
 
 
 @app.route('/vk/status', methods=['GET'])
