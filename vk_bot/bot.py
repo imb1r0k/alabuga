@@ -3,17 +3,13 @@ import threading
 import logging
 import re
 import pymysql
-import json
-import hashlib
-import hmac
-from flask import Flask, request, jsonify
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 import vk_api
+from vk_api.longpoll import VkLongPoll, VkEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
-import config
 from database import (
     get_bot_settings,
     find_or_create_user,
@@ -39,19 +35,16 @@ from database import (
     check_user_agreement,
     set_user_agreement,
     find_existing_user,
-    invalidate_user_task_cache,
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
-
 # Глобальные переменные
 user_states = {}
 sent_notifications = {}
 agreement_sent = set()
-executor = ThreadPoolExecutor(max_workers=10)
+executor = ThreadPoolExecutor(max_workers=2)
 
 # Кэш для данных
 _cache = {
@@ -66,10 +59,6 @@ _cache_time = {}
 CACHE_TTL_LONG = 300
 CACHE_TTL_MEDIUM = 60
 CACHE_TTL_SHORT = 5
-
-# VK Session (инициализируется при запуске)
-vk_session = None
-vk = None
 
 
 def get_cached(key, fetch_func, ttl=CACHE_TTL_MEDIUM):
@@ -180,6 +169,86 @@ def cache_cleaner():
         for key in old_keys:
             _cache.pop(key, None)
             _cache_time.pop(key, None)
+
+
+# ============ Фоновые потоки ============
+
+def send_notification_worker(vk):
+    while True:
+        try:
+            notifications = get_pending_notifications(limit=20)
+            if notifications:
+                for notif in notifications:
+                    try:
+                        if notif.get('vk_id'):
+                            vk.messages.send(
+                                user_id=notif['vk_id'],
+                                message=notif['message'],
+                                random_id=0
+                            )
+                            mark_notification_sent(notif['id'])
+                        else:
+                            mark_notification_sent(notif['id'])
+                        time.sleep(0.1)
+                    except Exception as e:
+                        logger.error(f"Ошибка отправки уведомления: {e}")
+                        mark_notification_sent(notif['id'])
+            time.sleep(3)
+        except Exception as e:
+            logger.error(f"Ошибка в потоке уведомлений: {e}")
+            time.sleep(5)
+
+
+def check_request_messages_worker(vk):
+    global sent_notifications
+    
+    while True:
+        try:
+            requests = get_all_requests_for_admin('open')
+            requests += get_all_requests_for_admin('in_progress')
+            
+            for req in requests:
+                request_id = req['id']
+                user_vk_id = req.get('vk_id')
+                
+                if not user_vk_id:
+                    continue
+                
+                last_msg = get_last_request_message(request_id)
+                if not last_msg or last_msg['user_id'] == req['user_id']:
+                    continue
+                
+                msg_key = f"{request_id}_{last_msg['id']}"
+                if sent_notifications.get(msg_key):
+                    continue
+                
+                try:
+                    sender_name = last_msg.get('first_name', 'Администратор')
+                    msg_text = f"📋 Новое сообщение по заявке #{request_id}\n"
+                    msg_text += f"📝 {req['subject']}\n"
+                    msg_text += "━" * 30 + "\n\n"
+                    msg_text += f"💬 {sender_name}: {last_msg['message']}\n\n"
+                    msg_text += "🔗 Чтобы ответить, перейдите в раздел '📋 Заявки' в боте."
+                    
+                    vk.messages.send(
+                        user_id=user_vk_id,
+                        message=msg_text,
+                        random_id=0
+                    )
+                    sent_notifications[msg_key] = True
+                    
+                except Exception as e:
+                    logger.error(f"Ошибка отправки уведомления о сообщении в заявке #{request_id}: {e}")
+                
+                time.sleep(0.1)
+            
+            if len(sent_notifications) > 100:
+                sent_notifications = dict(list(sent_notifications.items())[-50:])
+                
+        except Exception as e:
+            logger.error(f"Ошибка в потоке проверки заявок: {e}")
+        
+        time.sleep(8)
 
 
 # ============ Клавиатуры ============
@@ -368,6 +437,9 @@ def send_agreement_rules(vk, user_id):
 
 
 def send_credentials_message(vk, user_id, user_data, active_group, site_url=''):
+    """
+    Отправляет пользователю логин и пароль от аккаунта
+    """
     if user_data.get('generated_password'):
         login_msg = (
             "✅ Аккаунт успешно зарегистрирован на сайте!\n\n"
@@ -402,8 +474,10 @@ def send_credentials_message(vk, user_id, user_data, active_group, site_url=''):
 
 # ============ Обработчик сообщений ============
 
-def process_message(vk_id, text, attachments=None):
+def process_message(event, vk, vk_session):
     t_start = time.time()
+    vk_id = event.user_id
+    text = event.text.strip()
     
     try:
         settings = get_settings_cached()
@@ -419,7 +493,7 @@ def process_message(vk_id, text, attachments=None):
         
         if not db_user:
             if vk_id in user_states and user_states.get(vk_id, {}).get('action', '').startswith('registration'):
-                handle_registration_state(vk_id, text, active_group, site_url)
+                handle_registration_state(vk_id, text, vk, active_group, site_url)
                 return
             
             if text == "✅ Подтверждаю":
@@ -501,10 +575,34 @@ def process_message(vk_id, text, attachments=None):
             agreement_sent.remove(vk_id)
         
         if vk_id in user_states and user_states.get(vk_id, {}).get('action', '').startswith('registration'):
-            handle_registration_state(vk_id, text, active_group, site_url, db_user)
+            handle_registration_state(vk_id, text, vk, active_group, site_url, db_user)
             return
         
         state = user_states.get(vk_id)
+        
+        attachments = []
+        if event.attachments:
+            attachments = event.attachments
+            try:
+                message_data = vk.messages.getById(message_ids=event.message_id)
+                if message_data and 'items' in message_data and len(message_data['items']) > 0:
+                    msg_attachments = message_data['items'][0].get('attachments', [])
+                    if msg_attachments:
+                        new_attachments = {}
+                        for i, att in enumerate(msg_attachments):
+                            att_type = att.get('type')
+                            att_data = att.get(att_type, {})
+                            new_attachments[f'attach{i+1}'] = {
+                                'type': att_type,
+                                'id': att_data.get('id'),
+                                'owner_id': att_data.get('owner_id'),
+                                'access_key': att_data.get('access_key', ''),
+                                'data': att_data
+                            }
+                            new_attachments[f'attach{i+1}_type'] = att_type
+                        attachments = new_attachments
+            except Exception as e:
+                logger.error(f"Ошибка получения вложений: {e}")
         
         if text in ["🔙 Назад в меню", "🔙 Назад", "🔙 Назад к заявкам"]:
             user_states.pop(vk_id, None)
@@ -577,17 +675,21 @@ def process_message(vk_id, text, attachments=None):
         if isinstance(state, dict) and 'id' in state:
             task = state
             
+            # ПРОВЕРКА 0: существует ли задание в базе?
             if active_group:
+                # Проверяем, что задание действительно существует в текущей волне
                 tasks = get_tasks_cached(active_group['id'])
                 task_exists = False
                 for t in tasks:
                     if t['id'] == task['id']:
                         task_exists = True
+                        # Обновляем данные задания (вдруг они изменились)
                         task = t
                         user_states[vk_id] = task
                         break
                 
                 if not task_exists:
+                    # Задание не найдено - очищаем состояние и показываем меню
                     user_states.pop(vk_id, None)
                     vk.messages.send(
                         user_id=vk_id,
@@ -597,6 +699,7 @@ def process_message(vk_id, text, attachments=None):
                     )
                     return
             
+            # ПРОВЕРКА 1: задание уже выполнено?
             task_status = get_task_status_cached(db_user['id'], task['id'])
             if task_status == 'approved':
                 user_states.pop(vk_id, None)
@@ -610,29 +713,39 @@ def process_message(vk_id, text, attachments=None):
                 )
                 return
             
+            # ПРОВЕРКА 2: это текст кнопки меню, а не отчет?
+            if text in ["📋 Задания", "👤 Мой профиль", "📋 Заявки", "🔙 Назад в меню", "🔙 Назад"]:
+                user_states.pop(vk_id, None)
+                vk.messages.send(
+                    user_id=vk_id,
+                    message="🔙 Отправка отчета отменена.",
+                    random_id=0,
+                    keyboard=create_main_keyboard(active_group, site_url)
+                )
+                return
+            
+            # ПРОВЕРКА 3: пользователь пытается выбрать другое задание вместо отправки отчета?
             if active_group:
                 matched_task = get_task_by_title_cached(active_group['id'], text)
                 if matched_task and matched_task['id'] != task['id']:
-                    user_states[vk_id] = matched_task
+                    user_states.pop(vk_id, None)
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="⚠️ Вы выбрали другое задание. Отправка отчета отменена.",
+                        random_id=0
+                    )
+                    # Показываем новое задание
                     report = get_user_task_report(db_user['id'], matched_task['id'])
                     task_status = get_task_status_cached(db_user['id'], matched_task['id'])
+                    user_states[vk_id] = matched_task
                     vk.messages.send(
                         user_id=vk_id,
                         message=format_task_message(matched_task, report, task_status),
                         random_id=0
                     )
                     return
-                
-                if text in ["📋 Задания", "👤 Мой профиль", "📋 Заявки", "🔙 Назад в меню", "🔙 Назад"]:
-                    user_states.pop(vk_id, None)
-                    vk.messages.send(
-                        user_id=vk_id,
-                        message="🔙 Отправка отчета отменена.",
-                        random_id=0,
-                        keyboard=create_main_keyboard(active_group, site_url)
-                    )
-                    return
             
+            # Если текст пустой и нет вложений - просим написать текст
             if not text.strip() and not attachments:
                 vk.messages.send(
                     user_id=vk_id,
@@ -641,34 +754,25 @@ def process_message(vk_id, text, attachments=None):
                 )
                 return
             
+            # Обработка вложений
             saved_files = []
             attachment_text = ""
             
             if attachments:
                 try:
-                    saved_files, attachment_text = process_vk_attachments(attachments, vk)
+                    saved_files, attachment_text = process_vk_attachments(attachments, vk_session)
                     if attachment_text:
                         text = f"{text}\n\n📎 Прикрепленные файлы:\n{attachment_text}" if text else f"📎 Прикрепленные файлы:\n{attachment_text}"
                 except Exception as e:
                     logger.error(f"Ошибка обработки вложений: {e}")
             
+            # Создаем отчет
             has_attachments = len(saved_files) > 0
             try:
                 report_id = create_report(db_user['id'], task['id'], text, has_attachments)
             except ValueError as e:
                 error_msg = str(e)
-                if error_msg == "TASK_NOT_FOUND":
-                    user_states.pop(vk_id, None)
-                    tasks = get_tasks_cached(active_group['id']) if active_group else []
-                    keyboard = build_tasks_keyboard(tasks, db_user['id']) if tasks else create_main_keyboard(active_group, site_url)
-                    vk.messages.send(
-                        user_id=vk_id,
-                        message="⚠️ Задание не найдено. Пожалуйста, выберите задание заново.",
-                        random_id=0,
-                        keyboard=keyboard
-                    )
-                    return
-                elif error_msg == "TASK_ALREADY_COMPLETED":
+                if error_msg == "TASK_ALREADY_COMPLETED":
                     user_states.pop(vk_id, None)
                     tasks = get_tasks_cached(active_group['id']) if active_group else []
                     keyboard = build_tasks_keyboard(tasks, db_user['id']) if tasks else create_main_keyboard(active_group, site_url)
@@ -704,7 +808,7 @@ def process_message(vk_id, text, attachments=None):
             if has_attachments:
                 response_msg += f"\n📎 Прикреплено файлов: {len(saved_files)}"
             
-            invalidate_user_task_cache(db_user['id'], task['id'])
+            _cache.pop(f'status_{db_user["id"]}_{task["id"]}', None)
             
             if active_group:
                 tasks = get_tasks_cached(active_group['id'])
@@ -714,8 +818,6 @@ def process_message(vk_id, text, attachments=None):
             
             vk.messages.send(user_id=vk_id, message=response_msg, random_id=0, keyboard=keyboard)
             return
-        
-        # ============ ОБРАБОТКА ГЛАВНЫХ КОМАНД ============
         
         if text in ["📋 Задания", "/start", "Начать", "Старт"]:
             if not active_group:
@@ -854,6 +956,7 @@ def process_message(vk_id, text, attachments=None):
         
     except pymysql.err.IntegrityError as e:
         logger.error(f"Ошибка целостности БД от {vk_id}: {e}")
+        # Если это ошибка внешнего ключа - очищаем состояние пользователя
         if "foreign key constraint fails" in str(e):
             user_states.pop(vk_id, None)
             try:
@@ -875,7 +978,7 @@ def process_message(vk_id, text, attachments=None):
         logger.warning(f"⚠️ Сообщение от {vk_id} обрабатывалось {elapsed:.2f}с")
 
 
-def handle_registration_state(vk_id, text, active_group, site_url, db_user=None):
+def handle_registration_state(vk_id, text, vk, active_group, site_url, db_user=None):
     """Обработка состояния регистрации"""
     state = user_states.get(vk_id, {})
     action = state.get('action', '')
@@ -956,142 +1059,52 @@ def handle_registration_state(vk_id, text, active_group, site_url, db_user=None)
             return
 
 
-# ============ Обработчики Callback API ============
-
-@app.route('/vk/callback', methods=['POST'])
-def vk_callback():
-    """Основной обработчик callback от VK"""
-    data = request.get_json()
+def main():
+    global executor
     
-    if not data:
-        return 'Invalid JSON', 400
-    
-    # Проверка на подтверждение сервера
-    if data.get('type') == 'confirmation':
-        logger.info(f"Получен запрос на подтверждение сервера для группы {data.get('group_id')}")
-        # Возвращаем ТОЛЬКО код подтверждения
-        return config.CALLBACK_CONFIRMATION_CODE, 200, {'Content-Type': 'text/plain'}
-    
-    # Проверка секретного ключа
-    secret = data.get('secret')
-    if secret and secret != config.CALLBACK_API_SECRET:
-        logger.warning(f"Неверный секретный ключ: {secret}")
-        return 'Invalid secret', 403
-    
-    # Обработка нового сообщения
-    if data.get('type') == 'message_new':
-        try:
-            object_data = data.get('object', {})
-            message = object_data.get('message', {})
-            
-            # Проверка, что сообщение от пользователя (не от бота)
-            if message.get('out') == 1:
-                return 'ok', 200
-            
-            vk_id = message.get('from_id')
-            text = message.get('text', '').strip()
-            
-            # Получаем вложения
-            attachments = message.get('attachments', [])
-            
-            if attachments:
-                # Преобразуем вложения в нужный формат
-                new_attachments = {}
-                for i, att in enumerate(attachments):
-                    att_type = att.get('type')
-                    att_data = att.get(att_type, {})
-                    new_attachments[f'attach{i+1}'] = {
-                        'type': att_type,
-                        'id': att_data.get('id'),
-                        'owner_id': att_data.get('owner_id'),
-                        'access_key': att_data.get('access_key', ''),
-                        'data': att_data
-                    }
-                    new_attachments[f'attach{i+1}_type'] = att_type
-                attachments = new_attachments
-            else:
-                attachments = None
-            
-            # Асинхронная обработка
-            executor.submit(process_message, vk_id, text, attachments)
-            
-            return 'ok', 200
-            
-        except Exception as e:
-            logger.error(f"Ошибка обработки message_new: {e}", exc_info=True)
-            return 'error', 500
-    
-    return 'ok', 200
+    logger.info("🚀 Запуск бота ВКонтакте...")
 
-
-@app.route('/vk/status', methods=['GET'])
-def status():
-    """Проверка статуса бота"""
-    return jsonify({
-        'status': 'running',
-        'group_id': config.GROUP_ID,
-        'version': '1.0'
-    })
-
-
-@app.route('/vk/setup', methods=['GET'])
-def setup_info():
-    """Информация для настройки Callback API"""
-    return jsonify({
-        'group_id': config.GROUP_ID,
-        'callback_url': config.CALLBACK_API_URL,
-        'confirmation_code': config.CALLBACK_CONFIRMATION_CODE,
-        'secret_key': config.CALLBACK_API_SECRET
-    })
-
-
-# ============ Запуск бота ============
-
-def init_vk_session():
-    """Инициализация VK сессии"""
-    global vk_session, vk
-    
     settings = get_bot_settings()
     token = settings.get('vk_token', '')
-    
+    site_url = settings.get('site_url', '')
+
     if not token:
         logger.error("❌ ОШИБКА: Укажите VK Token в админ-панели!")
-        return False
-    
-    try:
-        vk_session = vk_api.VkApi(token=token)
-        vk = vk_session.get_api()
-        logger.info("✅ VK сессия инициализирована")
-        return True
-    except Exception as e:
-        logger.error(f"❌ Ошибка инициализации VK сессии: {e}")
-        return False
+        timeout = 0
+        while not token and timeout < 300:
+            time.sleep(10)
+            settings = get_bot_settings()
+            token = settings.get('vk_token', '')
+            site_url = settings.get('site_url', '')
+            timeout += 10
+        
+        if not token:
+            logger.error("❌ Токен не получен. Бот останавливается.")
+            return
 
+    executor = ThreadPoolExecutor(max_workers=2)
 
-def main():
-    """Запуск бота"""
-    logger.info("🚀 Запуск бота на Callback API...")
-    
-    if not init_vk_session():
-        logger.error("❌ Не удалось инициализировать VK сессию. Бот останавливается.")
-        return
-    
-    # Запуск фоновых потоков
+    vk_session = vk_api.VkApi(token=token)
+    vk = vk_session.get_api()
+    longpoll = VkLongPoll(vk_session)
+
+    threading.Thread(target=send_notification_worker, args=(vk,), daemon=True).start()
+    threading.Thread(target=check_request_messages_worker, args=(vk,), daemon=True).start()
     threading.Thread(target=cache_cleaner, daemon=True).start()
     logger.info("✅ Фоновые потоки запущены!")
-    
-    # Запуск Flask приложения
-    logger.info(f"✅ Бот запущен на http://{config.CALLBACK_API_HOST}:{config.CALLBACK_API_PORT}")
-    logger.info(f"📍 Callback URL: {config.CALLBACK_API_URL}")
-    logger.info(f"🔑 Confirmation code: {config.CALLBACK_CONFIRMATION_CODE}")
-    logger.info(f"🔐 Secret key: {config.CALLBACK_API_SECRET}")
-    
-    app.run(
-        host=config.CALLBACK_API_HOST,
-        port=config.CALLBACK_API_PORT,
-        debug=False,
-        threaded=True
-    )
+
+    logger.info("✅ Бот успешно подключен к ВКонтакте и ожидает сообщений!")
+
+    for event in longpoll.listen():
+        if event.type == VkEventType.MESSAGE_NEW and event.to_me:
+            try:
+                future = executor.submit(process_message, event, vk, vk_session)
+                future.add_done_callback(
+                    lambda f: logger.error(f"Ошибка в потоке: {f.exception()}") 
+                    if f.exception() else None
+                )
+            except Exception as e:
+                logger.error(f"Ошибка отправки задачи в пул: {e}")
 
 
 if __name__ == '__main__':
