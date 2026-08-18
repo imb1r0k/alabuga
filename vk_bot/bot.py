@@ -670,8 +670,66 @@ def process_message(event, vk, vk_session):
                 )
                 return
         
+        # ============ ОБРАБОТКА ОТЧЕТА ПО ЗАДАНИЮ ============
         if isinstance(state, dict) and 'id' in state:
             task = state
+            
+            # ПРОВЕРКА 1: задание уже выполнено?
+            task_status = get_task_status_cached(db_user['id'], task['id'])
+            if task_status == 'approved':
+                user_states.pop(vk_id, None)
+                tasks = get_tasks_cached(active_group['id']) if active_group else []
+                keyboard = build_tasks_keyboard(tasks, db_user['id']) if tasks else create_main_keyboard(active_group, site_url)
+                vk.messages.send(
+                    user_id=vk_id,
+                    message="✅ Это задание уже выполнено! Выберите другое задание.",
+                    random_id=0,
+                    keyboard=keyboard
+                )
+                return
+            
+            # ПРОВЕРКА 2: это текст кнопки меню, а не отчет?
+            if text in ["📋 Задания", "👤 Мой профиль", "📋 Заявки", "🔙 Назад в меню", "🔙 Назад"]:
+                user_states.pop(vk_id, None)
+                vk.messages.send(
+                    user_id=vk_id,
+                    message="🔙 Отправка отчета отменена.",
+                    random_id=0,
+                    keyboard=create_main_keyboard(active_group, site_url)
+                )
+                return
+            
+            # ПРОВЕРКА 3: пользователь пытается выбрать другое задание вместо отправки отчета?
+            if active_group:
+                matched_task = get_task_by_title_cached(active_group['id'], text)
+                if matched_task and matched_task['id'] != task['id']:
+                    user_states.pop(vk_id, None)
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="⚠️ Вы выбрали другое задание. Отправка отчета отменена.",
+                        random_id=0
+                    )
+                    # Показываем новое задание
+                    report = get_user_task_report(db_user['id'], matched_task['id'])
+                    task_status = get_task_status_cached(db_user['id'], matched_task['id'])
+                    user_states[vk_id] = matched_task
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message=format_task_message(matched_task, report, task_status),
+                        random_id=0
+                    )
+                    return
+            
+            # Если текст пустой и нет вложений - просим написать текст
+            if not text.strip() and not attachments:
+                vk.messages.send(
+                    user_id=vk_id,
+                    message="⚠️ Пожалуйста, напишите текст отчета или прикрепите файлы.",
+                    random_id=0
+                )
+                return
+            
+            # Обработка вложений
             saved_files = []
             attachment_text = ""
             
@@ -683,8 +741,32 @@ def process_message(event, vk, vk_session):
                 except Exception as e:
                     logger.error(f"Ошибка обработки вложений: {e}")
             
+            # Создаем отчет
             has_attachments = len(saved_files) > 0
-            report_id = create_report(db_user['id'], task['id'], text, has_attachments)
+            try:
+                report_id = create_report(db_user['id'], task['id'], text, has_attachments)
+            except ValueError as e:
+                error_msg = str(e)
+                if error_msg == "TASK_ALREADY_COMPLETED":
+                    user_states.pop(vk_id, None)
+                    tasks = get_tasks_cached(active_group['id']) if active_group else []
+                    keyboard = build_tasks_keyboard(tasks, db_user['id']) if tasks else create_main_keyboard(active_group, site_url)
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="✅ Это задание уже выполнено! Выберите другое задание.",
+                        random_id=0,
+                        keyboard=keyboard
+                    )
+                    return
+                elif error_msg == "REPORT_ALREADY_PENDING":
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="⏳ У вас уже есть отчет на рассмотрении по этому заданию. Пожалуйста, дождитесь проверки администратора.",
+                        random_id=0
+                    )
+                    return
+                else:
+                    raise
             
             for file_info in saved_files:
                 save_report_media(
