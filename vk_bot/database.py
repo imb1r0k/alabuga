@@ -275,11 +275,35 @@ def create_report(user_id, task_id, submission_text, has_attachments=False):
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
+            # Проверяем, есть ли уже одобренный отчет для этого задания
+            cursor.execute("""
+                SELECT id FROM vk_bot_reports
+                WHERE user_id = %s AND task_id = %s AND status = 'approved'
+                LIMIT 1
+            """, (user_id, task_id))
+            
+            if cursor.fetchone():
+                # Задание уже выполнено
+                raise ValueError("TASK_ALREADY_COMPLETED")
+            
+            # Проверяем, есть ли уже ожидающий отчет
+            cursor.execute("""
+                SELECT id FROM vk_bot_reports
+                WHERE user_id = %s AND task_id = %s AND status = 'pending'
+                LIMIT 1
+            """, (user_id, task_id))
+            
+            if cursor.fetchone():
+                # Уже есть отчет на рассмотрении
+                raise ValueError("REPORT_ALREADY_PENDING")
+            
             cursor.execute("""
                 INSERT INTO vk_bot_reports (user_id, task_id, submission_text, has_attachments, status) 
                 VALUES (%s, %s, %s, %s, 'pending')
             """, (user_id, task_id, submission_text, 1 if has_attachments else 0))
             return cursor.lastrowid
+    except ValueError as e:
+        raise e
     finally:
         conn.close()
 
@@ -645,6 +669,21 @@ def get_user_tickets(user_id):
         conn.close()
 
 
+def get_user_tickets_for_group(user_id, group_id):
+    """Проверяет, есть ли у пользователя билет за конкретную волну"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT id FROM vk_bot_tickets
+                WHERE user_id = %s AND group_id = %s
+                LIMIT 1
+            """, (user_id, group_id))
+            return cursor.fetchone()
+    finally:
+        conn.close()
+
+
 def get_pending_notifications(limit=10):
     """Получает ожидающие отправки уведомления"""
     conn = get_db_connection()
@@ -845,6 +884,7 @@ def update_report_status(report_id, status, reject_reason=''):
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
+            # Получаем информацию об отчете
             cursor.execute("""
                 SELECT r.*, 
                        t.points, t.title, t.group_id,
@@ -859,6 +899,16 @@ def update_report_status(report_id, status, reject_reason=''):
             if not report:
                 return None
 
+            # Проверяем, не был ли уже одобрен этот отчет
+            cursor.execute("""
+                SELECT status FROM vk_bot_reports WHERE id = %s
+            """, (report_id,))
+            current_status = cursor.fetchone()
+            if current_status and current_status['status'] == 'approved':
+                logger.info(f"Отчет {report_id} уже был одобрен ранее")
+                return None
+
+            # Обновляем статус отчета
             cursor.execute("""
                 UPDATE vk_bot_reports 
                 SET status = %s, reject_reason = %s 
@@ -870,12 +920,15 @@ def update_report_status(report_id, status, reject_reason=''):
 
             if status == 'approved':
                 points = report.get('points', 10)
+                
+                # Начисляем баллы
                 cursor.execute("""
                     UPDATE users 
                     SET rating = rating + %s, completed_tasks = completed_tasks + 1 
                     WHERE id = %s
                 """, (points, user_id))
 
+                # Проверяем, все ли задания волны выполнены
                 cursor.execute("""
                     SELECT COUNT(*) as total 
                     FROM vk_bot_tasks 
@@ -892,22 +945,35 @@ def update_report_status(report_id, status, reject_reason=''):
                 """, (user_id, report['group_id']))
                 done_tasks = cursor.fetchone()['done']
 
-                if total_tasks > 0 and done_tasks >= total_tasks:
+                # Проверяем, не выдан ли уже билет за эту волну
+                cursor.execute("""
+                    SELECT id FROM vk_bot_tickets
+                    WHERE group_id = %s AND user_id = %s
+                """, (report['group_id'], user_id))
+                existing_ticket = cursor.fetchone()
+
+                # Выдаем билет ТОЛЬКО если:
+                # 1. Все задания волны выполнены (done_tasks >= total_tasks)
+                # 2. Билет еще не выдан за эту волну (existing_ticket is None)
+                if total_tasks > 0 and done_tasks >= total_tasks and not existing_ticket:
                     import hashlib
+                    # Генерируем уникальный номер билета
                     ticket_num = 'TKT-' + hashlib.md5(
-                        f"{report['group_id']}{report_id}".encode()
+                        f"{report['group_id']}{user_id}{datetime.now().timestamp()}".encode()
                     ).hexdigest()[:6].upper()
+                    
                     cursor.execute("""
                         INSERT INTO vk_bot_tickets (group_id, user_id, ticket_number)
                         VALUES (%s, %s, %s)
                     """, (report['group_id'], user_id, ticket_num))
+                    
                     if cursor.rowcount > 0:
                         message += f"\n\n🎉 Поздравляем! Вы выполнили все задания волны — вам выдан лотерейный билет!\n🎫 Номер билета: {ticket_num}"
 
                 message = f"✅ Ваше задание \"{report['title']}\" одобрено! Получено +{points} баллов."
 
             elif status == 'rejected':
-                message = f"❌ Ваше задание \"{report['title']}\" отклонено. Причина: {reject_reason or 'Не выполнено учение'}. Отправьте отчет заново."
+                message = f"❌ Ваше задание \"{report['title']}\" отклонено. Причина: {reject_reason or 'Не выполнено условие'}. Отправьте отчет заново."
 
             if message:
                 add_notification(user_id, message, report_id)
