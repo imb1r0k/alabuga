@@ -546,7 +546,7 @@ def format_task_message(task, report=None, task_status=None):
     
     msg = f"📌 {task['title']}\n\n"
     msg += f"📝 {task['description']}\n\n"
-    msg += f"⭐ Сложность: {diff_emoji.get(task['difficulty'], '📌')} {diff_text.get(task['difficulty'], task['difficulty'])}\n"
+    msg += f"⭐ Сложность: {diff_emoji.get(task['difficulty'], '')} {diff_text.get(task['difficulty'], task['difficulty'])}\n"
     msg += f"🎯 Баллы: {task['points']}\n\n"
     
     if task_status == 'approved' or (report and report.get('status') == 'approved'):
@@ -745,7 +745,7 @@ def process_message_callback(vk_id, text, attachments=None):
                     user_states[vk_id] = {'tasks_page': current_page}
                     vk.messages.send(
                         user_id=vk_id,
-                        message="📋 Выберите задание:",
+                        message="Выберите задание:",
                         random_id=0,
                         keyboard=build_tasks_keyboard(tasks, db_user['id'], current_page)
                     )
@@ -1006,7 +1006,7 @@ def process_message_callback(vk_id, text, attachments=None):
                 draw_time = settings.get('draw_time', '18:00')
                 msg += f"\n⏰ Ожидайте розыгрыша в {draw_time}!"
             else:
-                msg += "🎯 Выполните все задания активной волны, чтобы получить лотерейный билет!"
+                msg += "Выполните все задания активной волны, чтобы получить лотерейный билет!"
             
             if site_url:
                 msg += f"\n\n🌐 {site_url}"
