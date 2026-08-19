@@ -64,11 +64,11 @@ app = Flask(__name__)
 user_states = {}
 sent_notifications = {}
 agreement_sent = set()
-executor = ThreadPoolExecutor(max_workers=10)
+executor = ThreadPoolExecutor(max_workers=20)
 
 # VK Session
 vk = None
-vk_session = None  # Добавляем для process_vk_attachments
+vk_session = None
 
 # Кэш для данных
 _cache = {
@@ -80,9 +80,9 @@ _cache = {
     'task_by_title': {},
 }
 _cache_time = {}
-CACHE_TTL_LONG = 300
-CACHE_TTL_MEDIUM = 60
-CACHE_TTL_SHORT = 10
+CACHE_TTL_LONG = 600
+CACHE_TTL_MEDIUM = 120
+CACHE_TTL_SHORT = 30
 
 
 def get_cached(key, fetch_func, ttl=CACHE_TTL_MEDIUM):
@@ -106,26 +106,64 @@ def get_settings_cached():
 
 
 def get_active_group_cached():
-    return get_cached('active_group', get_active_task_group, CACHE_TTL_MEDIUM)
+    """Получает только активную группу заданий с кэшированием"""
+    def fetch():
+        conn = pymysql.connect(
+            host=config.DB_HOST,
+            port=config.DB_PORT,
+            user=config.DB_USER,
+            password=config.DB_PASSWORD,
+            database=config.DB_NAME,
+            charset='utf8mb4',
+            cursorclass=pymysql.cursors.DictCursor,
+            autocommit=True,
+            connect_timeout=5,
+            read_timeout=10
+        )
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT * FROM vk_bot_task_groups 
+                    WHERE start_date <= CURDATE() AND end_date >= CURDATE()
+                    ORDER BY start_date ASC LIMIT 1
+                """)
+                return cursor.fetchone()
+        finally:
+            conn.close()
+    return get_cached('active_group', fetch, CACHE_TTL_MEDIUM)
 
 
 def get_tasks_cached(group_id):
+    """Получает задания только для указанной группы с кэшированием"""
     if not group_id:
         return []
-    key = f'tasks_{group_id}'
-    tasks = get_cached(key, lambda: get_tasks_for_group(group_id), CACHE_TTL_MEDIUM)
     
-    if tasks:
-        task_by_title_key = f'task_by_title_{group_id}'
-        task_by_title = {}
-        for t in tasks:
-            clean_title = t['title'].strip()
-            task_by_title[clean_title] = t
-            task_by_title[f"#{t['id']}"] = t
-        _cache[task_by_title_key] = task_by_title
-        _cache_time[task_by_title_key] = time.time()
+    def fetch():
+        conn = pymysql.connect(
+            host=config.DB_HOST,
+            port=config.DB_PORT,
+            user=config.DB_USER,
+            password=config.DB_PASSWORD,
+            database=config.DB_NAME,
+            charset='utf8mb4',
+            cursorclass=pymysql.cursors.DictCursor,
+            autocommit=True,
+            connect_timeout=5,
+            read_timeout=10
+        )
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT * FROM vk_bot_tasks 
+                    WHERE group_id = %s 
+                    ORDER BY FIELD(difficulty, 'easy', 'medium', 'hard'), id ASC
+                """, (group_id,))
+                return cursor.fetchall()
+        finally:
+            conn.close()
     
-    return tasks
+    key = f'tasks_group_{group_id}'
+    return get_cached(key, fetch, CACHE_TTL_MEDIUM)
 
 
 def get_task_by_title_cached(group_id, text):
@@ -140,7 +178,13 @@ def get_task_by_title_cached(group_id, text):
         tasks = get_tasks_cached(group_id)
         if not tasks:
             return None
-        task_by_title = _cache.get(task_by_title_key, {})
+        task_by_title = {}
+        for t in tasks:
+            clean_title = t['title'].strip()
+            task_by_title[clean_title] = t
+            task_by_title[f"#{t['id']}"] = t
+        _cache[task_by_title_key] = task_by_title
+        _cache_time[task_by_title_key] = time.time()
     
     if text in task_by_title:
         return task_by_title[text]
@@ -179,6 +223,46 @@ def get_task_status_cached(user_id, task_id):
     return get_cached(key, lambda: get_user_task_status(user_id, task_id), CACHE_TTL_SHORT)
 
 
+def get_all_task_statuses_cached(user_id, task_ids):
+    """Получает статусы для всех задач одним запросом с кэшированием"""
+    if not task_ids:
+        return {}
+    
+    key = f'all_statuses_{user_id}_{hash(tuple(sorted(task_ids)))}'
+    
+    def fetch():
+        conn = pymysql.connect(
+            host=config.DB_HOST,
+            port=config.DB_PORT,
+            user=config.DB_USER,
+            password=config.DB_PASSWORD,
+            database=config.DB_NAME,
+            charset='utf8mb4',
+            cursorclass=pymysql.cursors.DictCursor,
+            autocommit=True,
+            connect_timeout=5,
+            read_timeout=10
+        )
+        try:
+            with conn.cursor() as cursor:
+                placeholders = ','.join(['%s'] * len(task_ids))
+                cursor.execute(f"""
+                    SELECT task_id, status FROM vk_bot_reports 
+                    WHERE user_id = %s AND task_id IN ({placeholders})
+                    ORDER BY id DESC
+                """, (user_id, *task_ids))
+                
+                result = {}
+                for row in cursor.fetchall():
+                    if row['task_id'] not in result:
+                        result[row['task_id']] = row['status']
+                return result
+        finally:
+            conn.close()
+    
+    return get_cached(key, fetch, CACHE_TTL_SHORT)
+
+
 def cache_cleaner():
     while True:
         time.sleep(60)
@@ -203,52 +287,107 @@ def create_main_keyboard(active_group, site_url=''):
     return keyboard.get_keyboard()
 
 
-def build_tasks_keyboard(tasks, user_id):
+def build_tasks_keyboard(tasks, user_id, page=0, items_per_page=8):
+    """
+    Строит клавиатуру с заданиями с пагинацией.
+    page - текущая страница (начиная с 0)
+    items_per_page - количество заданий на странице
+    """
     keyboard = VkKeyboard(one_time=False)
-    
-    easy_tasks = [t for t in tasks if t['difficulty'] == 'easy']
-    medium_tasks = [t for t in tasks if t['difficulty'] == 'medium']
-    hard_tasks = [t for t in tasks if t['difficulty'] == 'hard']
-    
-    def add_task_buttons(task_list, prefix, emoji):
-        for t in task_list:
-            status = get_task_status_cached(user_id, t['id'])
-            
-            prefix_part = f" {prefix}: "
-            max_title_len = 38 - len(emoji) - len(prefix_part)
-            title_display = t['title']
-            if len(title_display) > max_title_len:
-                title_display = t['title'][:max_title_len].rstrip() + '…'
-            
-            label = f"{emoji}{prefix_part}{title_display}"
-            color = VkKeyboardColor.PRIMARY
-            
-            if status:
-                if status == 'approved':
-                    label = f"✅{prefix_part}{title_display}"
-                    color = VkKeyboardColor.POSITIVE
-                elif status == 'pending':
-                    label = f"⏳{prefix_part}{title_display}"
-                    color = VkKeyboardColor.SECONDARY
-                elif status == 'rejected':
-                    label = f"❌{prefix_part}{title_display}"
-                    color = VkKeyboardColor.NEGATIVE
-            
-            keyboard.add_button(label, color=color)
-            keyboard.add_line()
-    
-    if easy_tasks:
-        add_task_buttons(easy_tasks, "Легкое", "🟢")
-    if medium_tasks:
-        add_task_buttons(medium_tasks, "Среднее", "🟡")
-    if hard_tasks:
-        add_task_buttons(hard_tasks, "Сложное", "🔴")
     
     if not tasks:
         keyboard.add_button("📢 Нет заданий", color=VkKeyboardColor.SECONDARY)
         keyboard.add_line()
+        keyboard.add_button("🔙 Назад в меню", color=VkKeyboardColor.SECONDARY)
+        return keyboard.get_keyboard()
     
+    # Группируем задания по сложности
+    easy_tasks = [t for t in tasks if t['difficulty'] == 'easy']
+    medium_tasks = [t for t in tasks if t['difficulty'] == 'medium']
+    hard_tasks = [t for t in tasks if t['difficulty'] == 'hard']
+    
+    # Объединяем в порядке: легкие, средние, сложные
+    sorted_tasks = easy_tasks + medium_tasks + hard_tasks
+    
+    total_tasks = len(sorted_tasks)
+    total_pages = (total_tasks + items_per_page - 1) // items_per_page
+    
+    # Получаем задания для текущей страницы
+    start_idx = page * items_per_page
+    end_idx = min(start_idx + items_per_page, total_tasks)
+    page_tasks = sorted_tasks[start_idx:end_idx]
+    
+    # Получаем статусы всех задач одним запросом
+    task_ids = [t['id'] for t in page_tasks]
+    statuses = get_all_task_statuses_cached(user_id, task_ids)
+    
+    # Добавляем кнопки заданий
+    row_counter = 0
+    max_buttons_per_row = 2  # По 2 кнопки в строке для читаемости
+    
+    for t in page_tasks:
+        status = statuses.get(t['id'])
+        
+        # Сокращаем название для компактности
+        max_title_len = 18
+        title_display = t['title']
+        if len(title_display) > max_title_len:
+            title_display = t['title'][:max_title_len].rstrip() + '…'
+        
+        # Определяем эмодзи сложности
+        diff_emoji = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}
+        emoji = diff_emoji.get(t['difficulty'], '📌')
+        
+        label = f"{emoji} {title_display}"
+        color = VkKeyboardColor.PRIMARY
+        
+        if status:
+            if status == 'approved':
+                label = f"✅ {title_display}"
+                color = VkKeyboardColor.POSITIVE
+            elif status == 'pending':
+                label = f"⏳ {title_display}"
+                color = VkKeyboardColor.SECONDARY
+            elif status == 'rejected':
+                label = f"❌ {title_display}"
+                color = VkKeyboardColor.NEGATIVE
+        
+        keyboard.add_button(label, color=color)
+        row_counter += 1
+        
+        if row_counter >= max_buttons_per_row:
+            keyboard.add_line()
+            row_counter = 0
+    
+    # Если остались кнопки в строке, переходим на новую
+    if row_counter > 0:
+        keyboard.add_line()
+    
+    # Пагинация
+    if total_pages > 1:
+        # Кнопки навигации
+        nav_line_added = False
+        
+        # Предыдущая страница
+        if page > 0:
+            keyboard.add_button("⬅️ Предыдущая", color=VkKeyboardColor.SECONDARY)
+            nav_line_added = True
+        
+        # Информация о странице
+        page_info = f"📄 {page + 1}/{total_pages}"
+        keyboard.add_button(page_info, color=VkKeyboardColor.SECONDARY)
+        
+        # Следующая страница
+        if page < total_pages - 1:
+            keyboard.add_button("Следующая ➡️", color=VkKeyboardColor.SECONDARY)
+            nav_line_added = True
+        
+        if nav_line_added:
+            keyboard.add_line()
+    
+    # Кнопка возврата в меню
     keyboard.add_button("🔙 Назад в меню", color=VkKeyboardColor.SECONDARY)
+    
     return keyboard.get_keyboard()
 
 
@@ -407,10 +546,10 @@ def send_credentials_message(vk, user_id, user_data, active_group, site_url=''):
         logger.error(f"❌ Ошибка отправки данных для входа пользователю {user_id}: {e}")
 
 
-# ============ Обработчик сообщений (перенос из bot.py) ============
+# ============ Обработчик сообщений ============
 
 def process_message_callback(vk_id, text, attachments=None):
-    """Обработка сообщения для Callback API (без event)"""
+    """Обработка сообщения для Callback API"""
     t_start = time.time()
     logger.info(f"📩 Получено сообщение от {vk_id}: {text[:50] if text else '(пусто)'}")
     
@@ -515,6 +654,26 @@ def process_message_callback(vk_id, text, attachments=None):
         
         state = user_states.get(vk_id)
         
+        # Обработка пагинации
+        if text in ["⬅️ Предыдущая", "Следующая ➡️"]:
+            current_page = user_states.get(vk_id, {}).get('tasks_page', 0)
+            if text == "⬅️ Предыдущая":
+                current_page = max(0, current_page - 1)
+            else:
+                current_page += 1
+            
+            if active_group:
+                tasks = get_tasks_cached(active_group['id'])
+                if tasks:
+                    user_states[vk_id] = {'tasks_page': current_page}
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="📋 Выберите задание:",
+                        random_id=0,
+                        keyboard=build_tasks_keyboard(tasks, db_user['id'], current_page)
+                    )
+            return
+        
         if text in ["🔙 Назад в меню", "🔙 Назад", "🔙 Назад к заявкам"]:
             user_states.pop(vk_id, None)
             vk.messages.send(
@@ -602,7 +761,7 @@ def process_message_callback(vk_id, text, attachments=None):
                         user_id=vk_id,
                         message="⚠️ Задание больше не доступно. Пожалуйста, выберите задание заново.",
                         random_id=0,
-                        keyboard=build_tasks_keyboard(tasks, db_user['id']) if tasks else create_main_keyboard(active_group, site_url)
+                        keyboard=build_tasks_keyboard(tasks, db_user['id'], user_states.get(vk_id, {}).get('tasks_page', 0)) if tasks else create_main_keyboard(active_group, site_url)
                     )
                     return
             
@@ -610,7 +769,7 @@ def process_message_callback(vk_id, text, attachments=None):
             if task_status == 'approved':
                 user_states.pop(vk_id, None)
                 tasks = get_tasks_cached(active_group['id']) if active_group else []
-                keyboard = build_tasks_keyboard(tasks, db_user['id']) if tasks else create_main_keyboard(active_group, site_url)
+                keyboard = build_tasks_keyboard(tasks, db_user['id'], user_states.get(vk_id, {}).get('tasks_page', 0)) if tasks else create_main_keyboard(active_group, site_url)
                 vk.messages.send(
                     user_id=vk_id,
                     message="✅ Это задание уже выполнено! Выберите другое задание.",
@@ -661,7 +820,6 @@ def process_message_callback(vk_id, text, attachments=None):
             
             if attachments:
                 try:
-                    # Используем глобальный vk_session для process_vk_attachments
                     saved_files, attachment_text = process_vk_attachments(attachments, vk_session)
                     if attachment_text:
                         text = f"{text}\n\n📎 Прикрепленные файлы:\n{attachment_text}" if text else f"📎 Прикрепленные файлы:\n{attachment_text}"
@@ -676,7 +834,7 @@ def process_message_callback(vk_id, text, attachments=None):
                 if error_msg == "TASK_ALREADY_COMPLETED":
                     user_states.pop(vk_id, None)
                     tasks = get_tasks_cached(active_group['id']) if active_group else []
-                    keyboard = build_tasks_keyboard(tasks, db_user['id']) if tasks else create_main_keyboard(active_group, site_url)
+                    keyboard = build_tasks_keyboard(tasks, db_user['id'], user_states.get(vk_id, {}).get('tasks_page', 0)) if tasks else create_main_keyboard(active_group, site_url)
                     vk.messages.send(
                         user_id=vk_id,
                         message="✅ Это задание уже выполнено! Выберите другое задание.",
@@ -713,7 +871,7 @@ def process_message_callback(vk_id, text, attachments=None):
             
             if active_group:
                 tasks = get_tasks_cached(active_group['id'])
-                keyboard = build_tasks_keyboard(tasks, db_user['id'])
+                keyboard = build_tasks_keyboard(tasks, db_user['id'], user_states.get(vk_id, {}).get('tasks_page', 0))
             else:
                 keyboard = create_main_keyboard(active_group, site_url)
             
@@ -742,6 +900,8 @@ def process_message_callback(vk_id, text, attachments=None):
                 )
             else:
                 tasks = get_tasks_cached(active_group['id'])
+                # Сбрасываем страницу при открытии заданий
+                user_states[vk_id] = {'tasks_page': 0}
                 welcome = settings.get('welcome_text', 'Привет! Выполняй задания и получай билеты! 🎫')
                 welcome += f"\n\n⏰ Задания действуют до: {active_group['end_date']}"
                 welcome += "\n📎 Для подтверждения прикрепляйте фото, файлы или ссылки!"
@@ -749,7 +909,7 @@ def process_message_callback(vk_id, text, attachments=None):
                     user_id=vk_id,
                     message=welcome,
                     random_id=0,
-                    keyboard=build_tasks_keyboard(tasks, db_user['id'])
+                    keyboard=build_tasks_keyboard(tasks, db_user['id'], 0)
                 )
             return
         
@@ -846,7 +1006,9 @@ def process_message_callback(vk_id, text, attachments=None):
                     )
                     return
         
+        # Поиск задания по тексту кнопки
         if active_group:
+            # Проверяем, не является ли текст кнопкой задания
             matched_task = get_task_by_title_cached(active_group['id'], text)
             
             if matched_task:
@@ -873,7 +1035,7 @@ def process_message_callback(vk_id, text, attachments=None):
             user_states.pop(vk_id, None)
             try:
                 tasks = get_tasks_cached(active_group['id']) if active_group else []
-                keyboard = build_tasks_keyboard(tasks, db_user['id']) if tasks else create_main_keyboard(active_group, site_url)
+                keyboard = build_tasks_keyboard(tasks, db_user['id'], user_states.get(vk_id, {}).get('tasks_page', 0)) if tasks else create_main_keyboard(active_group, site_url)
                 vk.messages.send(
                     user_id=vk_id,
                     message="⚠️ Произошла ошибка при отправке отчета. Пожалуйста, выберите задание заново.",
@@ -1063,30 +1225,25 @@ def vk_callback():
     if not data:
         return 'Invalid JSON', 400
     
-    # Подтверждение сервера
     if data.get('type') == 'confirmation':
         logger.info(f"Получен запрос на подтверждение сервера для группы {data.get('group_id')}")
         return config.CALLBACK_CONFIRMATION_CODE, 200, {'Content-Type': 'text/plain'}
     
-    # Проверка секретного ключа
     secret = data.get('secret')
     if secret and secret != config.CALLBACK_API_SECRET:
         logger.warning(f"Неверный секретный ключ: {secret}")
         return 'Invalid secret', 403
     
-    # Новое сообщение
     if data.get('type') == 'message_new':
         try:
             message = data.get('object', {}).get('message', {})
             
-            # Игнорируем сообщения от бота
             if message.get('out') == 1:
                 return 'ok', 200
             
             vk_id = message.get('from_id')
             text = message.get('text', '').strip()
             
-            # Парсим вложения
             attachments = message.get('attachments', [])
             if attachments:
                 new_attachments = {}
@@ -1105,7 +1262,6 @@ def vk_callback():
             else:
                 attachments = None
             
-            # Асинхронная обработка
             executor.submit(process_message_callback, vk_id, text, attachments)
             
             return 'ok', 200
@@ -1170,13 +1326,11 @@ def main():
         logger.error("❌ Не удалось инициализировать VK сессию. Бот останавливается.")
         return
     
-    # Запуск фоновых потоков
     threading.Thread(target=send_notification_worker, daemon=True).start()
     threading.Thread(target=check_request_messages_worker, daemon=True).start()
     threading.Thread(target=cache_cleaner, daemon=True).start()
     logger.info("✅ Фоновые потоки запущены!")
     
-    # Запуск Flask
     logger.info(f"✅ Бот запущен на http://{config.CALLBACK_API_HOST}:{config.CALLBACK_API_PORT}")
     logger.info(f"📍 Callback URL: {config.CALLBACK_API_URL}")
     logger.info(f"🔑 Confirmation code: {config.CALLBACK_CONFIRMATION_CODE}")
