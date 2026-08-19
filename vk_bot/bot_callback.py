@@ -168,41 +168,90 @@ def get_tasks_cached(group_id):
 
 def get_task_by_title_cached(group_id, text):
     """Быстрый поиск задания по тексту кнопки"""
-    if not group_id:
+    if not group_id or not text:
         return None
     
+    # Получаем все задания группы
+    tasks = get_tasks_cached(group_id)
+    if not tasks:
+        return None
+    
+    # Строим кэш для быстрого поиска
     task_by_title_key = f'task_by_title_{group_id}'
-    task_by_title = get_cached(task_by_title_key, lambda: {}, CACHE_TTL_MEDIUM)
+    task_by_title = _cache.get(task_by_title_key, {})
     
     if not task_by_title:
-        tasks = get_tasks_cached(group_id)
-        if not tasks:
-            return None
-        task_by_title = {}
         for t in tasks:
+            # Ключ - чистый заголовок без эмодзи
             clean_title = t['title'].strip()
-            task_by_title[clean_title] = t
+            task_by_title[clean_title.lower()] = t
+            # Ключ - ID с решеткой
             task_by_title[f"#{t['id']}"] = t
         _cache[task_by_title_key] = task_by_title
         _cache_time[task_by_title_key] = time.time()
     
+    # 1. Прямой поиск по тексту как есть
     if text in task_by_title:
         return task_by_title[text]
     
-    clean_text = text
-    for emoji in ['✅', '⏳', '❌', '🟢', '🟡', '🔴', '📌']:
-        clean_text = clean_text.replace(emoji, '')
-    for prefix in ['Легкое:', 'Среднее:', 'Сложное:']:
-        clean_text = clean_text.replace(prefix, '').strip()
-    
-    if clean_text in task_by_title:
-        return task_by_title[clean_text]
-    
+    # 2. Поиск по ID (если текст содержит #число)
     match = re.search(r'#(\d+)', text)
     if match:
         task_id = int(match.group(1))
-        for t in task_by_title.values():
-            if isinstance(t, dict) and t.get('id') == task_id:
+        for t in tasks:
+            if t['id'] == task_id:
+                return t
+    
+    # 3. Очищаем текст от эмодзи и префиксов
+    clean_text = text
+    
+    # Удаляем все эмодзи (включая статусные)
+    emoji_pattern = re.compile(
+        "[" 
+        "\U0001F600-\U0001F64F"  # смайлы
+        "\U0001F300-\U0001F5FF"  # символы и пиктограммы
+        "\U0001F680-\U0001F6FF"  # транспорт и карты
+        "\U0001F700-\U0001F77F"  # алхимические символы
+        "\U0001F780-\U0001F7FF"  # геометрические фигуры
+        "\U0001F800-\U0001F8FF"  # дополнительные стрелки
+        "\U0001F900-\U0001F9FF"  # дополнительные символы
+        "\U0001FA00-\U0001FA6F"  # дополнительные символы
+        "\U0001FA70-\U0001FAFF"  # дополнительные символы
+        "\U00002702-\U000027B0"  # символы
+        "\U000024C2-\U0001F251"  # буквы в кружках
+        "\U00002700-\U000027BF"  # разные символы
+        "✅⏳❌🟢🟡🔴📌⬅️➡️"  # наши специфические
+        "]" 
+        "", 
+        flags=re.UNICODE
+    )
+    clean_text = emoji_pattern.sub('', clean_text).strip()
+    
+    # Удаляем префиксы сложности
+    for prefix in ['Легкое:', 'Среднее:', 'Сложное:']:
+        if clean_text.startswith(prefix):
+            clean_text = clean_text[len(prefix):].strip()
+    
+    # 4. Поиск по очищенному тексту
+    if clean_text:
+        clean_text_lower = clean_text.lower()
+        for t in tasks:
+            if t['title'].strip().lower() == clean_text_lower:
+                return t
+            # Частичное совпадение (если название длинное)
+            if len(clean_text_lower) > 3 and clean_text_lower in t['title'].strip().lower():
+                return t
+    
+    # 5. Поиск по части названия (последняя попытка)
+    for t in tasks:
+        title_lower = t['title'].strip().lower()
+        # Если текст содержит более 3 символов из названия
+        if len(clean_text) > 3:
+            words = clean_text.lower().split()
+            title_words = title_lower.split()
+            # Проверяем, что хотя бы 2 слова совпадают
+            common_words = set(words) & set(title_words)
+            if len(common_words) >= 2 and len(common_words) >= len(words) * 0.5:
                 return t
     
     return None
@@ -302,7 +351,6 @@ def build_tasks_keyboard(tasks, user_id, page=0, items_per_page=8):
         return keyboard.get_keyboard()
     
     # Группируем задания по сложности (уже отсортированы в БД)
-    # Но на всякий случай перегруппируем
     easy_tasks = [t for t in tasks if t['difficulty'] == 'easy']
     medium_tasks = [t for t in tasks if t['difficulty'] == 'medium']
     hard_tasks = [t for t in tasks if t['difficulty'] == 'hard']
@@ -351,9 +399,10 @@ def build_tasks_keyboard(tasks, user_id, page=0, items_per_page=8):
         
         status = statuses.get(t['id'])
         
-        # Сокращаем название для компактности
-        max_title_len = 20
+        # Используем полное название для кнопки, чтобы бот мог его распознать
         title_display = t['title']
+        # Если название слишком длинное, обрезаем для отображения, но сохраняем полное для поиска
+        max_title_len = 20
         if len(title_display) > max_title_len:
             title_display = t['title'][:max_title_len].rstrip() + '…'
         
@@ -377,6 +426,8 @@ def build_tasks_keyboard(tasks, user_id, page=0, items_per_page=8):
                 label = f"❌ {title_display}"
                 color = VkKeyboardColor.NEGATIVE
         
+        # Сохраняем в данных кнопки ID задания для точного поиска
+        # Используем callback данные для точного определения
         keyboard.add_button(label, color=color)
         row_counter += 1
         
@@ -1032,11 +1083,12 @@ def process_message_callback(vk_id, text, attachments=None):
                     )
                     return
         
-        # Поиск задания по тексту кнопки
+        # ============ ПОИСК ЗАДАНИЯ ============
         if active_group:
             matched_task = get_task_by_title_cached(active_group['id'], text)
             
             if matched_task:
+                logger.info(f"🔍 Найдено задание: {matched_task['id']} - {matched_task['title']}")
                 report = get_user_task_report(db_user['id'], matched_task['id'])
                 task_status = get_task_status_cached(db_user['id'], matched_task['id'])
                 user_states[vk_id] = matched_task
@@ -1046,6 +1098,8 @@ def process_message_callback(vk_id, text, attachments=None):
                     random_id=0
                 )
                 return
+            else:
+                logger.info(f"❌ Задание не найдено для текста: '{text}'")
         
         vk.messages.send(
             user_id=vk_id,
