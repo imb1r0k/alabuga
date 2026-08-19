@@ -301,35 +301,58 @@ def build_tasks_keyboard(tasks, user_id, page=0, items_per_page=8):
         keyboard.add_button("🔙 Назад в меню", color=VkKeyboardColor.SECONDARY)
         return keyboard.get_keyboard()
     
-    # Группируем задания по сложности
+    # Группируем задания по сложности (уже отсортированы в БД)
+    # Но на всякий случай перегруппируем
     easy_tasks = [t for t in tasks if t['difficulty'] == 'easy']
     medium_tasks = [t for t in tasks if t['difficulty'] == 'medium']
     hard_tasks = [t for t in tasks if t['difficulty'] == 'hard']
     
     # Объединяем в порядке: легкие, средние, сложные
-    sorted_tasks = easy_tasks + medium_tasks + hard_tasks
-    
-    total_tasks = len(sorted_tasks)
+    all_tasks = easy_tasks + medium_tasks + hard_tasks
+    total_tasks = len(all_tasks)
     total_pages = (total_tasks + items_per_page - 1) // items_per_page
     
     # Получаем задания для текущей страницы
     start_idx = page * items_per_page
     end_idx = min(start_idx + items_per_page, total_tasks)
-    page_tasks = sorted_tasks[start_idx:end_idx]
+    page_tasks = all_tasks[start_idx:end_idx]
     
-    # Получаем статусы всех задач одним запросом
+    # Получаем статусы всех задач на странице одним запросом
     task_ids = [t['id'] for t in page_tasks]
     statuses = get_all_task_statuses_cached(user_id, task_ids)
     
-    # Добавляем кнопки заданий
+    # Добавляем кнопки заданий по 2 в строке
     row_counter = 0
-    max_buttons_per_row = 2  # По 2 кнопки в строке для читаемости
+    max_buttons_per_row = 2
+    
+    # Отслеживаем текущую сложность для добавления заголовков
+    current_difficulty = None
     
     for t in page_tasks:
+        # Если сложность изменилась, добавляем разделитель
+        if current_difficulty != t['difficulty']:
+            current_difficulty = t['difficulty']
+            # Если есть незавершенная строка, переходим на новую
+            if row_counter > 0:
+                keyboard.add_line()
+                row_counter = 0
+            # Добавляем заголовок сложности
+            diff_labels = {
+                'easy': '🟢 ЛЕГКИЕ ЗАДАНИЯ',
+                'medium': '🟡 СРЕДНИЕ ЗАДАНИЯ',
+                'hard': '🔴 СЛОЖНЫЕ ЗАДАНИЯ'
+            }
+            keyboard.add_button(
+                diff_labels.get(t['difficulty'], '📌 ЗАДАНИЯ'),
+                color=VkKeyboardColor.SECONDARY
+            )
+            keyboard.add_line()
+            row_counter = 0
+        
         status = statuses.get(t['id'])
         
         # Сокращаем название для компактности
-        max_title_len = 18
+        max_title_len = 20
         title_display = t['title']
         if len(title_display) > max_title_len:
             title_display = t['title'][:max_title_len].rstrip() + '…'
@@ -338,9 +361,11 @@ def build_tasks_keyboard(tasks, user_id, page=0, items_per_page=8):
         diff_emoji = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}
         emoji = diff_emoji.get(t['difficulty'], '📌')
         
+        # Формируем подпись кнопки
         label = f"{emoji} {title_display}"
         color = VkKeyboardColor.PRIMARY
         
+        # Изменяем цвет и подпись в зависимости от статуса
         if status:
             if status == 'approved':
                 label = f"✅ {title_display}"
@@ -355,34 +380,35 @@ def build_tasks_keyboard(tasks, user_id, page=0, items_per_page=8):
         keyboard.add_button(label, color=color)
         row_counter += 1
         
+        # Если набрали 2 кнопки в строке, переходим на следующую
         if row_counter >= max_buttons_per_row:
             keyboard.add_line()
             row_counter = 0
     
-    # Если остались кнопки в строке, переходим на новую
+    # Если остались незавершенные кнопки, завершаем строку
     if row_counter > 0:
         keyboard.add_line()
     
-    # Пагинация
+    # Добавляем пагинацию, если больше одной страницы
     if total_pages > 1:
-        # Кнопки навигации
-        nav_line_added = False
+        # Строка с навигацией
+        nav_buttons_added = False
         
-        # Предыдущая страница
+        # Кнопка "Предыдущая"
         if page > 0:
             keyboard.add_button("⬅️ Предыдущая", color=VkKeyboardColor.SECONDARY)
-            nav_line_added = True
+            nav_buttons_added = True
         
-        # Информация о странице
-        page_info = f"📄 {page + 1}/{total_pages}"
-        keyboard.add_button(page_info, color=VkKeyboardColor.SECONDARY)
+        # Индикатор страницы
+        keyboard.add_button(f"📄 {page + 1}/{total_pages}", color=VkKeyboardColor.SECONDARY)
+        nav_buttons_added = True
         
-        # Следующая страница
+        # Кнопка "Следующая"
         if page < total_pages - 1:
             keyboard.add_button("Следующая ➡️", color=VkKeyboardColor.SECONDARY)
-            nav_line_added = True
+            nav_buttons_added = True
         
-        if nav_line_added:
+        if nav_buttons_added:
             keyboard.add_line()
     
     # Кнопка возврата в меню
@@ -1008,7 +1034,6 @@ def process_message_callback(vk_id, text, attachments=None):
         
         # Поиск задания по тексту кнопки
         if active_group:
-            # Проверяем, не является ли текст кнопкой задания
             matched_task = get_task_by_title_cached(active_group['id'], text)
             
             if matched_task:
