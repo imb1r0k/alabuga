@@ -373,30 +373,7 @@ def build_tasks_keyboard(tasks, user_id, page=0, items_per_page=8):
     row_counter = 0
     max_buttons_per_row = 2
     
-    # Отслеживаем текущую сложность для добавления заголовков
-    current_difficulty = None
-    
     for t in page_tasks:
-        # Если сложность изменилась, добавляем разделитель
-        if current_difficulty != t['difficulty']:
-            current_difficulty = t['difficulty']
-            # Если есть незавершенная строка, переходим на новую
-            if row_counter > 0:
-                keyboard.add_line()
-                row_counter = 0
-            # Добавляем заголовок сложности
-            diff_labels = {
-                'easy': '🟢 ЛЕГКИЕ ЗАДАНИЯ',
-                'medium': '🟡 СРЕДНИЕ ЗАДАНИЯ',
-                'hard': '🔴 СЛОЖНЫЕ ЗАДАНИЯ'
-            }
-            keyboard.add_button(
-                diff_labels.get(t['difficulty'], '📌 ЗАДАНИЯ'),
-                color=VkKeyboardColor.SECONDARY
-            )
-            keyboard.add_line()
-            row_counter = 0
-        
         status = statuses.get(t['id'])
         
         # Используем полное название для кнопки, чтобы бот мог его распознать
@@ -426,8 +403,6 @@ def build_tasks_keyboard(tasks, user_id, page=0, items_per_page=8):
                 label = f"❌ {title_display}"
                 color = VkKeyboardColor.NEGATIVE
         
-        # Сохраняем в данных кнопки ID задания для точного поиска
-        # Используем callback данные для точного определения
         keyboard.add_button(label, color=color)
         row_counter += 1
         
