@@ -171,7 +171,6 @@ def get_task_by_title_cached(group_id, text):
     if not group_id or not text:
         return None
     
-    # Получаем все задания группы
     tasks = get_tasks_cached(group_id)
     if not tasks:
         return None
@@ -182,8 +181,9 @@ def get_task_by_title_cached(group_id, text):
     
     if not task_by_title:
         for t in tasks:
-            # Ключ - чистый заголовок без эмодзи
+            # Ключ - чистый заголовок
             clean_title = t['title'].strip()
+            task_by_title[clean_title] = t
             task_by_title[clean_title.lower()] = t
             # Ключ - ID с решеткой
             task_by_title[f"#{t['id']}"] = t
@@ -205,53 +205,36 @@ def get_task_by_title_cached(group_id, text):
     # 3. Очищаем текст от эмодзи и префиксов
     clean_text = text
     
-    # Удаляем все эмодзи (включая статусные)
-    emoji_pattern = re.compile(
-        "[" 
-        "\U0001F600-\U0001F64F"  # смайлы
-        "\U0001F300-\U0001F5FF"  # символы и пиктограммы
-        "\U0001F680-\U0001F6FF"  # транспорт и карты
-        "\U0001F700-\U0001F77F"  # алхимические символы
-        "\U0001F780-\U0001F7FF"  # геометрические фигуры
-        "\U0001F800-\U0001F8FF"  # дополнительные стрелки
-        "\U0001F900-\U0001F9FF"  # дополнительные символы
-        "\U0001FA00-\U0001FA6F"  # дополнительные символы
-        "\U0001FA70-\U0001FAFF"  # дополнительные символы
-        "\U00002702-\U000027B0"  # символы
-        "\U000024C2-\U0001F251"  # буквы в кружках
-        "\U00002700-\U000027BF"  # разные символы
-        "✅⏳❌🟢🟡🔴📌⬅️➡️"  # наши специфические
-        "]" 
-        "", 
-        flags=re.UNICODE
-    )
-    clean_text = emoji_pattern.sub('', clean_text).strip()
+    # Удаляем эмодзи сложности
+    for emoji in ['🟢', '🟡', '🔴', '✅', '⏳', '❌', '📌']:
+        clean_text = clean_text.replace(emoji, '').strip()
     
-    # Удаляем префиксы сложности
+    # Удаляем префиксы сложности (если есть)
     for prefix in ['Легкое:', 'Среднее:', 'Сложное:']:
-        if clean_text.startswith(prefix):
-            clean_text = clean_text[len(prefix):].strip()
+        if prefix in clean_text:
+            clean_text = clean_text.replace(prefix, '').strip()
+    
+    # Убираем лишние пробелы
+    clean_text = ' '.join(clean_text.split())
     
     # 4. Поиск по очищенному тексту
     if clean_text:
-        clean_text_lower = clean_text.lower()
+        # Точное совпадение
+        if clean_text in task_by_title:
+            return task_by_title[clean_text]
+        if clean_text.lower() in task_by_title:
+            return task_by_title[clean_text.lower()]
+        
+        # Поиск по частичному совпадению
         for t in tasks:
-            if t['title'].strip().lower() == clean_text_lower:
+            title = t['title'].strip()
+            # Если название содержит очищенный текст или наоборот
+            if clean_text in title or title in clean_text:
                 return t
-            # Частичное совпадение (если название длинное)
-            if len(clean_text_lower) > 3 and clean_text_lower in t['title'].strip().lower():
-                return t
-    
-    # 5. Поиск по части названия (последняя попытка)
-    for t in tasks:
-        title_lower = t['title'].strip().lower()
-        # Если текст содержит более 3 символов из названия
-        if len(clean_text) > 3:
-            words = clean_text.lower().split()
-            title_words = title_lower.split()
-            # Проверяем, что хотя бы 2 слова совпадают
-            common_words = set(words) & set(title_words)
-            if len(common_words) >= 2 and len(common_words) >= len(words) * 0.5:
+            # Сравнение по словам
+            clean_words = set(clean_text.lower().split())
+            title_words = set(title.lower().split())
+            if len(clean_words & title_words) >= min(2, len(title_words)):
                 return t
     
     return None
@@ -376,9 +359,8 @@ def build_tasks_keyboard(tasks, user_id, page=0, items_per_page=8):
     for t in page_tasks:
         status = statuses.get(t['id'])
         
-        # Используем полное название для кнопки, чтобы бот мог его распознать
+        # Используем полное название для кнопки
         title_display = t['title']
-        # Если название слишком длинное, обрезаем для отображения, но сохраняем полное для поиска
         max_title_len = 20
         if len(title_display) > max_title_len:
             title_display = t['title'][:max_title_len].rstrip() + '…'
@@ -596,6 +578,159 @@ def send_credentials_message(vk, user_id, user_data, active_group, site_url=''):
         logger.info(f"✅ Данные для входа отправлены пользователю {user_id}")
     except Exception as e:
         logger.error(f"❌ Ошибка отправки данных для входа пользователю {user_id}: {e}")
+
+
+# ============ Функция автовыдачи билетов ============
+
+def auto_issue_tickets():
+    """
+    Проверяет все завершенные волны и выдает билеты пользователям,
+    которые выполнили все задания, но по какой-то причине не получили билет.
+    """
+    logger.info("🔄 Запуск автовыдачи билетов...")
+    
+    conn = pymysql.connect(
+        host=config.DB_HOST,
+        port=config.DB_PORT,
+        user=config.DB_USER,
+        password=config.DB_PASSWORD,
+        database=config.DB_NAME,
+        charset='utf8mb4',
+        cursorclass=pymysql.cursors.DictCursor,
+        autocommit=True,
+        connect_timeout=5,
+        read_timeout=10
+    )
+    
+    try:
+        with conn.cursor() as cursor:
+            # Получаем все завершенные группы (end_date < CURDATE())
+            cursor.execute("""
+                SELECT id, title FROM vk_bot_task_groups 
+                WHERE end_date < CURDATE()
+                ORDER BY id DESC
+            """)
+            completed_groups = cursor.fetchall()
+            
+            if not completed_groups:
+                logger.info("📢 Нет завершенных волн для проверки")
+                return
+            
+            logger.info(f"📊 Проверяем {len(completed_groups)} завершенных волн")
+            
+            tickets_issued = 0
+            
+            for group in completed_groups:
+                group_id = group['id']
+                group_title = group['title']
+                
+                # Получаем все задания в группе
+                cursor.execute("""
+                    SELECT id FROM vk_bot_tasks WHERE group_id = %s
+                """, (group_id,))
+                tasks = cursor.fetchall()
+                task_ids = [t['id'] for t in tasks]
+                total_tasks = len(task_ids)
+                
+                if total_tasks == 0:
+                    continue
+                
+                # Получаем всех пользователей, у которых есть одобренные отчеты по заданиям этой группы
+                placeholders = ','.join(['%s'] * len(task_ids))
+                cursor.execute(f"""
+                    SELECT DISTINCT r.user_id, u.vk_id, u.first_name, u.last_name
+                    FROM vk_bot_reports r
+                    JOIN users u ON r.user_id = u.id
+                    WHERE r.task_id IN ({placeholders})
+                    AND r.status = 'approved'
+                """, task_ids)
+                users_with_reports = cursor.fetchall()
+                
+                for user in users_with_reports:
+                    user_id = user['user_id']
+                    vk_id = user['vk_id']
+                    
+                    # Проверяем, сколько заданий выполнил пользователь
+                    cursor.execute("""
+                        SELECT COUNT(DISTINCT task_id) as done
+                        FROM vk_bot_reports
+                        WHERE user_id = %s AND task_id IN ({placeholders}) AND status = 'approved'
+                    """.format(placeholders=placeholders), (user_id, *task_ids))
+                    done_result = cursor.fetchone()
+                    done_tasks = done_result['done'] if done_result else 0
+                    
+                    # Проверяем, есть ли уже билет
+                    cursor.execute("""
+                        SELECT id FROM vk_bot_tickets
+                        WHERE group_id = %s AND user_id = %s
+                    """, (group_id, user_id))
+                    existing_ticket = cursor.fetchone()
+                    
+                    # Если все задания выполнены и билета нет - выдаем
+                    if done_tasks >= total_tasks and not existing_ticket:
+                        import hashlib
+                        ticket_num = 'TKT-' + hashlib.md5(
+                            f"{group_id}{user_id}{datetime.now().timestamp()}".encode()
+                        ).hexdigest()[:6].upper()
+                        
+                        cursor.execute("""
+                            INSERT INTO vk_bot_tickets (group_id, user_id, ticket_number)
+                            VALUES (%s, %s, %s)
+                        """, (group_id, user_id, ticket_num))
+                        
+                        tickets_issued += 1
+                        
+                        # Отправляем уведомление пользователю
+                        if vk_id:
+                            try:
+                                vk.messages.send(
+                                    user_id=vk_id,
+                                    message=f"🎉 Поздравляем! Вы выполнили все задания волны \"{group_title}\"!\n🎫 Вам выдан лотерейный билет: {ticket_num}\n\nОжидайте розыгрыша!",
+                                    random_id=0
+                                )
+                                logger.info(f"✅ Билет {ticket_num} выдан пользователю {vk_id} за волну {group_title}")
+                            except Exception as e:
+                                logger.error(f"❌ Ошибка отправки уведомления пользователю {vk_id}: {e}")
+                        
+                        # Добавляем уведомление в БД
+                        cursor.execute("""
+                            INSERT INTO vk_bot_notifications (user_id, message)
+                            VALUES (%s, %s)
+                        """, (user_id, f"🎉 Поздравляем! Вы выполнили все задания волны \"{group_title}\"! Вам выдан лотерейный билет: {ticket_num}"))
+                
+                logger.info(f"📊 Волна '{group_title}': выдано {tickets_issued} билетов")
+            
+            logger.info(f"✅ Автовыдача билетов завершена. Всего выдано: {tickets_issued}")
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка автовыдачи билетов: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+    finally:
+        conn.close()
+
+
+def auto_ticket_worker():
+    """Фоновый поток для автовыдачи билетов каждый день в 2:00"""
+    while True:
+        try:
+            now = datetime.now()
+            # Вычисляем время до следующего запуска (2:00)
+            next_run = now.replace(hour=2, minute=0, second=0, microsecond=0)
+            if now >= next_run:
+                next_run += timedelta(days=1)
+            
+            wait_seconds = (next_run - now).total_seconds()
+            logger.info(f"⏰ Следующая автовыдача билетов в {next_run.strftime('%Y-%m-%d %H:%M:%S')} (через {wait_seconds/3600:.1f} часов)")
+            
+            time.sleep(wait_seconds)
+            
+            # Запускаем автовыдачу
+            auto_issue_tickets()
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка в потоке автовыдачи билетов: {e}")
+            time.sleep(60)
 
 
 # ============ Обработчик сообщений ============
@@ -1063,7 +1198,7 @@ def process_message_callback(vk_id, text, attachments=None):
             matched_task = get_task_by_title_cached(active_group['id'], text)
             
             if matched_task:
-                logger.info(f"🔍 Найдено задание: {matched_task['id']} - {matched_task['title']}")
+                logger.info(f"🔍 Найдено задание: ID={matched_task['id']}, Title={matched_task['title']}")
                 report = get_user_task_report(db_user['id'], matched_task['id'])
                 task_status = get_task_status_cached(db_user['id'], matched_task['id'])
                 user_states[vk_id] = matched_task
@@ -1380,9 +1515,11 @@ def main():
         logger.error("❌ Не удалось инициализировать VK сессию. Бот останавливается.")
         return
     
+    # Запускаем фоновые потоки
     threading.Thread(target=send_notification_worker, daemon=True).start()
     threading.Thread(target=check_request_messages_worker, daemon=True).start()
     threading.Thread(target=cache_cleaner, daemon=True).start()
+    threading.Thread(target=auto_ticket_worker, daemon=True).start()
     logger.info("✅ Фоновые потоки запущены!")
     
     logger.info(f"✅ Бот запущен на http://{config.CALLBACK_API_HOST}:{config.CALLBACK_API_PORT}")
