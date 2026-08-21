@@ -365,6 +365,13 @@ def build_tasks_keyboard(tasks, user_id, page=0, items_per_page=8):
     return keyboard.get_keyboard()
 
 
+def create_task_view_keyboard():
+    """Клавиатура для просмотра задания"""
+    keyboard = VkKeyboard(one_time=False)
+    keyboard.add_button("📋 К заданиям", color=VkKeyboardColor.PRIMARY)
+    return keyboard.get_keyboard()
+
+
 def create_agreement_keyboard():
     keyboard = VkKeyboard(one_time=False)
     keyboard.add_button("✅ Подтверждаю", color=VkKeyboardColor.POSITIVE)
@@ -841,7 +848,7 @@ def process_message_callback(vk_id, text, attachments=None):
                     user_states[vk_id] = {'tasks_page': current_page}
                     vk.messages.send(
                         user_id=vk_id,
-                        message="Выберите задание:",
+                        message="📋 Выберите задание:",
                         random_id=0,
                         keyboard=build_tasks_keyboard(tasks, db_user['id'], current_page)
                     )
@@ -858,8 +865,37 @@ def process_message_callback(vk_id, text, attachments=None):
             )
             return
         
-        # ============ ОБРАБОТКА ВЫБОРА ЗАДАНИЯ ============
-        # Если пользователь нажал на кнопку задания
+        # ============ КНОПКА "К ЗАДАНИЯМ" ============
+        if text == "📋 К заданиям":
+            if active_group:
+                tasks = get_tasks_cached(active_group['id'])
+                if tasks:
+                    current_page = state.get('tasks_page', 0)
+                    user_states[vk_id] = {'tasks_page': current_page}
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="📋 Выберите задание:",
+                        random_id=0,
+                        keyboard=build_tasks_keyboard(tasks, db_user['id'], current_page)
+                    )
+                else:
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="📢 В данный момент нет активных заданий.",
+                        random_id=0,
+                        keyboard=create_main_keyboard(active_group, site_url)
+                    )
+            else:
+                vk.messages.send(
+                    user_id=vk_id,
+                    message="📢 В данный момент нет активных заданий.",
+                    random_id=0,
+                    keyboard=create_main_keyboard(active_group, site_url)
+                )
+            return
+        
+        # ============ ВЫБОР ЗАДАНИЯ ============
+        # Проверяем, не является ли текст кнопкой задания
         if active_group:
             matched_task = get_task_by_title_cached(active_group['id'], text)
             
@@ -881,12 +917,14 @@ def process_message_callback(vk_id, text, attachments=None):
                 vk.messages.send(
                     user_id=vk_id,
                     message=format_task_message(matched_task, report, task_status),
-                    random_id=0
+                    random_id=0,
+                    keyboard=create_task_view_keyboard()
                 )
                 return
         
         # ============ ОБРАБОТКА ОТЧЕТА ============
-        # Если пользователь находится в режиме просмотра задания и отправляет отчет
+        # Отправка отчета возможна ТОЛЬКО если пользователь в режиме просмотра задания
+        # И это НЕ кнопка (текст не является кнопкой меню или задания)
         if isinstance(state, dict) and state.get('action') == 'task_view':
             task = state.get('task')
             
@@ -915,8 +953,42 @@ def process_message_callback(vk_id, text, attachments=None):
                 )
                 return
             
-            # Если пользователь отправил текст или вложения
-            if text.strip() or attachments:
+            # Проверяем, что пользователь действительно отправляет отчет (текст или вложения)
+            # Игнорируем кнопки
+            if text and text in ["📋 Задания", "👤 Мой профиль", "📋 Заявки", "🌐 Личный кабинет", "➕ Создать заявку"]:
+                # Пользователь нажал на кнопку меню - выходим из режима задания
+                user_states.pop(vk_id, None)
+                vk.messages.send(
+                    user_id=vk_id,
+                    message="🔙 Отправка отчета отменена.",
+                    random_id=0,
+                    keyboard=create_main_keyboard(active_group, site_url)
+                )
+                return
+            
+            # Проверяем, не является ли текст кнопкой другого задания
+            if active_group and text:
+                other_task = get_task_by_title_cached(active_group['id'], text)
+                if other_task and other_task['id'] != task['id']:
+                    # Пользователь выбрал другое задание - переключаемся
+                    report = get_user_task_report(db_user['id'], other_task['id'])
+                    task_status = get_task_status_cached(db_user['id'], other_task['id'])
+                    current_page = state.get('tasks_page', 0)
+                    user_states[vk_id] = {
+                        'action': 'task_view',
+                        'task': other_task,
+                        'tasks_page': current_page
+                    }
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message=format_task_message(other_task, report, task_status),
+                        random_id=0,
+                        keyboard=create_task_view_keyboard()
+                    )
+                    return
+            
+            # Если пользователь отправил текст или вложения (не кнопки)
+            if (text and text.strip() and text not in ["📋 К заданиям"]) or attachments:
                 saved_files = []
                 attachment_text = ""
                 
@@ -949,7 +1021,8 @@ def process_message_callback(vk_id, text, attachments=None):
                         vk.messages.send(
                             user_id=vk_id,
                             message="⏳ У вас уже есть отчет на рассмотрении по этому заданию. Пожалуйста, дождитесь проверки администратора.",
-                            random_id=0
+                            random_id=0,
+                            keyboard=create_task_view_keyboard()
                         )
                         return
                     else:
@@ -993,7 +1066,8 @@ def process_message_callback(vk_id, text, attachments=None):
             vk.messages.send(
                 user_id=vk_id,
                 message="⚠️ Пожалуйста, напишите текст отчета или прикрепите файлы.",
-                random_id=0
+                random_id=0,
+                keyboard=create_task_view_keyboard()
             )
             return
         
@@ -1022,6 +1096,10 @@ def process_message_callback(vk_id, text, attachments=None):
             return
         
         elif text == "👤 Мой профиль":
+            # Если пользователь был в режиме просмотра задания - выходим
+            if state.get('action') == 'task_view':
+                user_states.pop(vk_id, None)
+            
             tickets = get_user_tickets(db_user['id'])
             fresh_user = get_user_by_vk_id(vk_id) or db_user
             
@@ -1046,6 +1124,10 @@ def process_message_callback(vk_id, text, attachments=None):
             return
         
         elif text == "📋 Заявки":
+            # Если пользователь был в режиме просмотра задания - выходим
+            if state.get('action') == 'task_view':
+                user_states.pop(vk_id, None)
+            
             requests = get_user_requests(db_user['id'])
             if not requests:
                 vk.messages.send(
@@ -1064,6 +1146,10 @@ def process_message_callback(vk_id, text, attachments=None):
             return
         
         elif text == "➕ Создать заявку":
+            # Если пользователь был в режиме просмотра задания - выходим
+            if state.get('action') == 'task_view':
+                user_states.pop(vk_id, None)
+            
             user_states[vk_id] = {'action': 'create_request', 'step': 'category'}
             vk.messages.send(
                 user_id=vk_id,
@@ -1090,6 +1176,10 @@ def process_message_callback(vk_id, text, attachments=None):
             return
         
         elif text == "🌐 Личный кабинет" and site_url:
+            # Если пользователь был в режиме просмотра задания - выходим
+            if state.get('action') == 'task_view':
+                user_states.pop(vk_id, None)
+            
             vk.messages.send(
                 user_id=vk_id,
                 message=f"🌐 Перейдите в личный кабинет по ссылке:\n{site_url}",
