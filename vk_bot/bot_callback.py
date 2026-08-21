@@ -167,7 +167,7 @@ def get_tasks_cached(group_id):
 
 
 def get_task_by_title_cached(group_id, text):
-    """Быстрый поиск задания по тексту кнопки"""
+    """Находит задание по тексту кнопки"""
     if not group_id or not text:
         return None
     
@@ -175,55 +175,26 @@ def get_task_by_title_cached(group_id, text):
     if not tasks:
         return None
     
-    # Строим кэш для быстрого поиска
-    task_by_title_key = f'task_by_title_{group_id}'
-    task_by_title = _cache.get(task_by_title_key, {})
+    # Очищаем текст от эмодзи
+    clean_text = text
+    for emoji in ['🟢', '🟡', '🔴', '✅', '⏳', '❌', '📌']:
+        clean_text = clean_text.replace(emoji, '').strip()
+    clean_text = ' '.join(clean_text.split())
     
-    if not task_by_title:
-        for t in tasks:
-            # Ключ - чистый заголовок
-            clean_title = t['title'].strip()
-            task_by_title[clean_title] = t
-            task_by_title[clean_title.lower()] = t
-            # Ключ - ID с решеткой
-            task_by_title[f"#{t['id']}"] = t
-        _cache[task_by_title_key] = task_by_title
-        _cache_time[task_by_title_key] = time.time()
+    # Ищем задание
+    for t in tasks:
+        title = t['title'].strip()
+        if clean_text == title or clean_text.lower() == title.lower():
+            return t
+        if clean_text in title or title in clean_text:
+            return t
     
-    # 1. Прямой поиск по тексту как есть
-    if text in task_by_title:
-        return task_by_title[text]
-    
-    # 2. Поиск по ID (если текст содержит #число)
+    # Поиск по ID
     match = re.search(r'#(\d+)', text)
     if match:
         task_id = int(match.group(1))
         for t in tasks:
             if t['id'] == task_id:
-                return t
-    
-    # 3. Очищаем текст от эмодзи и префиксов
-    clean_text = text
-    
-    # Удаляем эмодзи сложности и статуса
-    for emoji in ['🟢', '🟡', '🔴', '✅', '⏳', '❌', '📌']:
-        clean_text = clean_text.replace(emoji, '').strip()
-    
-    # Убираем лишние пробелы
-    clean_text = ' '.join(clean_text.split())
-    
-    # 4. Поиск по очищенному тексту
-    if clean_text:
-        # Точное совпадение
-        if clean_text in task_by_title:
-            return task_by_title[clean_text]
-        if clean_text.lower() in task_by_title:
-            return task_by_title[clean_text.lower()]
-        
-        # Поиск по частичному совпадению
-        for t in tasks:
-            title = t['title'].strip()
-            if clean_text in title or title in clean_text:
                 return t
     
     return None
@@ -309,11 +280,7 @@ def create_main_keyboard(active_group, site_url=''):
 
 
 def build_tasks_keyboard(tasks, user_id, page=0, items_per_page=8):
-    """
-    Строит клавиатуру с заданиями с пагинацией.
-    page - текущая страница (начиная с 0)
-    items_per_page - количество заданий на странице
-    """
+    """Строит клавиатуру с заданиями с пагинацией"""
     keyboard = VkKeyboard(one_time=False)
     
     if not tasks:
@@ -322,47 +289,39 @@ def build_tasks_keyboard(tasks, user_id, page=0, items_per_page=8):
         keyboard.add_button("🔙 Назад в меню", color=VkKeyboardColor.SECONDARY)
         return keyboard.get_keyboard()
     
-    # Группируем задания по сложности (уже отсортированы в БД)
+    # Группируем задания по сложности
     easy_tasks = [t for t in tasks if t['difficulty'] == 'easy']
     medium_tasks = [t for t in tasks if t['difficulty'] == 'medium']
     hard_tasks = [t for t in tasks if t['difficulty'] == 'hard']
     
-    # Объединяем в порядке: легкие, средние, сложные
     all_tasks = easy_tasks + medium_tasks + hard_tasks
     total_tasks = len(all_tasks)
     total_pages = (total_tasks + items_per_page - 1) // items_per_page
     
-    # Получаем задания для текущей страницы
     start_idx = page * items_per_page
     end_idx = min(start_idx + items_per_page, total_tasks)
     page_tasks = all_tasks[start_idx:end_idx]
     
-    # Получаем статусы всех задач на странице одним запросом
     task_ids = [t['id'] for t in page_tasks]
     statuses = get_all_task_statuses_cached(user_id, task_ids)
     
-    # Добавляем кнопки заданий по 2 в строке
     row_counter = 0
     max_buttons_per_row = 2
     
     for t in page_tasks:
         status = statuses.get(t['id'])
         
-        # Используем полное название для кнопки
         title_display = t['title']
         max_title_len = 20
         if len(title_display) > max_title_len:
             title_display = t['title'][:max_title_len].rstrip() + '…'
         
-        # Определяем эмодзи сложности
         diff_emoji = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}
         emoji = diff_emoji.get(t['difficulty'], '📌')
         
-        # Формируем подпись кнопки
         label = f"{emoji} {title_display}"
         color = VkKeyboardColor.PRIMARY
         
-        # Изменяем цвет и подпись в зависимости от статуса
         if status:
             if status == 'approved':
                 label = f"✅ {title_display}"
@@ -377,30 +336,23 @@ def build_tasks_keyboard(tasks, user_id, page=0, items_per_page=8):
         keyboard.add_button(label, color=color)
         row_counter += 1
         
-        # Если набрали 2 кнопки в строке, переходим на следующую
         if row_counter >= max_buttons_per_row:
             keyboard.add_line()
             row_counter = 0
     
-    # Если остались незавершенные кнопки, завершаем строку
     if row_counter > 0:
         keyboard.add_line()
     
-    # Добавляем пагинацию, если больше одной страницы
     if total_pages > 1:
-        # Строка с навигацией
         nav_buttons_added = False
         
-        # Кнопка "Предыдущая"
         if page > 0:
             keyboard.add_button("⬅️ Предыдущая", color=VkKeyboardColor.SECONDARY)
             nav_buttons_added = True
         
-        # Индикатор страницы
         keyboard.add_button(f"📄 {page + 1}/{total_pages}", color=VkKeyboardColor.SECONDARY)
         nav_buttons_added = True
         
-        # Кнопка "Следующая"
         if page < total_pages - 1:
             keyboard.add_button("Следующая ➡️", color=VkKeyboardColor.SECONDARY)
             nav_buttons_added = True
@@ -408,7 +360,6 @@ def build_tasks_keyboard(tasks, user_id, page=0, items_per_page=8):
         if nav_buttons_added:
             keyboard.add_line()
     
-    # Кнопка возврата в меню
     keyboard.add_button("🔙 Назад в меню", color=VkKeyboardColor.SECONDARY)
     
     return keyboard.get_keyboard()
@@ -572,10 +523,7 @@ def send_credentials_message(vk, user_id, user_data, active_group, site_url=''):
 # ============ Функция автовыдачи билетов ============
 
 def auto_issue_tickets():
-    """
-    Проверяет все завершенные волны и выдает билеты пользователям,
-    которые выполнили все задания, но по какой-то причине не получили билет.
-    """
+    """Проверяет все завершенные волны и выдает билеты пользователям"""
     logger.info("🔄 Запуск автовыдачи билетов...")
     
     conn = pymysql.connect(
@@ -593,7 +541,6 @@ def auto_issue_tickets():
     
     try:
         with conn.cursor() as cursor:
-            # Получаем все завершенные группы (end_date < CURDATE())
             cursor.execute("""
                 SELECT id, title FROM vk_bot_task_groups 
                 WHERE end_date < CURDATE()
@@ -613,7 +560,6 @@ def auto_issue_tickets():
                 group_id = group['id']
                 group_title = group['title']
                 
-                # Получаем все задания в группе
                 cursor.execute("""
                     SELECT id FROM vk_bot_tasks WHERE group_id = %s
                 """, (group_id,))
@@ -624,7 +570,6 @@ def auto_issue_tickets():
                 if total_tasks == 0:
                     continue
                 
-                # Получаем всех пользователей, у которых есть одобренные отчеты по заданиям этой группы
                 placeholders = ','.join(['%s'] * len(task_ids))
                 cursor.execute(f"""
                     SELECT DISTINCT r.user_id, u.vk_id, u.first_name, u.last_name
@@ -639,7 +584,6 @@ def auto_issue_tickets():
                     user_id = user['user_id']
                     vk_id = user['vk_id']
                     
-                    # Проверяем, сколько заданий выполнил пользователь
                     cursor.execute(f"""
                         SELECT COUNT(DISTINCT task_id) as done
                         FROM vk_bot_reports
@@ -648,14 +592,12 @@ def auto_issue_tickets():
                     done_result = cursor.fetchone()
                     done_tasks = done_result['done'] if done_result else 0
                     
-                    # Проверяем, есть ли уже билет
                     cursor.execute("""
                         SELECT id FROM vk_bot_tickets
                         WHERE group_id = %s AND user_id = %s
                     """, (group_id, user_id))
                     existing_ticket = cursor.fetchone()
                     
-                    # Если все задания выполнены и билета нет - выдаем
                     if done_tasks >= total_tasks and not existing_ticket:
                         import hashlib
                         ticket_num = 'TKT-' + hashlib.md5(
@@ -669,7 +611,6 @@ def auto_issue_tickets():
                         
                         tickets_issued += 1
                         
-                        # Отправляем уведомление пользователю
                         if vk_id:
                             try:
                                 vk.messages.send(
@@ -681,7 +622,6 @@ def auto_issue_tickets():
                             except Exception as e:
                                 logger.error(f"❌ Ошибка отправки уведомления пользователю {vk_id}: {e}")
                         
-                        # Добавляем уведомление в БД
                         cursor.execute("""
                             INSERT INTO vk_bot_notifications (user_id, message)
                             VALUES (%s, %s)
@@ -704,7 +644,6 @@ def auto_ticket_worker():
     while True:
         try:
             now = datetime.now()
-            # Вычисляем время до следующего запуска (2:00)
             next_run = now.replace(hour=2, minute=0, second=0, microsecond=0)
             if now >= next_run:
                 next_run += timedelta(days=1)
@@ -713,8 +652,6 @@ def auto_ticket_worker():
             logger.info(f"⏰ Следующая автовыдача билетов в {next_run.strftime('%Y-%m-%d %H:%M:%S')} (через {wait_seconds/3600:.1f} часов)")
             
             time.sleep(wait_seconds)
-            
-            # Запускаем автовыдачу
             auto_issue_tickets()
             
         except Exception as e:
@@ -722,7 +659,7 @@ def auto_ticket_worker():
             time.sleep(60)
 
 
-# ============ Обработчик сообщений ============
+# ============ ОСНОВНАЯ ЛОГИКА ОБРАБОТЧИКА ============
 
 def process_message_callback(vk_id, text, attachments=None):
     """Обработка сообщения для Callback API"""
@@ -741,6 +678,7 @@ def process_message_callback(vk_id, text, attachments=None):
                 _cache[f'user_{vk_id}'] = db_user
                 _cache_time[f'user_{vk_id}'] = time.time()
         
+        # ============ РЕГИСТРАЦИЯ ============
         if not db_user:
             if vk_id in user_states and user_states.get(vk_id, {}).get('action', '').startswith('registration'):
                 handle_registration_state(vk_id, text, active_group, site_url)
@@ -792,6 +730,7 @@ def process_message_callback(vk_id, text, attachments=None):
                 )
             return
         
+        # ============ СОГЛАСИЕ С ПРАВИЛАМИ ============
         user_agreed = get_user_agreement_cached(db_user['id'])
         
         if not user_agreed:
@@ -828,38 +767,9 @@ def process_message_callback(vk_id, text, attachments=None):
             handle_registration_state(vk_id, text, active_group, site_url, db_user)
             return
         
-        state = user_states.get(vk_id)
+        state = user_states.get(vk_id, {})
         
-        # Обработка пагинации
-        if text in ["⬅️ Предыдущая", "Следующая ➡️"]:
-            current_page = user_states.get(vk_id, {}).get('tasks_page', 0)
-            if text == "⬅️ Предыдущая":
-                current_page = max(0, current_page - 1)
-            else:
-                current_page += 1
-            
-            if active_group:
-                tasks = get_tasks_cached(active_group['id'])
-                if tasks:
-                    user_states[vk_id] = {'tasks_page': current_page}
-                    vk.messages.send(
-                        user_id=vk_id,
-                        message="Выберите задание:",
-                        random_id=0,
-                        keyboard=build_tasks_keyboard(tasks, db_user['id'], current_page)
-                    )
-            return
-        
-        if text in ["🔙 Назад в меню", "🔙 Назад", "🔙 Назад к заявкам"]:
-            user_states.pop(vk_id, None)
-            vk.messages.send(
-                user_id=vk_id,
-                message="🔙 Возврат в главное меню.",
-                random_id=0,
-                keyboard=create_main_keyboard(active_group, site_url)
-            )
-            return
-        
+        # ============ ОБРАБОТКА ЗАЯВОК ============
         if isinstance(state, dict) and state.get('action') == 'request_chat':
             request_id = state.get('request_id')
             
@@ -917,20 +827,57 @@ def process_message_callback(vk_id, text, attachments=None):
                 )
                 return
         
-        # ============ ПРОВЕРКА НА ВЫБОР ЗАДАНИЯ ============
-        # Важно: сначала проверяем, не нажал ли пользователь на кнопку задания
+        # ============ ОБРАБОТКА НАВИГАЦИИ ПО СТРАНИЦАМ ============
+        if text in ["⬅️ Предыдущая", "Следующая ➡️"]:
+            current_page = state.get('tasks_page', 0)
+            if text == "⬅️ Предыдущая":
+                current_page = max(0, current_page - 1)
+            else:
+                current_page += 1
+            
+            if active_group:
+                tasks = get_tasks_cached(active_group['id'])
+                if tasks:
+                    user_states[vk_id] = {'tasks_page': current_page}
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message="Выберите задание:",
+                        random_id=0,
+                        keyboard=build_tasks_keyboard(tasks, db_user['id'], current_page)
+                    )
+            return
+        
+        # ============ ОБРАБОТКА КНОПКИ "НАЗАД" ============
+        if text in ["🔙 Назад в меню", "🔙 Назад", "🔙 Назад к заявкам"]:
+            user_states.pop(vk_id, None)
+            vk.messages.send(
+                user_id=vk_id,
+                message="🔙 Возврат в главное меню.",
+                random_id=0,
+                keyboard=create_main_keyboard(active_group, site_url)
+            )
+            return
+        
+        # ============ ОБРАБОТКА ВЫБОРА ЗАДАНИЯ ============
+        # Если пользователь нажал на кнопку задания
         if active_group:
             matched_task = get_task_by_title_cached(active_group['id'], text)
             
             if matched_task:
-                # Пользователь выбрал задание - открываем его
-                logger.info(f"🔍 Выбрано задание: ID={matched_task['id']}, Title={matched_task['title']}")
+                logger.info(f"🔍 Пользователь выбрал задание: ID={matched_task['id']}, Title={matched_task['title']}")
+                
+                # Получаем статус и отчет
                 report = get_user_task_report(db_user['id'], matched_task['id'])
                 task_status = get_task_status_cached(db_user['id'], matched_task['id'])
-                # Сохраняем выбранное задание в состояние
-                current_page = user_states.get(vk_id, {}).get('tasks_page', 0)
-                user_states[vk_id] = matched_task
-                user_states[vk_id]['tasks_page'] = current_page
+                
+                # Сохраняем выбранное задание в состоянии
+                current_page = state.get('tasks_page', 0)
+                user_states[vk_id] = {
+                    'action': 'task_view',
+                    'task': matched_task,
+                    'tasks_page': current_page
+                }
+                
                 vk.messages.send(
                     user_id=vk_id,
                     message=format_task_message(matched_task, report, task_status),
@@ -938,38 +885,28 @@ def process_message_callback(vk_id, text, attachments=None):
                 )
                 return
         
-        # ============ ОБРАБОТКА ОТЧЕТА ПО ЗАДАНИЮ ============
-        if isinstance(state, dict) and 'id' in state:
-            task = state
+        # ============ ОБРАБОТКА ОТЧЕТА ============
+        # Если пользователь находится в режиме просмотра задания и отправляет отчет
+        if isinstance(state, dict) and state.get('action') == 'task_view':
+            task = state.get('task')
             
-            # Проверяем, существует ли задание еще
-            if active_group:
-                tasks = get_tasks_cached(active_group['id'])
-                task_exists = False
-                for t in tasks:
-                    if t['id'] == task['id']:
-                        task_exists = True
-                        task = t
-                        user_states[vk_id] = task
-                        break
-                
-                if not task_exists:
-                    user_states.pop(vk_id, None)
-                    vk.messages.send(
-                        user_id=vk_id,
-                        message="⚠️ Задание больше не доступно. Пожалуйста, выберите задание заново.",
-                        random_id=0,
-                        keyboard=build_tasks_keyboard(tasks, db_user['id'], user_states.get(vk_id, {}).get('tasks_page', 0)) if tasks else create_main_keyboard(active_group, site_url)
-                    )
-                    return
+            if not task:
+                user_states.pop(vk_id, None)
+                vk.messages.send(
+                    user_id=vk_id,
+                    message="⚠️ Произошла ошибка. Пожалуйста, выберите задание заново.",
+                    random_id=0,
+                    keyboard=create_main_keyboard(active_group, site_url)
+                )
+                return
             
+            # Проверяем статус задания
             task_status = get_task_status_cached(db_user['id'], task['id'])
             
-            # Если задание уже выполнено
             if task_status == 'approved':
                 user_states.pop(vk_id, None)
                 tasks = get_tasks_cached(active_group['id']) if active_group else []
-                keyboard = build_tasks_keyboard(tasks, db_user['id'], user_states.get(vk_id, {}).get('tasks_page', 0)) if tasks else create_main_keyboard(active_group, site_url)
+                keyboard = build_tasks_keyboard(tasks, db_user['id'], state.get('tasks_page', 0)) if tasks else create_main_keyboard(active_group, site_url)
                 vk.messages.send(
                     user_id=vk_id,
                     message="✅ Это задание уже выполнено! Выберите другое задание.",
@@ -978,18 +915,7 @@ def process_message_callback(vk_id, text, attachments=None):
                 )
                 return
             
-            # Если пользователь нажал "Назад" или другую системную кнопку
-            if text in ["📋 Задания", "👤 Мой профиль", "📋 Заявки", "🔙 Назад в меню", "🔙 Назад"]:
-                user_states.pop(vk_id, None)
-                vk.messages.send(
-                    user_id=vk_id,
-                    message="🔙 Отправка отчета отменена.",
-                    random_id=0,
-                    keyboard=create_main_keyboard(active_group, site_url)
-                )
-                return
-            
-            # Если пользователь отправил отчет (текст или вложения)
+            # Если пользователь отправил текст или вложения
             if text.strip() or attachments:
                 saved_files = []
                 attachment_text = ""
@@ -1003,6 +929,7 @@ def process_message_callback(vk_id, text, attachments=None):
                         logger.error(f"Ошибка обработки вложений: {e}")
                 
                 has_attachments = len(saved_files) > 0
+                
                 try:
                     report_id = create_report(db_user['id'], task['id'], text, has_attachments)
                 except ValueError as e:
@@ -1010,7 +937,7 @@ def process_message_callback(vk_id, text, attachments=None):
                     if error_msg == "TASK_ALREADY_COMPLETED":
                         user_states.pop(vk_id, None)
                         tasks = get_tasks_cached(active_group['id']) if active_group else []
-                        keyboard = build_tasks_keyboard(tasks, db_user['id'], user_states.get(vk_id, {}).get('tasks_page', 0)) if tasks else create_main_keyboard(active_group, site_url)
+                        keyboard = build_tasks_keyboard(tasks, db_user['id'], state.get('tasks_page', 0)) if tasks else create_main_keyboard(active_group, site_url)
                         vk.messages.send(
                             user_id=vk_id,
                             message="✅ Это задание уже выполнено! Выберите другое задание.",
@@ -1037,14 +964,15 @@ def process_message_callback(vk_id, text, attachments=None):
                         file_info.get('file_size', 0)
                     )
                 
-                current_page = user_states.get(vk_id, {}).get('tasks_page', 0)
+                invalidate_user_task_cache(db_user['id'], task['id'])
+                
+                # Сохраняем страницу и возвращаемся к списку заданий
+                current_page = state.get('tasks_page', 0)
                 user_states.pop(vk_id, None)
                 
                 response_msg = "✅ Ваш отчет принят на рассмотрение!\nСтатус задания обновится после проверки администратором."
                 if has_attachments:
                     response_msg += f"\n📎 Прикреплено файлов: {len(saved_files)}"
-                
-                invalidate_user_task_cache(db_user['id'], task['id'])
                 
                 if active_group:
                     tasks = get_tasks_cached(active_group['id'])
@@ -1052,17 +980,13 @@ def process_message_callback(vk_id, text, attachments=None):
                 else:
                     keyboard = create_main_keyboard(active_group, site_url)
                 
-                try:
-                    vk.messages.send(
-                        user_id=vk_id,
-                        message=response_msg,
-                        random_id=0,
-                        keyboard=keyboard
-                    )
-                    logger.info(f"✅ Подтверждение отправлено пользователю {vk_id}")
-                except Exception as e:
-                    logger.error(f"❌ Ошибка отправки подтверждения: {e}")
-                
+                vk.messages.send(
+                    user_id=vk_id,
+                    message=response_msg,
+                    random_id=0,
+                    keyboard=keyboard
+                )
+                logger.info(f"✅ Отчет отправлен пользователем {vk_id} по заданию {task['id']}")
                 return
             
             # Если текст пустой и нет вложений
@@ -1073,7 +997,7 @@ def process_message_callback(vk_id, text, attachments=None):
             )
             return
         
-        # ============ ОБРАБОТКА ГЛАВНЫХ КОМАНД ============
+        # ============ ГЛАВНЫЕ КОМАНДЫ ============
         
         if text in ["📋 Задания", "/start", "Начать", "Старт"]:
             if not active_group:
@@ -1085,7 +1009,6 @@ def process_message_callback(vk_id, text, attachments=None):
                 )
             else:
                 tasks = get_tasks_cached(active_group['id'])
-                # Сбрасываем страницу при открытии заданий
                 user_states[vk_id] = {'tasks_page': 0}
                 welcome = settings.get('welcome_text', 'Привет! Выполняй задания и получай билеты! 🎫')
                 welcome += f"\n\n⏰ Задания действуют до: {active_group['end_date']}"
@@ -1175,6 +1098,7 @@ def process_message_callback(vk_id, text, attachments=None):
             )
             return
         
+        # ============ ОБРАБОТКА ЗАЯВОК ПО НОМЕРУ ============
         if 'Заявка #' in text or '#' in text:
             match = re.search(r'#(\d+)', text)
             if match:
@@ -1191,6 +1115,7 @@ def process_message_callback(vk_id, text, attachments=None):
                     )
                     return
         
+        # ============ НЕИЗВЕСТНАЯ КОМАНДА ============
         vk.messages.send(
             user_id=vk_id,
             message="🤖 Воспользуйтесь кнопками меню:",
