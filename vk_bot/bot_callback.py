@@ -651,11 +651,11 @@ def auto_issue_tickets():
                     vk_id = user['vk_id']
                     
                     # Проверяем, сколько заданий выполнил пользователь
-                    cursor.execute("""
+                    cursor.execute(f"""
                         SELECT COUNT(DISTINCT task_id) as done
                         FROM vk_bot_reports
                         WHERE user_id = %s AND task_id IN ({placeholders}) AND status = 'approved'
-                    """.format(placeholders=placeholders), (user_id, *task_ids))
+                    """, (user_id, *task_ids))
                     done_result = cursor.fetchone()
                     done_tasks = done_result['done'] if done_result else 0
                     
@@ -932,6 +932,28 @@ def process_message_callback(vk_id, text, attachments=None):
         if isinstance(state, dict) and 'id' in state:
             task = state
             
+            # Проверяем, не пытается ли пользователь выбрать другое задание
+            # вместо отправки отчета
+            if active_group:
+                matched_task = get_task_by_title_cached(active_group['id'], text)
+                # Если пользователь нажал на другое задание
+                if matched_task and matched_task['id'] != task['id']:
+                    # Очищаем состояние, но сохраняем страницу
+                    current_page = user_states.get(vk_id, {}).get('tasks_page', 0)
+                    user_states.pop(vk_id, None)
+                    # Открываем выбранное задание
+                    report = get_user_task_report(db_user['id'], matched_task['id'])
+                    task_status = get_task_status_cached(db_user['id'], matched_task['id'])
+                    user_states[vk_id] = matched_task
+                    # Сохраняем страницу для клавиатуры
+                    user_states[vk_id]['tasks_page'] = current_page
+                    vk.messages.send(
+                        user_id=vk_id,
+                        message=format_task_message(matched_task, report, task_status),
+                        random_id=0
+                    )
+                    return
+            
             if active_group:
                 tasks = get_tasks_cached(active_group['id'])
                 task_exists = False
@@ -974,25 +996,6 @@ def process_message_callback(vk_id, text, attachments=None):
                     keyboard=create_main_keyboard(active_group, site_url)
                 )
                 return
-            
-            if active_group:
-                matched_task = get_task_by_title_cached(active_group['id'], text)
-                if matched_task and matched_task['id'] != task['id']:
-                    user_states.pop(vk_id, None)
-                    vk.messages.send(
-                        user_id=vk_id,
-                        message="⚠️ Вы выбрали другое задание. Отправка отчета отменена.",
-                        random_id=0
-                    )
-                    report = get_user_task_report(db_user['id'], matched_task['id'])
-                    task_status = get_task_status_cached(db_user['id'], matched_task['id'])
-                    user_states[vk_id] = matched_task
-                    vk.messages.send(
-                        user_id=vk_id,
-                        message=format_task_message(matched_task, report, task_status),
-                        random_id=0
-                    )
-                    return
             
             if not text.strip() and not attachments:
                 vk.messages.send(
@@ -1048,6 +1051,7 @@ def process_message_callback(vk_id, text, attachments=None):
                     file_info.get('file_size', 0)
                 )
             
+            current_page = user_states.get(vk_id, {}).get('tasks_page', 0)
             user_states.pop(vk_id, None)
             
             response_msg = "✅ Ваш отчет принят на рассмотрение!\nСтатус задания обновится после проверки администратором."
@@ -1058,7 +1062,8 @@ def process_message_callback(vk_id, text, attachments=None):
             
             if active_group:
                 tasks = get_tasks_cached(active_group['id'])
-                keyboard = build_tasks_keyboard(tasks, db_user['id'], user_states.get(vk_id, {}).get('tasks_page', 0))
+                # Возвращаем пользователю список заданий с той же страницы
+                keyboard = build_tasks_keyboard(tasks, db_user['id'], current_page)
             else:
                 keyboard = create_main_keyboard(active_group, site_url)
             
@@ -1202,6 +1207,9 @@ def process_message_callback(vk_id, text, attachments=None):
                 report = get_user_task_report(db_user['id'], matched_task['id'])
                 task_status = get_task_status_cached(db_user['id'], matched_task['id'])
                 user_states[vk_id] = matched_task
+                # Сохраняем текущую страницу для возврата
+                current_page = user_states.get(vk_id, {}).get('tasks_page', 0)
+                user_states[vk_id]['tasks_page'] = current_page
                 vk.messages.send(
                     user_id=vk_id,
                     message=format_task_message(matched_task, report, task_status),
