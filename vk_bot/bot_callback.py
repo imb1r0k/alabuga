@@ -167,7 +167,7 @@ def get_tasks_cached(group_id):
 
 
 def get_task_by_title_cached(group_id, text):
-    """Находит задание по тексту кнопки"""
+    """Находит задание по тексту кнопки с улучшенным поиском"""
     if not group_id or not text:
         return None
     
@@ -175,28 +175,58 @@ def get_task_by_title_cached(group_id, text):
     if not tasks:
         return None
     
-    # Очищаем текст от эмодзи
+    logger.info(f"🔍 Поиск задания по тексту: '{text}'")
+    
+    # 1. Прямой поиск по тексту (с эмодзи)
+    for t in tasks:
+        # Проверяем, содержится ли название задания в тексте кнопки
+        if t['title'] in text:
+            logger.info(f"✅ Найдено по прямому совпадению: {t['title']}")
+            return t
+    
+    # 2. Очищаем текст от эмодзи
     clean_text = text
-    for emoji in ['🟢', '🟡', '🔴', '✅', '⏳', '❌', '📌']:
+    # Список всех возможных эмодзи
+    emojis = ['🟢', '🟡', '🔴', '✅', '⏳', '❌', '📌', '⬅️', '➡️', '📄', '🔙']
+    for emoji in emojis:
         clean_text = clean_text.replace(emoji, '').strip()
     clean_text = ' '.join(clean_text.split())
+    logger.info(f"🔍 Очищенный текст: '{clean_text}'")
     
-    # Ищем задание
-    for t in tasks:
-        title = t['title'].strip()
-        if clean_text == title or clean_text.lower() == title.lower():
-            return t
-        if clean_text in title or title in clean_text:
-            return t
+    # 3. Поиск по очищенному тексту
+    if clean_text:
+        for t in tasks:
+            title = t['title'].strip()
+            # Точное совпадение
+            if clean_text == title or clean_text.lower() == title.lower():
+                logger.info(f"✅ Найдено по точному совпадению: {title}")
+                return t
+            # Название содержит текст или текст содержит название
+            if clean_text in title or title in clean_text:
+                logger.info(f"✅ Найдено по частичному совпадению: {title}")
+                return t
     
-    # Поиск по ID
+    # 4. Поиск по ID (если текст содержит #число)
     match = re.search(r'#(\d+)', text)
     if match:
         task_id = int(match.group(1))
         for t in tasks:
             if t['id'] == task_id:
+                logger.info(f"✅ Найдено по ID #{task_id}: {t['title']}")
                 return t
     
+    # 5. Поиск по словам (последняя попытка)
+    if clean_text:
+        clean_words = set(clean_text.lower().split())
+        for t in tasks:
+            title_words = set(t['title'].lower().split())
+            # Если есть общие слова
+            common = clean_words & title_words
+            if len(common) >= min(2, len(title_words)):
+                logger.info(f"✅ Найдено по общим словам: {t['title']}")
+                return t
+    
+    logger.info(f"❌ Задание не найдено для текста: '{text}'")
     return None
 
 
@@ -311,10 +341,11 @@ def build_tasks_keyboard(tasks, user_id, page=0, items_per_page=8):
     for t in page_tasks:
         status = statuses.get(t['id'])
         
+        # Используем ПОЛНОЕ название для кнопки
         title_display = t['title']
-        max_title_len = 20
-        if len(title_display) > max_title_len:
-            title_display = t['title'][:max_title_len].rstrip() + '…'
+        # Обрезаем только если слишком длинное
+        if len(title_display) > 25:
+            title_display = t['title'][:25].rstrip() + '…'
         
         diff_emoji = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}
         emoji = diff_emoji.get(t['difficulty'], '📌')
@@ -924,7 +955,6 @@ def process_message_callback(vk_id, text, attachments=None):
         
         # ============ ОБРАБОТКА ОТЧЕТА ============
         # Отправка отчета возможна ТОЛЬКО если пользователь в режиме просмотра задания
-        # И это НЕ кнопка (текст не является кнопкой меню или задания)
         if isinstance(state, dict) and state.get('action') == 'task_view':
             task = state.get('task')
             
