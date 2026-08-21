@@ -205,14 +205,9 @@ def get_task_by_title_cached(group_id, text):
     # 3. Очищаем текст от эмодзи и префиксов
     clean_text = text
     
-    # Удаляем эмодзи сложности
+    # Удаляем эмодзи сложности и статуса
     for emoji in ['🟢', '🟡', '🔴', '✅', '⏳', '❌', '📌']:
         clean_text = clean_text.replace(emoji, '').strip()
-    
-    # Удаляем префиксы сложности (если есть)
-    for prefix in ['Легкое:', 'Среднее:', 'Сложное:']:
-        if prefix in clean_text:
-            clean_text = clean_text.replace(prefix, '').strip()
     
     # Убираем лишние пробелы
     clean_text = ' '.join(clean_text.split())
@@ -228,13 +223,7 @@ def get_task_by_title_cached(group_id, text):
         # Поиск по частичному совпадению
         for t in tasks:
             title = t['title'].strip()
-            # Если название содержит очищенный текст или наоборот
             if clean_text in title or title in clean_text:
-                return t
-            # Сравнение по словам
-            clean_words = set(clean_text.lower().split())
-            title_words = set(title.lower().split())
-            if len(clean_words & title_words) >= min(2, len(title_words)):
                 return t
     
     return None
@@ -928,32 +917,32 @@ def process_message_callback(vk_id, text, attachments=None):
                 )
                 return
         
+        # ============ ПРОВЕРКА НА ВЫБОР ЗАДАНИЯ ============
+        # Важно: сначала проверяем, не нажал ли пользователь на кнопку задания
+        if active_group:
+            matched_task = get_task_by_title_cached(active_group['id'], text)
+            
+            if matched_task:
+                # Пользователь выбрал задание - открываем его
+                logger.info(f"🔍 Выбрано задание: ID={matched_task['id']}, Title={matched_task['title']}")
+                report = get_user_task_report(db_user['id'], matched_task['id'])
+                task_status = get_task_status_cached(db_user['id'], matched_task['id'])
+                # Сохраняем выбранное задание в состояние
+                current_page = user_states.get(vk_id, {}).get('tasks_page', 0)
+                user_states[vk_id] = matched_task
+                user_states[vk_id]['tasks_page'] = current_page
+                vk.messages.send(
+                    user_id=vk_id,
+                    message=format_task_message(matched_task, report, task_status),
+                    random_id=0
+                )
+                return
+        
         # ============ ОБРАБОТКА ОТЧЕТА ПО ЗАДАНИЮ ============
         if isinstance(state, dict) and 'id' in state:
             task = state
             
-            # Проверяем, не пытается ли пользователь выбрать другое задание
-            # вместо отправки отчета
-            if active_group:
-                matched_task = get_task_by_title_cached(active_group['id'], text)
-                # Если пользователь нажал на другое задание
-                if matched_task and matched_task['id'] != task['id']:
-                    # Очищаем состояние, но сохраняем страницу
-                    current_page = user_states.get(vk_id, {}).get('tasks_page', 0)
-                    user_states.pop(vk_id, None)
-                    # Открываем выбранное задание
-                    report = get_user_task_report(db_user['id'], matched_task['id'])
-                    task_status = get_task_status_cached(db_user['id'], matched_task['id'])
-                    user_states[vk_id] = matched_task
-                    # Сохраняем страницу для клавиатуры
-                    user_states[vk_id]['tasks_page'] = current_page
-                    vk.messages.send(
-                        user_id=vk_id,
-                        message=format_task_message(matched_task, report, task_status),
-                        random_id=0
-                    )
-                    return
-            
+            # Проверяем, существует ли задание еще
             if active_group:
                 tasks = get_tasks_cached(active_group['id'])
                 task_exists = False
@@ -975,6 +964,8 @@ def process_message_callback(vk_id, text, attachments=None):
                     return
             
             task_status = get_task_status_cached(db_user['id'], task['id'])
+            
+            # Если задание уже выполнено
             if task_status == 'approved':
                 user_states.pop(vk_id, None)
                 tasks = get_tasks_cached(active_group['id']) if active_group else []
@@ -987,6 +978,7 @@ def process_message_callback(vk_id, text, attachments=None):
                 )
                 return
             
+            # Если пользователь нажал "Назад" или другую системную кнопку
             if text in ["📋 Задания", "👤 Мой профиль", "📋 Заявки", "🔙 Назад в меню", "🔙 Назад"]:
                 user_states.pop(vk_id, None)
                 vk.messages.send(
@@ -997,87 +989,88 @@ def process_message_callback(vk_id, text, attachments=None):
                 )
                 return
             
-            if not text.strip() and not attachments:
-                vk.messages.send(
-                    user_id=vk_id,
-                    message="⚠️ Пожалуйста, напишите текст отчета или прикрепите файлы.",
-                    random_id=0
-                )
-                return
-            
-            saved_files = []
-            attachment_text = ""
-            
-            if attachments:
+            # Если пользователь отправил отчет (текст или вложения)
+            if text.strip() or attachments:
+                saved_files = []
+                attachment_text = ""
+                
+                if attachments:
+                    try:
+                        saved_files, attachment_text = process_vk_attachments(attachments, vk_session)
+                        if attachment_text:
+                            text = f"{text}\n\n📎 Прикрепленные файлы:\n{attachment_text}" if text else f"📎 Прикрепленные файлы:\n{attachment_text}"
+                    except Exception as e:
+                        logger.error(f"Ошибка обработки вложений: {e}")
+                
+                has_attachments = len(saved_files) > 0
                 try:
-                    saved_files, attachment_text = process_vk_attachments(attachments, vk_session)
-                    if attachment_text:
-                        text = f"{text}\n\n📎 Прикрепленные файлы:\n{attachment_text}" if text else f"📎 Прикрепленные файлы:\n{attachment_text}"
-                except Exception as e:
-                    logger.error(f"Ошибка обработки вложений: {e}")
-            
-            has_attachments = len(saved_files) > 0
-            try:
-                report_id = create_report(db_user['id'], task['id'], text, has_attachments)
-            except ValueError as e:
-                error_msg = str(e)
-                if error_msg == "TASK_ALREADY_COMPLETED":
-                    user_states.pop(vk_id, None)
-                    tasks = get_tasks_cached(active_group['id']) if active_group else []
-                    keyboard = build_tasks_keyboard(tasks, db_user['id'], user_states.get(vk_id, {}).get('tasks_page', 0)) if tasks else create_main_keyboard(active_group, site_url)
+                    report_id = create_report(db_user['id'], task['id'], text, has_attachments)
+                except ValueError as e:
+                    error_msg = str(e)
+                    if error_msg == "TASK_ALREADY_COMPLETED":
+                        user_states.pop(vk_id, None)
+                        tasks = get_tasks_cached(active_group['id']) if active_group else []
+                        keyboard = build_tasks_keyboard(tasks, db_user['id'], user_states.get(vk_id, {}).get('tasks_page', 0)) if tasks else create_main_keyboard(active_group, site_url)
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message="✅ Это задание уже выполнено! Выберите другое задание.",
+                            random_id=0,
+                            keyboard=keyboard
+                        )
+                        return
+                    elif error_msg == "REPORT_ALREADY_PENDING":
+                        vk.messages.send(
+                            user_id=vk_id,
+                            message="⏳ У вас уже есть отчет на рассмотрении по этому заданию. Пожалуйста, дождитесь проверки администратора.",
+                            random_id=0
+                        )
+                        return
+                    else:
+                        raise
+                
+                for file_info in saved_files:
+                    save_report_media(
+                        report_id,
+                        file_info['file_url'],
+                        file_info['file_type'],
+                        file_info['original_name'],
+                        file_info.get('file_size', 0)
+                    )
+                
+                current_page = user_states.get(vk_id, {}).get('tasks_page', 0)
+                user_states.pop(vk_id, None)
+                
+                response_msg = "✅ Ваш отчет принят на рассмотрение!\nСтатус задания обновится после проверки администратором."
+                if has_attachments:
+                    response_msg += f"\n📎 Прикреплено файлов: {len(saved_files)}"
+                
+                invalidate_user_task_cache(db_user['id'], task['id'])
+                
+                if active_group:
+                    tasks = get_tasks_cached(active_group['id'])
+                    keyboard = build_tasks_keyboard(tasks, db_user['id'], current_page)
+                else:
+                    keyboard = create_main_keyboard(active_group, site_url)
+                
+                try:
                     vk.messages.send(
                         user_id=vk_id,
-                        message="✅ Это задание уже выполнено! Выберите другое задание.",
+                        message=response_msg,
                         random_id=0,
                         keyboard=keyboard
                     )
-                    return
-                elif error_msg == "REPORT_ALREADY_PENDING":
-                    vk.messages.send(
-                        user_id=vk_id,
-                        message="⏳ У вас уже есть отчет на рассмотрении по этому заданию. Пожалуйста, дождитесь проверки администратора.",
-                        random_id=0
-                    )
-                    return
-                else:
-                    raise
+                    logger.info(f"✅ Подтверждение отправлено пользователю {vk_id}")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка отправки подтверждения: {e}")
+                
+                return
             
-            for file_info in saved_files:
-                save_report_media(
-                    report_id,
-                    file_info['file_url'],
-                    file_info['file_type'],
-                    file_info['original_name'],
-                    file_info.get('file_size', 0)
-                )
-            
-            current_page = user_states.get(vk_id, {}).get('tasks_page', 0)
-            user_states.pop(vk_id, None)
-            
-            response_msg = "✅ Ваш отчет принят на рассмотрение!\nСтатус задания обновится после проверки администратором."
-            if has_attachments:
-                response_msg += f"\n📎 Прикреплено файлов: {len(saved_files)}"
-            
-            invalidate_user_task_cache(db_user['id'], task['id'])
-            
-            if active_group:
-                tasks = get_tasks_cached(active_group['id'])
-                # Возвращаем пользователю список заданий с той же страницы
-                keyboard = build_tasks_keyboard(tasks, db_user['id'], current_page)
-            else:
-                keyboard = create_main_keyboard(active_group, site_url)
-            
-            try:
-                vk.messages.send(
-                    user_id=vk_id,
-                    message=response_msg,
-                    random_id=0,
-                    keyboard=keyboard
-                )
-                logger.info(f"✅ Подтверждение отправлено пользователю {vk_id}")
-            except Exception as e:
-                logger.error(f"❌ Ошибка отправки подтверждения: {e}")
-            
+            # Если текст пустой и нет вложений
+            vk.messages.send(
+                user_id=vk_id,
+                message="⚠️ Пожалуйста, напишите текст отчета или прикрепите файлы.",
+                random_id=0
+            )
             return
         
         # ============ ОБРАБОТКА ГЛАВНЫХ КОМАНД ============
@@ -1197,27 +1190,6 @@ def process_message_callback(vk_id, text, attachments=None):
                         keyboard=create_request_chat_keyboard(request_id)
                     )
                     return
-        
-        # ============ ПОИСК ЗАДАНИЯ ============
-        if active_group:
-            matched_task = get_task_by_title_cached(active_group['id'], text)
-            
-            if matched_task:
-                logger.info(f"🔍 Найдено задание: ID={matched_task['id']}, Title={matched_task['title']}")
-                report = get_user_task_report(db_user['id'], matched_task['id'])
-                task_status = get_task_status_cached(db_user['id'], matched_task['id'])
-                user_states[vk_id] = matched_task
-                # Сохраняем текущую страницу для возврата
-                current_page = user_states.get(vk_id, {}).get('tasks_page', 0)
-                user_states[vk_id]['tasks_page'] = current_page
-                vk.messages.send(
-                    user_id=vk_id,
-                    message=format_task_message(matched_task, report, task_status),
-                    random_id=0
-                )
-                return
-            else:
-                logger.info(f"❌ Задание не найдено для текста: '{text}'")
         
         vk.messages.send(
             user_id=vk_id,
