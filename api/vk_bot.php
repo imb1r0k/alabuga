@@ -223,7 +223,7 @@ if ($uri === 'admin/vk-bot/tasks') {
     }
 }
 
-// === РАЗДЕЛ ОТЧЕТОВ ===
+// === РАЗДЕЛ ОТЧЕТОВ С БЛОКИРОВКОЙ ===
 if ($uri === 'admin/vk-bot/reports') {
     requireAdmin($pdo);
     
@@ -253,76 +253,139 @@ if ($uri === 'admin/vk-bot/reports') {
 
         if (!$id) jsonError('ID отчета не указан', 400);
 
-        // Получаем отчет с данными пользователя и задания
-        $stmt = $pdo->prepare("
-            SELECT r.*, 
-                   t.points, t.title, t.group_id,
-                   u.id as user_id, u.vk_id, u.vk_url
-            FROM vk_bot_reports r
-            JOIN vk_bot_tasks t ON r.task_id = t.id
-            JOIN users u ON r.user_id = u.id
-            WHERE r.id = ?
-        ");
-        $stmt->execute([$id]);
-        $report = $stmt->fetch();
-        if (!$report) jsonError('Отчет не найден', 404);
+        // Используем GET_LOCK для блокировки на уровне MySQL
+        // Это предотвращает параллельную обработку одного отчета
+        $lockName = 'report_lock_' . $id;
+        $lockStmt = $pdo->prepare("SELECT GET_LOCK(?, 5)");
+        $lockStmt->execute([$lockName]);
+        $locked = $lockStmt->fetchColumn();
+        
+        if (!$locked) {
+            jsonError('Не удалось получить блокировку, попробуйте позже', 409);
+        }
 
-        $pdo->beginTransaction();
         try {
+            // Начинаем транзакцию
+            $pdo->beginTransaction();
+            
+            // Проверяем статус отчета с блокировкой строки
+            $checkStmt = $pdo->prepare("
+                SELECT status FROM vk_bot_reports WHERE id = ? FOR UPDATE
+            ");
+            $checkStmt->execute([$id]);
+            $currentStatus = $checkStmt->fetchColumn();
+            
+            // Если отчет уже обработан - возвращаем успех, но без повторного начисления
+            if ($currentStatus !== 'pending') {
+                $pdo->commit();
+                $pdo->exec("SELECT RELEASE_LOCK('$lockName')");
+                // Возвращаем успех, чтобы фронтенд не показывал ошибку
+                jsonResponse([
+                    'success' => true, 
+                    'message' => 'Отчет уже был обработан ранее',
+                    'already_processed' => true
+                ]);
+            }
+
+            // Получаем отчет с данными пользователя и задания
+            $stmt = $pdo->prepare("
+                SELECT r.*, 
+                       t.points, t.title, t.group_id,
+                       u.id as user_id, u.vk_id, u.vk_url
+                FROM vk_bot_reports r
+                JOIN vk_bot_tasks t ON r.task_id = t.id
+                JOIN users u ON r.user_id = u.id
+                WHERE r.id = ? FOR UPDATE
+            ");
+            $stmt->execute([$id]);
+            $report = $stmt->fetch();
+            
+            if (!$report) {
+                $pdo->rollBack();
+                $pdo->exec("SELECT RELEASE_LOCK('$lockName')");
+                jsonError('Отчет не найден', 404);
+            }
+
             // Обновляем статус отчета
             $stmt = $pdo->prepare("UPDATE vk_bot_reports SET status = ?, reject_reason = ? WHERE id = ?");
             $stmt->execute([$status, $reason, $id]);
 
             $message = '';
+            $pointsAwarded = false;
+            
             if ($status === 'approved') {
-                // Начисляем баллы пользователю
+                // Начисляем баллы пользователю с проверкой, что баллы еще не начислены
                 $points = (int)$report['points'];
-                $stmt = $pdo->prepare("UPDATE users SET rating = rating + ?, completed_tasks = completed_tasks + 1 WHERE id = ?");
-                $stmt->execute([$points, $report['user_id']]);
-
-                // Базовое сообщение об одобрении
-                $message = "✅ Ваше задание \"" . $report['title'] . "\" одобрено! Получено +{$points} баллов.";
-
-                // Проверяем, все ли задания выполнены
-                $totalStmt = $pdo->prepare("
-                    SELECT COUNT(*) as total FROM vk_bot_tasks
-                    WHERE group_id = ?
+                
+                // Проверяем, не начислены ли уже баллы за этот отчет
+                $checkPointsStmt = $pdo->prepare("
+                    SELECT COUNT(*) FROM users u
+                    WHERE u.id = ? 
+                    AND EXISTS (
+                        SELECT 1 FROM vk_bot_reports r
+                        WHERE r.id = ? AND r.status = 'approved'
+                    )
                 ");
-                $totalStmt->execute([$report['group_id']]);
-                $totalTasks = (int)$totalStmt->fetchColumn();
-
-                $doneStmt = $pdo->prepare("
-                    SELECT COUNT(DISTINCT r.task_id) as done
-                    FROM vk_bot_reports r
-                    WHERE r.user_id = ?
-                    AND r.task_id IN (SELECT id FROM vk_bot_tasks WHERE group_id = ?)
-                    AND r.status = 'approved'
-                ");
-                $doneStmt->execute([$report['user_id'], $report['group_id']]);
-                $doneTasks = (int)$doneStmt->fetchColumn();
-
-                // Выдаем билет если все задания выполнены
-                if ($totalTasks > 0 && $doneTasks >= $totalTasks) {
-                    // Проверяем, не выдан ли уже билет
-                    $checkTicket = $pdo->prepare("
-                        SELECT id FROM vk_bot_tickets
-                        WHERE user_id = ? AND group_id = ?
+                $checkPointsStmt->execute([$report['user_id'], $id]);
+                $alreadyAwarded = (int)$checkPointsStmt->fetchColumn() > 0;
+                
+                if (!$alreadyAwarded) {
+                    // Начисляем баллы
+                    $updateStmt = $pdo->prepare("
+                        UPDATE users 
+                        SET rating = rating + ?, completed_tasks = completed_tasks + 1 
+                        WHERE id = ?
                     ");
-                    $checkTicket->execute([$report['user_id'], $report['group_id']]);
+                    $updateStmt->execute([$points, $report['user_id']]);
+                    $pointsAwarded = true;
                     
-                    if (!$checkTicket->fetch()) {
-                        $ticketNum = 'TKT-' . strtoupper(substr(md5(uniqid(rand(), true)), 0, 6)) . '-' . rand(100, 999);
-                        $insTicket = $pdo->prepare("
-                            INSERT INTO vk_bot_tickets (user_id, group_id, ticket_number)
-                            VALUES (?, ?, ?)
+                    // Базовое сообщение об одобрении
+                    $message = "✅ Ваше задание \"" . $report['title'] . "\" одобрено! Получено +{$points} баллов.";
+
+                    // Проверяем, все ли задания выполнены
+                    $totalStmt = $pdo->prepare("
+                        SELECT COUNT(*) as total FROM vk_bot_tasks
+                        WHERE group_id = ?
+                    ");
+                    $totalStmt->execute([$report['group_id']]);
+                    $totalTasks = (int)$totalStmt->fetchColumn();
+
+                    $doneStmt = $pdo->prepare("
+                        SELECT COUNT(DISTINCT r.task_id) as done
+                        FROM vk_bot_reports r
+                        WHERE r.user_id = ?
+                        AND r.task_id IN (SELECT id FROM vk_bot_tasks WHERE group_id = ?)
+                        AND r.status = 'approved'
+                    ");
+                    $doneStmt->execute([$report['user_id'], $report['group_id']]);
+                    $doneTasks = (int)$doneStmt->fetchColumn();
+
+                    // Выдаем билет если все задания выполнены
+                    if ($totalTasks > 0 && $doneTasks >= $totalTasks) {
+                        // Проверяем, не выдан ли уже билет
+                        $checkTicket = $pdo->prepare("
+                            SELECT id FROM vk_bot_tickets
+                            WHERE user_id = ? AND group_id = ? FOR UPDATE
                         ");
-                        $insTicket->execute([$report['user_id'], $report['group_id'], $ticketNum]);
-                        $message .= "\n\n🎉 Поздравляем! Вы выполнили все задания волны — вам выдан лотерейный билет!\n🎫 Номер билета: {$ticketNum}";
+                        $checkTicket->execute([$report['user_id'], $report['group_id']]);
+                        
+                        if (!$checkTicket->fetch()) {
+                            $ticketNum = 'TKT-' . strtoupper(substr(md5(uniqid(rand(), true)), 0, 6)) . '-' . rand(100, 999);
+                            $insTicket = $pdo->prepare("
+                                INSERT INTO vk_bot_tickets (user_id, group_id, ticket_number)
+                                VALUES (?, ?, ?)
+                            ");
+                            $insTicket->execute([$report['user_id'], $report['group_id'], $ticketNum]);
+                            $message .= "\n\n🎉 Поздравляем! Вы выполнили все задания волны — вам выдан лотерейный билет!\n🎫 Номер билета: {$ticketNum}";
+                        }
                     }
+                } else {
+                    // Баллы уже были начислены
+                    $message = "✅ Задание уже было одобрено ранее. Баллы начислены.";
                 }
 
             } elseif ($status === 'rejected') {
-                $message = "❌ Ваше задание \"" . $report['title'] . "\" отклонено. Причина: " . ($reason ?: 'Не выполнено учение') . ". Отправьте отчет заново.";
+                $message = "❌ Ваше задание \"" . $report['title'] . "\" отклонено. Причина: " . ($reason ?: 'Не выполнено условие') . ". Отправьте отчет заново.";
             }
 
             // Добавляем уведомление в таблицу
@@ -335,10 +398,19 @@ if ($uri === 'admin/vk-bot/reports') {
             }
 
             $pdo->commit();
-            jsonResponse(['success' => true, 'message' => $message]);
+            
+            // Освобождаем блокировку
+            $pdo->exec("SELECT RELEASE_LOCK('$lockName')");
+            
+            jsonResponse([
+                'success' => true, 
+                'message' => $message,
+                'points_awarded' => $pointsAwarded
+            ]);
 
         } catch (Exception $e) {
             $pdo->rollBack();
+            $pdo->exec("SELECT RELEASE_LOCK('$lockName')");
             jsonError('Ошибка обработки отчета: ' . $e->getMessage(), 500);
         }
     }
